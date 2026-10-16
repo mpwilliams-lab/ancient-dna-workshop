@@ -13,6 +13,32 @@ export const PCA_VIEW = { width: 1000, height: 700, left: 20, right: 980, top: 2
 const PERIOD_ORDER: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
 const ARROW_PERIODS: PeriodId[] = ['Roman', 'AngloSaxon'];
 
+/** Opacity of a clipped point. A string on purpose: svgEl rounds numbers to one decimal, which would turn 0.35 into 0.4. */
+const GHOST_OPACITY = '0.35';
+
+/** Width estimate for a 16 px bold centre label: about 9.3 px per character (measured 7.8 to 10.7 in Chrome). */
+const LABEL_CHAR_W = 9.3;
+/** The biggest centre marker (a diamond of radius 12) reaches 1.3 x 12 px from its centre. */
+const MARKER_REACH = 15.6;
+
+interface Box { left: number; right: number; top: number; bottom: number }
+interface Segment { x1: number; y1: number; x2: number; y2: number }
+
+function boxesOverlap(a: Box, b: Box): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+/** True when any point of the segment lies inside the box (sampled every 4 px; the boxes used here are at least 18 px tall). */
+function segmentHitsBox(s: Segment, b: Box): boolean {
+  const steps = Math.max(1, Math.ceil(Math.hypot(s.x2 - s.x1, s.y2 - s.y1) / 4));
+  for (let i = 0; i <= steps; i += 1) {
+    const x = s.x1 + ((s.x2 - s.x1) * i) / steps;
+    const y = s.y1 + ((s.y2 - s.y1) * i) / steps;
+    if (x >= b.left && x <= b.right && y >= b.top && y <= b.bottom) return true;
+  }
+  return false;
+}
+
 export interface PcaScale {
   k: number;           // pixels per PC unit, identical on both axes
   offX: number;
@@ -72,7 +98,9 @@ function periodLayers(p: PlotState): PeriodId[] {
 export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState): void {
   const fr = data.frames[p.frame];
   const sc = makeScale(fr);
-  const prevFrameId = svg.getAttribute('data-frame');
+  // Only an svg that currently shows a PCA has a frame worth animating from: data-frame can be a stale leftover
+  // once the bars or a trait plot have used the same svg. Read both attributes before they are overwritten below.
+  const prevFrameId = svg.getAttribute('data-view') === 'pca' ? svg.getAttribute('data-frame') : null;
   const prev = prevFrameId === 'europe' || prevFrameId === 'britain' ? data.frames[prevFrameId] : undefined;
 
   svg.setAttribute('viewBox', `0 0 ${PCA_VIEW.width} ${PCA_VIEW.height}`);
@@ -115,13 +143,15 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState):
       const c = clampToFrame(pt, fr);
       const q = pos(c);
       const east = id === 'AngloSaxon' && pt.east === true;
+      const ghost = c.clipped; // pinned to the frame edge, not where it lies: hollow and faint so it does not read as data
       const cls = ['pt', east ? 'east' : '', c.clipped ? 'clipped' : ''].filter(Boolean).join(' ');
       layer.append(svgEl('path', {
         class: cls,
         d: shapePath(PERIOD_SHAPES[id], q.x, q.y, east ? r + 1.5 : r),
-        fill: PERIOD_COLORS[id],
-        stroke: east ? INK : '#FFFFFF',
-        'stroke-width': east ? 2.5 : 0.8,
+        fill: ghost ? 'none' : PERIOD_COLORS[id],
+        stroke: east ? INK : ghost ? PERIOD_COLORS[id] : '#FFFFFF',
+        'stroke-width': east ? 2.5 : ghost ? 1.5 : 0.8,
+        ...(ghost ? { opacity: GHOST_OPACITY } : {}),
       }));
     }
     world.append(layer);
@@ -154,24 +184,29 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState):
   }
 
   // 5. British frame: arrows from the Iron Age centre, then centre markers with labels.
+  //    A centre outside the frame would have to be pinned to its edge, claiming a place it does not have, so a layer
+  //    whose centre is out of frame gets no centre marker, no label and no arrow (its ghost points are drawn above).
   if (p.frame === 'britain') {
     const centreOf = (id: PeriodId) => data.periods.find((pi) => pi.id === id)?.centre;
+    const arrowSegments: Segment[] = []; // kept so a label can keep clear of them
     const iron = centreOf('IronAge');
-    if (iron) {
-      const a = pos(clampToFrame(iron, fr));
+    if (iron && inFrame(iron, fr)) {
+      const a = pos(iron);
       for (const id of ARROW_PERIODS) {
         if (!layers.includes(id)) continue;
         const target = centreOf(id);
-        if (!target) continue;
-        const b = pos(clampToFrame(target, fr));
+        if (!target || !inFrame(target, fr)) continue;
+        const b = pos(target);
         const len = Math.hypot(b.x - a.x, b.y - a.y);
         const cut = len > 20 ? 14 / len : 0; // stop short of the target's centre marker
+        const end = { x: b.x - (b.x - a.x) * cut, y: b.y - (b.y - a.y) * cut };
+        arrowSegments.push({ x1: a.x, y1: a.y, x2: end.x, y2: end.y });
         const g = svgEl('g', { class: 'arrow', 'data-arrow': id, 'data-tip': PERIOD_LABELS[id] });
         if (!layers.includes('IronAge')) {
           g.append(svgEl('circle', { class: 'arrow-tail', cx: a.x, cy: a.y, r: 6, fill: 'none', stroke: PERIOD_COLORS.IronAge, 'stroke-width': 2.5 }));
         }
         g.append(svgEl('line', {
-          x1: a.x, y1: a.y, x2: b.x - (b.x - a.x) * cut, y2: b.y - (b.y - a.y) * cut,
+          x1: a.x, y1: a.y, x2: end.x, y2: end.y,
           stroke: INK, 'stroke-width': 3, 'marker-end': 'url(#pca-arrowhead)',
         }));
         world.append(g);
@@ -179,8 +214,8 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState):
     }
     const centres = layers
       .map((id) => ({ id, c: centreOf(id) }))
-      .filter((e): e is { id: PeriodId; c: Pt } => e.c !== undefined)
-      .map((e) => ({ id: e.id, ...pos(clampToFrame(e.c, fr)) }));
+      .filter((e): e is { id: PeriodId; c: Pt } => e.c !== undefined && inFrame(e.c, fr))
+      .map((e) => ({ id: e.id, ...pos(e.c) }));
     for (const c of centres) {
       world.append(svgEl('path', {
         class: 'centre', 'data-centre': c.id, 'data-tip': PERIOD_LABELS[c.id],
@@ -188,14 +223,25 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState):
         fill: PERIOD_COLORS[c.id], stroke: INK, 'stroke-width': 2.5,
       }));
     }
-    // Labels to the right of each centre, pushed down so no two are closer than 18 px.
+    // Labels sit to the right of their centre, pushed down so no two are closer than 18 px. When another centre
+    // marker or an arrow lies in a label's right-hand box, the label goes to the left of its marker instead.
     let lastY = -Infinity;
     for (const c of [...centres].sort((u, v) => u.y - v.y)) {
       const y = Math.max(c.y + 5, lastY + 18);
       lastY = y;
+      const rightBox: Box = {
+        left: c.x + 18,
+        right: c.x + 18 + PERIOD_LABELS[c.id].length * LABEL_CHAR_W,
+        top: y - 15, // a 16 px line spans 15 px above the baseline ...
+        bottom: y + 3, // ... and 3 px below it
+      };
+      const blocked = centres.some((o) => o !== c && boxesOverlap(rightBox, {
+        left: o.x - MARKER_REACH, right: o.x + MARKER_REACH, top: o.y - MARKER_REACH, bottom: o.y + MARKER_REACH,
+      })) || arrowSegments.some((s) => segmentHitsBox(s, rightBox));
       world.append(svgEl('text', {
-        class: 'centre-label', 'data-centre-label': c.id, x: c.x + 18, y, 'font-size': 16, 'font-weight': '700',
-        fill: INK, stroke: '#FFFFFF', 'stroke-width': 4, 'paint-order': 'stroke',
+        class: 'centre-label', 'data-centre-label': c.id, x: blocked ? c.x - 18 : c.x + 18, y,
+        ...(blocked ? { 'text-anchor': 'end' } : {}),
+        'font-size': 16, 'font-weight': '700', fill: INK, stroke: '#FFFFFF', 'stroke-width': 4, 'paint-order': 'stroke',
       }, PERIOD_LABELS[c.id]));
     }
   }
@@ -221,9 +267,10 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState):
   const caption = svgEl('text', {
     class: 'pca-caption', x: PCA_VIEW.left, y: PCA_VIEW.height - 8, 'font-size': 14, fill: INK, 'font-style': 'italic',
   }, PCA_CAPTION);
+  // pointer-events none: the tip sits over the plot, so it must never take the hover from the mark underneath.
   const tip = svgEl('text', {
     class: 'plot-tip', x: PCA_VIEW.right, y: 40, 'text-anchor': 'end', 'font-size': 20, 'font-weight': '700',
-    fill: INK, stroke: '#FFFFFF', 'stroke-width': 5, 'paint-order': 'stroke',
+    fill: INK, stroke: '#FFFFFF', 'stroke-width': 5, 'paint-order': 'stroke', 'pointer-events': 'none',
   });
 
   svg.append(defs, world, legend, caption, tip);

@@ -4,7 +4,7 @@ import fixture from './fixtures/data.fixture.json';
 import type { PeriodId, WorkshopData } from '../src/types';
 import { INITIAL_PLOT, type PlotState } from '../src/plotState';
 import { PCA_VIEW, clampToFrame, frameTransition, makeScale, renderPca } from '../src/plots/pca';
-import { OKABE_ITO, PERIOD_COLORS, PERIOD_SHAPES, textBlock, wrapText } from '../src/plots/svg';
+import { OKABE_ITO, PERIOD_COLORS, PERIOD_SHAPES, f1, textBlock, wrapText } from '../src/plots/svg';
 import { MAP_GROUP_LABELS, NORTH_SEA_LABEL, PCA_CAPTION, PERIOD_LABELS, withN } from '../src/content';
 
 // The shared fixture supplies everything else; the PCA geometry is pinned here so the
@@ -219,6 +219,7 @@ describe('renderPca', () => {
 
   it('tap/hover shows only the period or group name; no per-sample data anywhere', () => {
     const svg = newSvg();
+    const addListener = vi.spyOn(svg, 'addEventListener'); // installed before the first render, so every attachment is counted
     const d = makeData();
     renderPca(svg, d, pca({ layers: ['AngloSaxon'], frame: 'europe' }));
     const tip = () => svg.querySelector('.plot-tip')?.textContent;
@@ -229,8 +230,11 @@ describe('renderPca', () => {
     svg.dispatchEvent(new Event('pointerleave'));
     expect(tip()).toBe('');
     expect(svg.querySelectorAll('[data-id], title')).toHaveLength(0);
-    // re-rendering does not stack listeners: one event still yields exactly the label
+    // re-rendering must not stack listeners. Stacked handlers would all write the same text, so a tip check cannot
+    // see them; count the attachments instead: pointerover, click and pointerleave, once across both renders.
     renderPca(svg, d, pca({ layers: ['AngloSaxon'], frame: 'europe' }));
+    expect(addListener).toHaveBeenCalledTimes(3);
+    // the tip of the new render still works
     svg.querySelector('g.layer[data-layer="Today"] .pt')!.dispatchEvent(new Event('pointerover', { bubbles: true }));
     expect(tip()).toBe(PERIOD_LABELS.Today);
   });
@@ -271,14 +275,11 @@ describe('renderPca', () => {
     }
   });
 
-  it('uses a colour-blind-safe palette with a shape per period', () => {
+  it('draws the seven periods in seven distinct Okabe-Ito hues', () => {
     const hues = Object.values(OKABE_ITO) as string[];
     const periods: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking'];
     for (const id of periods) expect(hues).toContain(PERIOD_COLORS[id]);
     expect(new Set(periods.map((id) => PERIOD_COLORS[id])).size).toBe(7);
-    // periods sharing a frame never share colour AND shape
-    const britain: PeriodId[] = ['BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking'];
-    expect(new Set(britain.map((id) => `${PERIOD_COLORS[id]}/${PERIOD_SHAPES[id]}`)).size).toBe(5);
   });
 
   it('§6 rule 1: no dates, ages, Group IDs or raw ids in any rendered PCA text', () => {
@@ -290,6 +291,279 @@ describe('renderPca', () => {
       expect(text).not.toMatch(/\d[\d,.]*\s*(BCE|BC|BP|CE|kya|ya|years?|generations?)\b/i);
       expect(text).not.toMatch(/Mesolithic|Neolithic|Pal(a)?eolithic|Megalithic|Ice Age/i);
       expect(text).not.toMatch(/FirstFarmers|BellBeaker|BronzeAge|IronAge|AngloSaxon|ItalianNorth|_/);
+    }
+  });
+});
+
+describe('plot tip', () => {
+  it('ignores the pointer, so it never swallows the hover on the mark underneath', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({}));
+    expect(svg.querySelector('.plot-tip')?.getAttribute('pointer-events')).toBe('none');
+  });
+});
+
+/** Installs a fake Element.prototype.animate (jsdom has none) while `run` executes. */
+function withFakeAnimate(run: (animate: ReturnType<typeof vi.fn>) => void): void {
+  const animate = vi.fn();
+  const original = Object.getOwnPropertyDescriptor(Element.prototype, 'animate');
+  Object.defineProperty(Element.prototype, 'animate', { value: animate, configurable: true, writable: true });
+  try {
+    run(animate);
+  } finally {
+    if (original) Object.defineProperty(Element.prototype, 'animate', original);
+    else delete (Element.prototype as unknown as { animate?: unknown }).animate;
+  }
+}
+
+describe('frame change animation hand-over', () => {
+  it('animates only from a previous PCA drawing, never from a frame another view left on the svg', () => {
+    withFakeAnimate((animate) => {
+      const d = makeData();
+      const svg = newSvg();
+      renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'europe' }));
+      // the bars or a trait plot take the svg over; data-frame is still 'europe' from the PCA before them
+      svg.setAttribute('data-view', 'admixture');
+      renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'britain' }));
+      expect(animate).not.toHaveBeenCalled(); // a stale frame is no starting point
+      svg.setAttribute('data-view', 'trait');
+      renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'europe' }));
+      expect(animate).not.toHaveBeenCalled();
+      // no data-view at all (an svg that never showed a PCA): nothing to animate from either
+      svg.removeAttribute('data-view');
+      renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'britain' }));
+      expect(animate).not.toHaveBeenCalled();
+      // but a real PCA drawing is a starting point again
+      renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'europe' }));
+      expect(animate).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+/** Moves one period's centre (the fixture is already a private clone, so this edits it in place). */
+function withCentre(d: WorkshopData, id: PeriodId, centre: { x: number; y: number }): WorkshopData {
+  d.periods = d.periods.map((p) => (p.id === id ? { ...p, centre } : p));
+  return d;
+}
+
+describe('layers outside the frame', () => {
+  it('a layer whose centre is outside the frame is still drawn, as ghosts on the edge, but gets no centre marker or label', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ['FirstFarmers', 'IronAge'], frame: 'britain' }));
+    const ff = [...svg.querySelectorAll('g.layer[data-layer="FirstFarmers"] .pt')];
+    expect(ff).toHaveLength(4); // the layer is still drawn (spec 4.4)
+    for (const pt of ff) {
+      // clamped to the frame edge as before (spec 5.1), but hollow and faint so it does not read as data
+      expect(pt.classList.contains('clipped')).toBe(true);
+      expect(pt.getAttribute('fill')).toBe('none');
+      expect(pt.getAttribute('stroke')).toBe(PERIOD_COLORS.FirstFarmers);
+      // svgEl rounds numbers to one decimal, so only a string keeps the second decimal
+      expect(pt.getAttribute('opacity')).toBe('0.35');
+    }
+    expect(svg.querySelector('.centre[data-centre="FirstFarmers"]')).toBeNull();
+    expect(svg.querySelector('[data-centre-label="FirstFarmers"]')).toBeNull();
+    expect([...svg.querySelectorAll('.centre-label')].map((t) => t.textContent)).toEqual([PERIOD_LABELS.IronAge]);
+    // the legend still names the layer, so the ghosts are identified
+    expect(svg.querySelector('.legend-item[data-legend="FirstFarmers"]')?.textContent)
+      .toBe(withN(PERIOD_LABELS.FirstFarmers, 4));
+  });
+
+  it('a partly clipped layer keeps its centre marker and label; only its clipped points are ghosts', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ['IronAge'], frame: 'britain' }));
+    const pts = [...svg.querySelectorAll('g.layer[data-layer="IronAge"] .pt')];
+    const ghosts = pts.filter((p) => p.classList.contains('clipped'));
+    const solid = pts.filter((p) => !p.classList.contains('clipped'));
+    expect(ghosts).toHaveLength(1); // the point at x = 6
+    expect(solid).toHaveLength(4);
+    expect(ghosts[0].getAttribute('fill')).toBe('none');
+    for (const p of solid) {
+      expect(p.getAttribute('fill')).toBe(PERIOD_COLORS.IronAge);
+      expect(p.hasAttribute('opacity')).toBe(false);
+    }
+    expect(svg.querySelector('.centre[data-centre="IronAge"]')).not.toBeNull();
+    expect(svg.querySelector('.centre-label[data-centre-label="IronAge"]')?.textContent).toBe(PERIOD_LABELS.IronAge);
+  });
+
+  it('skips the arrow whose head centre is outside the frame and keeps the others', () => {
+    const svg = newSvg();
+    const d = withCentre(makeData(), 'AngloSaxon', { x: 6, y: 3.8 });
+    renderPca(svg, d, pca({ layers: ['IronAge', 'Roman', 'AngloSaxon'], frame: 'britain' }));
+    expect([...svg.querySelectorAll('g.arrow')].map((a) => a.getAttribute('data-arrow'))).toEqual(['Roman']);
+    expect([...svg.querySelectorAll('.centre')].map((c) => c.getAttribute('data-centre'))).toEqual(['IronAge', 'Roman']);
+  });
+
+  it('draws no arrow, and no tail ring, when the Iron Age centre (the tail) is outside the frame', () => {
+    const svg = newSvg();
+    const d = withCentre(makeData(), 'IronAge', { x: -4, y: -2 });
+    renderPca(svg, d, pca({ layers: ['Roman', 'AngloSaxon'], frame: 'britain' }));
+    expect(svg.querySelectorAll('g.arrow')).toHaveLength(0);
+    expect(svg.querySelectorAll('.arrow-tail')).toHaveLength(0);
+    expect([...svg.querySelectorAll('.centre')].map((c) => c.getAttribute('data-centre'))).toEqual(['Roman', 'AngloSaxon']);
+  });
+});
+
+type Box = { left: number; right: number; top: number; bottom: number };
+const overlap = (a: Box, b: Box) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+// Geometry measured in Chrome, deliberately independent of the renderer's own estimate: the 16 px bold labels are
+// 7.8 to 10.7 px per character wide and an 18 px tall line (15 above the baseline, 3 below); the biggest centre
+// marker (a diamond of radius 12) reaches 15.6 px from its centre.
+const WIDEST_CHAR = 10.7;
+const textBox = (x: number, y: number, chars: number, anchorEnd: boolean): Box => {
+  const w = chars * WIDEST_CHAR;
+  return { left: anchorEnd ? x - w : x, right: anchorEnd ? x : x + w, top: y - 15, bottom: y + 3 };
+};
+const labelBox = (t: Element): Box =>
+  textBox(num(t, 'x'), num(t, 'y'), (t.textContent ?? '').length, t.getAttribute('text-anchor') === 'end');
+const markerBox = (x: number, y: number): Box => ({ left: x - 15.6, right: x + 15.6, top: y - 15.6, bottom: y + 15.6 });
+const labelOf = (svg: SVGSVGElement, id: PeriodId) => svg.querySelector(`.centre-label[data-centre-label="${id}"]`)!;
+
+describe('centre label placement', () => {
+  it('leaves a label on the right of its marker when nothing is in the way', () => {
+    const d = makeData();
+    const sc = makeScale(d.frames.britain);
+    const svg = newSvg();
+    renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'britain' }));
+    const label = labelOf(svg, 'IronAge');
+    expect(label.hasAttribute('text-anchor')).toBe(false);
+    expect(num(label, 'x')).toBe(Number(f1(sc.toX(1) + 18)));
+  });
+
+  it('flips a label to the left of its marker when the next centre sits 51 px to its right on the same row', () => {
+    const d = makeData();
+    const sc = makeScale(d.frames.britain);
+    const romanX = 1 + 51 / sc.k; // as in the real data: Iron Age and Roman share a row, 51 px apart
+    withCentre(d, 'IronAge', { x: 1, y: 3 });
+    withCentre(d, 'Roman', { x: romanX, y: 3 });
+    const iron = { x: sc.toX(1), y: sc.toY(3) };
+    const roman = { x: sc.toX(romanX), y: sc.toY(3) };
+    // on the right the Iron Age label would run straight through the Roman marker (so this case is a real test)
+    expect(overlap(textBox(iron.x + 18, iron.y + 5, PERIOD_LABELS.IronAge.length, false), markerBox(roman.x, roman.y))).toBe(true);
+
+    const svg = newSvg();
+    renderPca(svg, d, pca({ layers: ['IronAge', 'Roman'], frame: 'britain' }));
+    const left = labelOf(svg, 'IronAge');
+    const right = labelOf(svg, 'Roman');
+    expect(left.getAttribute('text-anchor')).toBe('end');
+    expect(num(left, 'x')).toBe(Number(f1(iron.x - 18)));
+    expect(overlap(labelBox(left), markerBox(roman.x, roman.y))).toBe(false); // clear of the right-hand marker
+    expect(overlap(labelBox(left), markerBox(iron.x, iron.y))).toBe(false); // and of its own
+    // the Roman label has nothing to its right and stays there
+    expect(right.hasAttribute('text-anchor')).toBe(false);
+    expect(num(right, 'x')).toBe(Number(f1(roman.x + 18)));
+    expect(overlap(labelBox(right), markerBox(iron.x, iron.y))).toBe(false);
+  });
+
+  it('judges overlap by the marker, not its centre point: Viking 35 px right and 15.7 px below Anglo-Saxon (real data)', () => {
+    const d = makeData();
+    const sc = makeScale(d.frames.britain);
+    withCentre(d, 'AngloSaxon', { x: 1.6, y: 3.8 });
+    withCentre(d, 'Viking', { x: 1.6 + 35.1 / sc.k, y: 3.8 - 15.7 / sc.k });
+    const viking = { x: sc.toX(1.6 + 35.1 / sc.k), y: sc.toY(3.8 - 15.7 / sc.k) };
+    const svg = newSvg();
+    renderPca(svg, d, pca({ layers: ['AngloSaxon', 'Viking'], frame: 'britain' }));
+    expect(labelOf(svg, 'AngloSaxon').getAttribute('text-anchor')).toBe('end');
+    expect(labelOf(svg, 'Viking').hasAttribute('text-anchor')).toBe(false);
+    expect(overlap(labelBox(labelOf(svg, 'AngloSaxon')), markerBox(viking.x, viking.y))).toBe(false);
+  });
+
+  it('flips a label when only an arrow, not a marker, runs through its right-hand box', () => {
+    const d = makeData();
+    const sc = makeScale(d.frames.britain);
+    const asX = 1 + 150 / sc.k; // 150 px to the right on the same row: the arrow lies along the Iron Age label
+    withCentre(d, 'IronAge', { x: 1, y: 3 });
+    withCentre(d, 'AngloSaxon', { x: asX, y: 3 });
+    const iron = { x: sc.toX(1), y: sc.toY(3) };
+    const as = { x: sc.toX(asX), y: sc.toY(3) };
+    // the Anglo-Saxon marker itself is well outside the label's reach, so only the arrow is in the way
+    expect(overlap(textBox(iron.x + 18, iron.y + 5, PERIOD_LABELS.IronAge.length, false), markerBox(as.x, as.y))).toBe(false);
+
+    const svg = newSvg();
+    renderPca(svg, d, pca({ layers: ['IronAge', 'AngloSaxon'], frame: 'britain' }));
+    expect(labelOf(svg, 'IronAge').getAttribute('text-anchor')).toBe('end');
+    expect(labelOf(svg, 'AngloSaxon').hasAttribute('text-anchor')).toBe(false);
+  });
+
+  it('still pushes labels of centres on the same row 18 px apart (real data: Iron Age and Roman share a y)', () => {
+    const d = makeData();
+    const sc = makeScale(d.frames.britain);
+    withCentre(d, 'IronAge', { x: 1, y: 3 });
+    withCentre(d, 'Roman', { x: 1 + 51 / sc.k, y: 3 });
+    withCentre(d, 'AngloSaxon', { x: 1 + 102 / sc.k, y: 3 });
+    const svg = newSvg();
+    renderPca(svg, d, pca({ layers: ['IronAge', 'Roman', 'AngloSaxon'], frame: 'britain' }));
+    const ys = [...svg.querySelectorAll('.centre-label')].map((t) => num(t, 'y')).sort((a, b) => a - b);
+    expect(ys).toHaveLength(3);
+    for (let i = 1; i < ys.length; i += 1) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(17.95);
+  });
+});
+
+// Colour distance exactly as the dataviz validator (validate_palette.js) computes it: OKLab distance x 100, with the
+// Machado, Oliveira and Fernandes (2009) severity-1.0 simulation for protan and deutan colour-vision deficiency.
+const CVD_MATRIX = {
+  protan: [[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216], [-0.003882, -0.048116, 1.051998]],
+  deutan: [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.01182, 0.04294, 0.968881]],
+} as const;
+
+function linearRgb(hex: string): number[] {
+  return [1, 3, 5]
+    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+}
+
+function oklab([r, g, b]: number[]): number[] {
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+/** Distance between two hex colours; `cvd` simulates how a protan or deutan reader sees both. */
+function colourDistance(a: string, b: string, cvd?: keyof typeof CVD_MATRIX): number {
+  const see = (hex: string): number[] => {
+    const rgb = linearRgb(hex);
+    if (!cvd) return rgb;
+    return CVD_MATRIX[cvd].map((row) => Math.min(1, Math.max(0, row[0] * rgb[0] + row[1] * rgb[1] + row[2] * rgb[2])));
+  };
+  const p = oklab(see(a));
+  const q = oklab(see(b));
+  return 100 * Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+}
+
+describe('palette: shapes back up the colours', () => {
+  // The validator's own thresholds. A pair closer than 8 under colour-vision deficiency needs a second cue, and
+  // two periods that share a shape must stay 15 or more apart for normal vision (8 or more for protan and deutan).
+  // The seven periods only: Today is a neutral grey base layer, outside the validator's categorical scope.
+  const CVD_TARGET = 8;
+  const NORMAL_FLOOR = 15;
+  const periods: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking'];
+  const pairs = periods.flatMap((a, i) => periods.slice(i + 1).map((b) => [a, b] as const));
+  const normal = (a: PeriodId, b: PeriodId) => colourDistance(PERIOD_COLORS[a], PERIOD_COLORS[b]);
+  const cvd = (a: PeriodId, b: PeriodId) => Math.min(
+    colourDistance(PERIOD_COLORS[a], PERIOD_COLORS[b], 'protan'),
+    colourDistance(PERIOD_COLORS[a], PERIOD_COLORS[b], 'deutan'),
+  );
+
+  it('measures colour distance the way the validator does (the pairs the brief quotes: 7.6 and 15.6)', () => {
+    expect(colourDistance(PERIOD_COLORS.BronzeAge, PERIOD_COLORS.BellBeaker, 'deutan')).toBeCloseTo(7.6, 1);
+    expect(normal('FirstFarmers', 'Roman')).toBeCloseTo(15.6, 1);
+  });
+
+  it('periods that look alike under colour-vision deficiency differ in shape (all 21 pairs, First farmers and Bell Beaker included)', () => {
+    expect(pairs).toHaveLength(21);
+    for (const [a, b] of pairs) {
+      if (cvd(a, b) < CVD_TARGET) expect(PERIOD_SHAPES[a], `${a} and ${b} look alike under CVD`).not.toBe(PERIOD_SHAPES[b]);
+    }
+  });
+
+  it('periods that share a shape are far apart in colour, for normal vision and for protan and deutan readers', () => {
+    for (const [a, b] of pairs.filter(([x, y]) => PERIOD_SHAPES[x] === PERIOD_SHAPES[y])) {
+      expect(normal(a, b), `${a} and ${b}, normal vision`).toBeGreaterThanOrEqual(NORMAL_FLOOR);
+      expect(cvd(a, b), `${a} and ${b}, colour-vision deficiency`).toBeGreaterThanOrEqual(CVD_TARGET);
     }
   });
 });
