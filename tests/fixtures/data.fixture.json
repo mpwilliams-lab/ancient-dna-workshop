@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "periods": [
+    { "id": "FirstFarmers", "order": 0, "frame": "europe", "n_pca": 3, "n_admix": 3, "centre": { "x": -0.012, "y": -0.02933 } },
+    { "id": "BellBeaker", "order": 1, "frame": "europe", "n_pca": 4, "n_admix": 4, "centre": { "x": 0.02025, "y": 0.035 } },
+    { "id": "BronzeAge", "order": 2, "frame": "britain", "n_pca": 3, "n_admix": 3, "centre": { "x": 0.018, "y": 0.03167 } },
+    { "id": "IronAge", "order": 3, "frame": "britain", "n_pca": 4, "n_admix": 4, "centre": { "x": 0.01625, "y": 0.028 } },
+    { "id": "Roman", "order": 4, "frame": "britain", "n_pca": 3, "n_admix": 2, "centre": { "x": 0.0163, "y": 0.02907 } },
+    { "id": "AngloSaxon", "order": 5, "frame": "britain", "n_pca": 4, "n_admix": 4, "centre": { "x": 0.01975, "y": 0.0325 } },
+    { "id": "Viking", "order": 6, "frame": "britain", "n_pca": 3, "n_admix": 3, "centre": { "x": 0.0197, "y": 0.03377 } },
+    { "id": "Today", "order": 7, "frame": "europe", "n_pca": 4, "n_admix": 4, "centre": { "x": 0.01825, "y": 0.03 } }
+  ],
+  "points": [
+    { "period": "FirstFarmers", "points": [{ "x": -0.014, "y": -0.029 }, { "x": -0.01, "y": -0.031 }, { "x": -0.012, "y": -0.028 }] },
+    { "period": "BellBeaker", "points": [{ "x": 0.018, "y": 0.036 }, { "x": 0.022, "y": 0.034 }, { "x": 0.02, "y": 0.037 }, { "x": 0.021, "y": 0.033 }] },
+    { "period": "BronzeAge", "points": [{ "x": 0.016, "y": 0.032 }, { "x": 0.02, "y": 0.03 }, { "x": 0.018, "y": 0.033 }] },
+    { "period": "IronAge", "points": [{ "x": 0.014, "y": 0.029 }, { "x": 0.018, "y": 0.027 }, { "x": 0.016, "y": 0.03 }, { "x": 0.017, "y": 0.026 }] },
+    { "period": "Roman", "points": [{ "x": 0.0143, "y": 0.0294 }, { "x": 0.0183, "y": 0.0274 }, { "x": 0.0163, "y": 0.0304 }] },
+    { "period": "AngloSaxon", "points": [{ "x": 0.0175, "y": 0.0335, "east": true }, { "x": 0.0215, "y": 0.0315, "east": false }, { "x": 0.0195, "y": 0.0345, "east": true }, { "x": 0.0205, "y": 0.0305, "east": false }] },
+    { "period": "Viking", "points": [{ "x": 0.0177, "y": 0.0341 }, { "x": 0.0217, "y": 0.0321 }, { "x": 0.0197, "y": 0.0351 }] },
+    { "period": "Today", "points": [{ "x": 0.016, "y": 0.031 }, { "x": 0.02, "y": 0.029 }, { "x": 0.018, "y": 0.032 }, { "x": 0.019, "y": 0.028 }] }
+  ],
+  "map_groups": [
+    { "id": "Sardinian", "n": 3, "centre": { "x": -0.01, "y": -0.04933 }, "points": [{ "x": -0.012, "y": -0.049 }, { "x": -0.008, "y": -0.051 }, { "x": -0.01, "y": -0.048 }] },
+    { "id": "Spanish", "n": 3, "centre": { "x": -0.02, "y": -0.01933 }, "points": [{ "x": -0.022, "y": -0.019 }, { "x": -0.018, "y": -0.021 }, { "x": -0.02, "y": -0.018 }] },
+    { "id": "ItalianNorth", "n": 3, "centre": { "x": 0, "y": -0.02433 }, "points": [{ "x": -0.002, "y": -0.024 }, { "x": 0.002, "y": -0.026 }, { "x": 0, "y": -0.023 }] },
+    { "id": "French", "n": 3, "centre": { "x": 0.005, "y": 0.01067 }, "points": [{ "x": 0.003, "y": 0.011 }, { "x": 0.007, "y": 0.009 }, { "x": 0.005, "y": 0.012 }] },
+    { "id": "Norwegian", "n": 3, "centre": { "x": 0.022, "y": 0.05067 }, "points": [{ "x": 0.02, "y": 0.051 }, { "x": 0.024, "y": 0.049 }, { "x": 0.022, "y": 0.052 }] }
+  ],
+  "north_sea": { "n": 5, "centre": { "x": 0.024, "y": 0.036 } },
+  "frames": {
+    "europe": { "xmin": -0.06, "xmax": 0.06, "ymin": -0.06, "ymax": 0.06 },
+    "britain": { "xmin": 0.01, "xmax": 0.028, "ymin": 0.022, "ymax": 0.04 }
+  },
+  "admixture": {
+    "bars": [
+      { "period": "FirstFarmers", "n": 3, "STEPPE": 0.003, "FARMER": 0.833, "WHG": 0.164 },
+      { "period": "BellBeaker", "n": 4, "STEPPE": 0.638, "FARMER": 0.283, "WHG": 0.079 },
+      { "period": "BronzeAge", "n": 3, "STEPPE": 0.6, "FARMER": 0.318, "WHG": 0.082 },
+      { "period": "IronAge", "n": 4, "STEPPE": 0.571, "FARMER": 0.345, "WHG": 0.084 },
+      { "period": "Roman", "n": 2, "STEPPE": 0.587, "FARMER": 0.331, "WHG": 0.082 },
+      { "period": "AngloSaxon", "n": 4, "STEPPE": 0.587, "FARMER": 0.325, "WHG": 0.088 },
+      { "period": "Viking", "n": 3, "STEPPE": 0.58, "FARMER": 0.33, "WHG": 0.09 },
+      { "period": "Today", "n": 4, "STEPPE": 0.556, "FARMER": 0.354, "WHG": 0.09 }
+    ],
+    "people": {
+      "BellBeaker": [
+        { "STEPPE": 0.58, "FARMER": 0.33, "WHG": 0.09 },
+        { "STEPPE": 0.62, "FARMER": 0.3, "WHG": 0.08 },
+        { "STEPPE": 0.66, "FARMER": 0.27, "WHG": 0.07 },
+        { "STEPPE": 0.692, "FARMER": 0.232, "WHG": 0.076 }
+      ]
+    },
+    "beaker_steppe_pct": 64
+  },
+  "consumer": {
+    "FirstFarmers": [{ "label": "Italian", "share": 0.6667 }, { "label": "Iberian", "share": 0.3333 }],
+    "BellBeaker": [{ "label": "Scandinavian", "share": 0.5 }, { "label": "British", "share": 0.25 }, { "label": "French", "share": 0.25 }],
+    "BronzeAge": [{ "label": "British", "share": 0.6667 }, { "label": "Scandinavian", "share": 0.3333 }],
+    "IronAge": [{ "label": "British", "share": 0.75 }, { "label": "French", "share": 0.25 }],
+    "Roman": [{ "label": "British", "share": 1 }],
+    "AngloSaxon": [{ "label": "Scandinavian", "share": 0.5 }, { "label": "British", "share": 0.5 }],
+    "Viking": [{ "label": "Scandinavian", "share": 0.6667 }, { "label": "British", "share": 0.3333 }],
+    "Today": [{ "label": "British", "share": 0.75 }, { "label": "Scandinavian", "share": 0.25 }]
+  },
+  "traits": [
+    {
+      "gene": "LCT",
+      "rsid": "rs4988235",
+      "variant_id": "2_136608646_G_A",
+      "allele": "A",
+      "source": "ages",
+      "points": [
+        { "t": 4500, "f": 0.02, "lo": 0, "hi": 0.06 },
+        { "t": 4000, "f": 0.0956, "lo": 0.0556, "hi": 0.1356 },
+        { "t": 3500, "f": 0.1711, "lo": 0.1311, "hi": 0.2111 },
+        { "t": 3000, "f": 0.2467, "lo": 0.2067, "hi": 0.2867 },
+        { "t": 2500, "f": 0.3222, "lo": 0.2822, "hi": 0.3622 },
+        { "t": 2000, "f": 0.3978, "lo": 0.3578, "hi": 0.4378 },
+        { "t": 1500, "f": 0.4733, "lo": 0.4333, "hi": 0.5133 },
+        { "t": 1000, "f": 0.5489, "lo": 0.5089, "hi": 0.5889 },
+        { "t": 500, "f": 0.6244, "lo": 0.5844, "hi": 0.6644 },
+        { "t": 0, "f": 0.7, "lo": 0.66, "hi": 0.74 }
+      ],
+      "present_day": 0.7
+    },
+    {
+      "gene": "SLC45A2",
+      "rsid": "rs16891982",
+      "variant_id": "5_33951693_C_G",
+      "allele": "G",
+      "source": "ages",
+      "points": [
+        { "t": 4500, "f": 0.55, "lo": 0.51, "hi": 0.59 },
+        { "t": 4000, "f": 0.5944, "lo": 0.5544, "hi": 0.6344 },
+        { "t": 3500, "f": 0.6389, "lo": 0.5989, "hi": 0.6789 },
+        { "t": 3000, "f": 0.6833, "lo": 0.6433, "hi": 0.7233 },
+        { "t": 2500, "f": 0.7278, "lo": 0.6878, "hi": 0.7678 },
+        { "t": 2000, "f": 0.7722, "lo": 0.7322, "hi": 0.8122 },
+        { "t": 1500, "f": 0.8167, "lo": 0.7767, "hi": 0.8567 },
+        { "t": 1000, "f": 0.8611, "lo": 0.8211, "hi": 0.9011 },
+        { "t": 500, "f": 0.9056, "lo": 0.8656, "hi": 0.9456 },
+        { "t": 0, "f": 0.95, "lo": 0.91, "hi": 0.99 }
+      ],
+      "present_day": 0.95
+    },
+    {
+      "gene": "HERC2",
+      "rsid": "rs12913832",
+      "variant_id": "15_28365618_A_G",
+      "allele": "G",
+      "source": "local",
+      "points": [
+        { "t": 3700, "f": 0.5781, "lo": 0.4561, "hi": 0.6913, "n": 64, "period": "BellBeaker" },
+        { "t": 3000, "f": 0.3673, "lo": 0.2467, "hi": 0.5073, "n": 49, "period": "BronzeAge" },
+        { "t": 2300, "f": 0.4682, "lo": 0.4092, "hi": 0.528, "n": 267, "period": "IronAge" },
+        { "t": 1700, "f": 0.65, "lo": 0.4329, "hi": 0.8188, "n": 20, "period": "Roman" },
+        { "t": 1200, "f": 0.8313, "lo": 0.767, "hi": 0.8806, "n": 166, "period": "AngloSaxon" },
+        { "t": 0, "f": 0.7897, "lo": 0.7303, "hi": 0.839, "n": 214, "period": "Today" }
+      ],
+      "present_day": 0.7897
+    },
+    {
+      "gene": "TYK2",
+      "rsid": "rs34536443",
+      "variant_id": "19_10463118_G_C",
+      "allele": "C",
+      "source": "local",
+      "points": [
+        { "t": 5000, "f": 0.0222, "lo": 0.0061, "hi": 0.0774, "n": 90, "period": "FirstFarmers" },
+        { "t": 3700, "f": 0.1029, "lo": 0.0508, "hi": 0.1976, "n": 68, "period": "BellBeaker" },
+        { "t": 3000, "f": 0.1346, "lo": 0.0668, "hi": 0.2527, "n": 52, "period": "BronzeAge" },
+        { "t": 2300, "f": 0.1388, "lo": 0.1032, "hi": 0.1841, "n": 281, "period": "IronAge" },
+        { "t": 1700, "f": 0.0833, "lo": 0.0232, "hi": 0.2585, "n": 24, "period": "Roman" },
+        { "t": 1200, "f": 0.0591, "lo": 0.0333, "hi": 0.1028, "n": 186, "period": "AngloSaxon" },
+        { "t": 0, "f": 0.0291, "lo": 0.0134, "hi": 0.0621, "n": 206, "period": "Today" }
+      ],
+      "present_day": 0.0291
+    },
+    {
+      "gene": "HLA-DQ2",
+      "rsid": "rs3891176",
+      "variant_id": "6_32634318_C_A",
+      "allele": "A",
+      "source": "text",
+      "points": [],
+      "present_day": null
+    }
+  ],
+  "trait_ticks": [
+    { "t": 3800, "key": "BellBeaker" },
+    { "t": 3100, "key": "BronzeAge" },
+    { "t": 2300, "key": "IronAge" },
+    { "t": 1700, "key": "Roman" },
+    { "t": 1200, "key": "AngloSaxon" },
+    { "t": 700, "key": "Medieval" },
+    { "t": 0, "key": "Today" }
+  ],
+  "logs": { "snps_total": 579720, "snps_used": 496901, "pca_samples_used": 1163, "admix_snps": 78188, "admix_individuals": 1194 }
+}
