@@ -50,10 +50,10 @@ const html = bytes.toString('utf8');
 const problems = [];
 const markupChecks = [
   [/<script\b[^>]*\bsrc\s*=/i, 'a <script src=...> (scripts must be inlined)'],
-  // A data: href is inline content (index.html's <link rel="icon" href="data:,"> keeps browsers from asking for /favicon.ico).
+  // A data: href or src is inline content (index.html's <link rel="icon" href="data:,"> keeps browsers from asking for /favicon.ico).
   // The lookahead sits right after `=` so the engine cannot back off into the quote or the spaces and flag a data: URL.
   [/<link\b[^>]*\bhref\s*=(?!\s*["']?data:)/i, 'a <link href=...> that is not a data: URL (styles/icons must be inlined)'],
-  [/<(img|iframe|source|video|audio|embed)\b[^>]*\bsrc\s*=\s*["']?(?!data:)/i, 'an element loading a non-data: src'],
+  [/<(img|iframe|source|video|audio|embed)\b[^>]*\bsrc\s*=(?!\s*["']?data:)/i, 'an element loading a non-data: src'],
 ];
 // Only CSS inside <style> is checked for url(: the inlined JS legitimately contains `new URL(`.
 const css = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n');

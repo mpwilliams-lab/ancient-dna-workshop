@@ -62,6 +62,29 @@ describe('scripts/export-offline.mjs', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('is not self-contained');
   });
+  // The same rule for media elements: a data: src is inline content, whatever the quote style.
+  it.each([
+    ['<img src="data:image/png;base64,AA">'],
+    ["<img src='data:image/png;base64,AA'>"],
+    ['<img src = "data:image/png;base64,AA" alt="">'],
+    ['<img src=data:image/png;base64,AA>'],
+    ['<iframe src="data:text/html,hi"></iframe>'],
+  ])('accepts an inline data: media src: %s', (snippet) => {
+    const r = exportTo(GOOD.replace('<div id="app"></div>', `<div id="app"></div>${snippet}`));
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(r.out, 'utf8')).toContain(snippet);
+  });
+  it.each([
+    ["<img src='logo.png'>"],
+    ['<img src=logo.png>'],
+    ['<iframe src="https://example.com/"></iframe>'],
+    ['<video src="//cdn.example/v.mp4"></video>'],
+    ['<img src="data:image/png;base64,AA"><img src="logo.png">'],
+  ])('still refuses a media src that is not a data: URL: %s', (snippet) => {
+    const r = exportTo(GOOD.replace('<div id="app"></div>', `<div id="app"></div>${snippet}`));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('is not self-contained');
+  });
   it('refuses a build with no inlined module script', () => {
     const r = exportTo('<!doctype html><html><body>hi</body></html>');
     expect(r.status).toBe(1);
