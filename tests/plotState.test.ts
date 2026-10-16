@@ -124,7 +124,12 @@ describe('reducePlot: ADMIXTURE bars (spec §4.4)', () => {
     expect(s.admixNew).toEqual(['IronAge']);
   });
   it('period = P shows one bar per person and leaves the mean-bar bookkeeping alone', () => {
-    const before = run([pca('BellBeaker'), { kind: 'admixture' }]);
+    // The guided second call, so admixNew is not empty and "leaves it alone" is a real claim.
+    const before = run([
+      pca('Today'), pca('FirstFarmers'), pca('BellBeaker'), { kind: 'admixture' },
+      pca('IronAge'), pca('Roman'), pca('AngloSaxon'), { kind: 'admixture' },
+    ]);
+    expect(before.admixNew).toEqual(['IronAge', 'Roman', 'AngloSaxon']);
     const per = reducePlot(before, { kind: 'admixture', period: 'BellBeaker' }, data);
     expect(per.view).toBe('admixture');
     expect(per.admixPeriod).toBe('BellBeaker');

@@ -72,11 +72,11 @@ export function hintCommand(i: number, extrasTick: number): Command {
   return SCRIPT[clampIndex(i)] ?? extraAt(extrasTick);
 }
 
-/** The hint line text. */
+/** The hint line text. `lastRan` is null before anything has run and after a refresh; undefined is treated the same. */
 export function hintText(i: number, lastRan: Command | null, extrasTick: number): string {
   const step = SCRIPT[clampIndex(i)];
   if (step === undefined) return EXTRA_PREFIX + formatCommand(extraAt(extrasTick));
   const predictStep = step.name === 'run_pca' && step.period === 'BellBeaker';
-  if (predictStep && lastRan !== null && lastRan.name === 'run_pca' && lastRan.period === 'FirstFarmers') return PREDICT_HINT;
+  if (predictStep && lastRan?.name === 'run_pca' && lastRan.period === 'FirstFarmers') return PREDICT_HINT;
   return NEXT_PREFIX + formatCommand(step);
 }

@@ -116,7 +116,12 @@ describe('hintText and hintCommand', () => {
     expect(hintText(4, pca('FirstFarmers'), 0)).toBe(PREDICT_HINT);
     expect(hintText(4, null, 0)).toBe('Next: run_pca(period = "BellBeaker")');
     expect(hintText(4, { name: 'help' }, 0)).toBe('Next: run_pca(period = "BellBeaker")');
+    expect(hintText(4, pca('Today'), 0)).toBe('Next: run_pca(period = "BellBeaker")'); // only FirstFarmers triggers it
+    expect(hintText(4, pca('IronAge'), 0)).toBe('Next: run_pca(period = "BellBeaker")');
     expect(hintText(2, pca('FirstFarmers'), 0)).toBe('Next: run_pca(period = "Today")'); // FirstFarmers run early
+  });
+  it('a missing lastRan (undefined as well as null) never throws and gives the plain hint', () => {
+    expect(hintText(4, undefined as unknown as null, 0)).toBe('Next: run_pca(period = "BellBeaker")');
   });
   it('after the last step rotates through the extras', () => {
     expect(EXTRA_PREFIX).toBe('Try an extra: ');
@@ -136,6 +141,15 @@ describe('hintText and hintCommand', () => {
     expect(hintCommand(16, 2)).toEqual(pca('all'));
     expect(hintCommand(99, 1)).toEqual(pca('Viking'));
     expect(hintCommand(Number.NaN, 0)).toEqual(SCRIPT[0]);
+  });
+  it('Esc always inserts what the hint line shows, for every index and extras tick', () => {
+    for (let i = 0; i <= SCRIPT.length; i++) {
+      for (let t = 0; t <= 4; t++) {
+        const shown = hintText(i, null, t);
+        const filled = formatCommand(hintCommand(i, t));
+        expect(shown.endsWith(filled), `i=${i} t=${t}: "${shown}" does not end with "${filled}"`).toBe(true);
+      }
+    }
   });
   it('the prefixes, every script hint and every extras hint obey spec §6 (ruleViolations is empty)', () => {
     const texts = [

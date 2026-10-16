@@ -1,4 +1,5 @@
-import type { PeriodId, GeneId, FrameId } from './types';
+import type { PeriodId } from './types';
+import { PERIOD_IDS, GENE_IDS, FRAME_IDS } from './types';
 import type { PlotState } from './plotState';
 import { SCRIPT } from './hints';
 
@@ -10,22 +11,19 @@ export const SESSION_KEY = 'adna-workshop-session-v1';
 export const MAX_TRANSCRIPT = 2000;
 export const MAX_HISTORY = 200;
 
-const PERIODS: readonly PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
-const GENES: readonly GeneId[] = ['LCT', 'SLC45A2', 'HERC2', 'TYK2', 'HLA-DQ2'];
-const FRAMES: readonly FrameId[] = ['europe', 'britain'];
 const VIEWS: readonly PlotState['view'][] = ['none', 'pca', 'admixture', 'trait'];
 const KINDS: readonly TranscriptLine['kind'][] = ['input', 'output', 'notice'];
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isOneOf = <T extends string>(list: readonly T[], v: unknown): v is T => typeof v === 'string' && (list as readonly string[]).includes(v);
-const isPeriodList = (v: unknown): v is PeriodId[] => Array.isArray(v) && v.every((x) => isOneOf(PERIODS, x));
+const isPeriodList = (v: unknown): v is PeriodId[] => Array.isArray(v) && v.every((x) => isOneOf(PERIOD_IDS, x));
 
 function toPlot(v: unknown): PlotState | null {
   if (!isObj(v)) return null;
-  if (!isOneOf(VIEWS, v.view) || !isOneOf(FRAMES, v.frame) || typeof v.showNorthSea !== 'boolean') return null;
+  if (!isOneOf(VIEWS, v.view) || !isOneOf(FRAME_IDS, v.frame) || typeof v.showNorthSea !== 'boolean') return null;
   if (!isPeriodList(v.layers) || !isPeriodList(v.admixShown) || !isPeriodList(v.admixNew)) return null;
-  if (v.admixPeriod !== undefined && !isOneOf(PERIODS, v.admixPeriod)) return null;
-  if (v.gene !== undefined && !isOneOf(GENES, v.gene)) return null;
+  if (v.admixPeriod !== undefined && !isOneOf(PERIOD_IDS, v.admixPeriod)) return null;
+  if (v.gene !== undefined && !isOneOf(GENE_IDS, v.gene)) return null;
   const plot: PlotState = {
     view: v.view, layers: v.layers, frame: v.frame, showNorthSea: v.showNorthSea, admixShown: v.admixShown, admixNew: v.admixNew,
   };

@@ -1,4 +1,5 @@
 import type { WorkshopData, PeriodId, FrameId, GeneId } from './types';
+import { GENE_IDS } from './types';
 import type { PlotAction } from './commands';
 
 export interface PlotState {
@@ -11,7 +12,6 @@ export const INITIAL_PLOT: PlotState = {
   view: 'none', layers: [], frame: 'europe', showNorthSea: false, admixShown: [], admixNew: [],
 };
 
-const GENES: readonly GeneId[] = ['LCT', 'SLC45A2', 'HERC2', 'TYK2', 'HLA-DQ2'];
 const DEFAULT_BARS: readonly PeriodId[] = ['FirstFarmers', 'BellBeaker', 'Today'];
 const NORTH_SEA_TRIGGERS: readonly PeriodId[] = ['AngloSaxon', 'Viking'];
 
@@ -54,7 +54,7 @@ export function reducePlot(s: PlotState, a: PlotAction, data: WorkshopData): Plo
       return { ...withoutAdmixPeriod(s), view: 'admixture', admixShown: shown, admixNew: added };
     }
     case 'trait': {
-      if (!GENES.includes(a.gene)) return s;
+      if (!GENE_IDS.includes(a.gene)) return s;
       return { ...s, view: 'trait', gene: a.gene };
     }
     default:
