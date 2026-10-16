@@ -180,5 +180,16 @@ export function allRenderableStrings(): string[] {
   }
   for (const pct of [0, 64, 100]) out.push(beakerBridge(pct));
   out.push(countNote(7 / 68, 68), withN(PERIOD_LABELS.Roman, 15));
+  out.push(steppePctLabel(65), admixPeopleTitle(PERIOD_LABELS.BellBeaker, 64));
   return out;
 }
+
+// ---- Plot text (added by Task 12: bars, trajectories, router) ----
+export const PLOT_EMPTY = 'Your plots will appear here.';
+export function steppePctLabel(pct: number): string {
+  return `${pct}% steppe`;
+}
+export function admixPeopleTitle(label: string, n: number): string {
+  return `${label}: one bar per person (n = ${n})`;
+}
+export const TRAIT_Y_LABEL = 'How common the variant is';
