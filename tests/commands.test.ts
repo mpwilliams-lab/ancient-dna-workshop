@@ -4,7 +4,7 @@ import type { WorkshopData, PeriodId, GeneId, ConsumerShare } from '../src/types
 import type { Command } from '../src/parser';
 import { execute, formatCount, roundPercents, asciiBar } from '../src/commands';
 import {
-  PERIOD_LABELS, MAP_GROUP_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION, CONSUMER_NOTE, CONSUMER_TAKEAWAY,
+  PERIOD_LABELS, MAP_GROUP_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION, HOOK_NOTE, CONSUMER_NOTE, CONSUMER_TAKEAWAY,
   ROMAN_CARD, K_REFUSAL, beakerBridge, traitSourceLabel,
 } from '../src/content';
 
@@ -212,7 +212,9 @@ describe('execute: log templates', () => {
 });
 
 describe('execute: ancestry_test', () => {
-  it('me shows ME_HEADING, the ME_RESULT bars, HOOK_QUESTION and CONSUMER_NOTE (spec §3 hook)', () => {
+  // Final review (ruled): the hook screen used to print the whole Beat 4 debrief (CONSUMER_NOTE) after the example result,
+  // about twenty minutes before Beat 4. Only its last sentence belongs on the hook screen.
+  it('me shows ME_HEADING, the ME_RESULT bars, HOOK_QUESTION and only the short illustrative sentence (spec §3 hook)', () => {
     const lines = execute({ name: 'ancestry_test', person: 'me' }, fixture).lines;
     expect(lines).toEqual([
       ME_HEADING,
@@ -220,9 +222,30 @@ describe('execute: ancestry_test', () => {
       '  British      [##################..]  92%',
       '  Scandinavian [##..................]   8%',
       HOOK_QUESTION,
-      CONSUMER_NOTE,
+      HOOK_NOTE,
     ]);
+    expect(HOOK_NOTE).toBe('These labels are illustrative, not a measurement.');
     expect(ME_RESULT.map((s) => s.label)).toEqual(['British', 'Scandinavian']);
+  });
+  it('me does not preview the Beat 4 debrief: the full CONSUMER_NOTE is not on the hook screen, only its last sentence', () => {
+    const text = execute({ name: 'ancestry_test', person: 'me' }, fixture).lines.join('\n');
+    expect(text).not.toContain(CONSUMER_NOTE);
+    for (const piece of ['where similar people live today', 'who anyone', 'Dutch, German or Danish', 'North Sea', 'Vikings']) {
+      expect(text, piece).not.toContain(piece);
+    }
+    expect(text).toContain(HOOK_NOTE);
+    // one source: the short sentence is the closing sentence of the full note, not a second hand-typed copy
+    expect(CONSUMER_NOTE.endsWith(HOOK_NOTE)).toBe(true);
+    expect(CONSUMER_NOTE.length).toBeGreaterThan(HOOK_NOTE.length * 3);
+  });
+  it('a period keeps the full CONSUMER_NOTE (Beat 4), with every sentence the hook screen leaves out', () => {
+    for (const person of PERIODS) {
+      const lines = execute({ name: 'ancestry_test', person }, fixture).lines;
+      expect(lines[lines.length - 1], person).toBe(CONSUMER_NOTE);
+      for (const piece of ['where similar people live today', 'Dutch, German or Danish', 'It does not mean Vikings.', HOOK_NOTE]) {
+        expect(lines.join('\n'), `${person}: ${piece}`).toContain(piece);
+      }
+    }
   });
   it('a period shows sorted ASCII bars that sum to 100, its n, CONSUMER_TAKEAWAY and the note (spec §3 beat 4)', () => {
     const d = withConsumer(withN(fixture, 'IronAge', 281, 270), 'IronAge', [

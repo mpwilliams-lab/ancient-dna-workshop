@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as C from '../src/content';
+import { PARSER_GENE_ORDER, PARSER_PERIOD_ORDER, parse } from '../src/parser';
 import type { Trait, TraitPoint } from '../src/types';
 import { ALLOWED_AGE_PHRASES, ruleViolations } from './contentRules';
 import { cloneFixture, FIXTURE } from './fixtures/fixture';
@@ -262,5 +263,78 @@ describe('labels (contract)', () => {
       expect(C.HELP_LINES.join('\n')).toContain(name);
     }
     expect(C.K_REFUSAL).toBe("This workshop's run uses K = 3. Try run_admixture(K = 3).");
+  });
+});
+
+// ---------- final review: help() layout, the hook's one-sentence note, the PCA legend label ----------
+describe('help() layout (a line over 60 characters wraps badly in the terminal pane)', () => {
+  const MAX_LINE = 60;
+  const indent = (s: string): number => s.length - s.trimStart().length;
+  const COMMANDS = [
+    'help()', 'load_genomes()', 'run_pca(period = "IronAge")', 'run_admixture(K = 3)', 'run_admixture(K = 3, period = "BellBeaker")',
+    'allele_freq(gene = "LCT")', 'ancestry_test(person = "me")', 'clear()',
+  ];
+  /** The lines under a command that are indented deeper than it, joined: its description. */
+  const describedAs = (command: string): string => {
+    const i = C.HELP_LINES.findIndex((l) => l.trim() === command);
+    const out: string[] = [];
+    for (let j = i + 1; j < C.HELP_LINES.length && indent(C.HELP_LINES[j]!) > indent(C.HELP_LINES[i]!); j++) out.push(C.HELP_LINES[j]!.trim());
+    return out.join(' ');
+  };
+
+  it('every line is at most 60 characters', () => {
+    expect(C.HELP_LINES.length).toBeGreaterThan(10);
+    for (const line of C.HELP_LINES) expect(line.length, `"${line}"`).toBeLessThanOrEqual(MAX_LINE);
+  });
+
+  it('puts each command on a line of its own, with a short indented description straight below it', () => {
+    for (const command of COMMANDS) {
+      const at = C.HELP_LINES.map((l, i) => [l, i] as const).filter(([l]) => l.trim() === command);
+      expect(at, command).toHaveLength(1);
+      const [line, i] = at[0]!;
+      const below = C.HELP_LINES[i + 1];
+      expect(below, `${command} has a line below it`).toBeDefined();
+      expect(below!.trim().length, command).toBeGreaterThan(0);
+      expect(indent(below!), `${command}: description indent`).toBeGreaterThan(indent(line));
+      // nothing but the command on its line: no description beside it
+      expect(line.trim(), command).toBe(command);
+    }
+  });
+
+  it('lists only commands that run: every command line parses', () => {
+    for (const command of COMMANDS) expect(parse(command), command).toMatchObject({ ok: true });
+  });
+
+  it('keeps every period, every gene and the keys that the old layout named', () => {
+    const periods = describedAs('run_pca(period = "IronAge")');
+    for (const id of [...PARSER_PERIOD_ORDER, 'all']) expect(periods, id).toMatch(new RegExp(`(^|[^A-Za-z])${id}([^A-Za-z]|$)`));
+    const genes = describedAs('allele_freq(gene = "LCT")');
+    for (const id of PARSER_GENE_ORDER) expect(genes, id).toContain(id);
+    expect(describedAs('ancestry_test(person = "me")')).toMatch(/"me"/);
+    const text = C.HELP_LINES.join('\n');
+    expect(text).toMatch(/Commands \(type one, then press Enter\):/);
+    for (const key of ['Tab completes', 'Up/Down shows earlier commands', 'Esc fills in the hint']) expect(text, key).toContain(key);
+  });
+
+  it('is still free of §6 violations line by line', () => {
+    for (const line of C.HELP_LINES) expect(ruleViolations(line), line).toEqual([]);
+  });
+});
+
+describe('the hook screen keeps one sentence of the consumer note', () => {
+  it('HOOK_NOTE is the sentence "These labels are illustrative, not a measurement." and closes the full CONSUMER_NOTE', () => {
+    expect(C.HOOK_NOTE).toBe('These labels are illustrative, not a measurement.');
+    expect(C.CONSUMER_NOTE.endsWith(C.HOOK_NOTE)).toBe(true);
+    expect(C.CONSUMER_NOTE.split(C.HOOK_NOTE)).toHaveLength(2); // exactly once, so there is a single source for the sentence
+    expect(ALL).toContain(C.HOOK_NOTE);
+    expect(ruleViolations(C.HOOK_NOTE)).toEqual([]);
+  });
+});
+
+describe('the PCA legend label for the outlined eastern-England points', () => {
+  it('is "Eastern England (outlined)", is scanned with the rest, and breaks no §6 rule', () => {
+    expect(C.EAST_ENGLAND_LEGEND).toBe('Eastern England (outlined)');
+    expect(ALL).toContain(C.EAST_ENGLAND_LEGEND);
+    expect(ruleViolations(C.EAST_ENGLAND_LEGEND)).toEqual([]);
   });
 });

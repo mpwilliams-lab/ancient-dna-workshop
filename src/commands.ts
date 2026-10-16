@@ -3,7 +3,7 @@ import { PERIOD_IDS, GENE_IDS } from './types';
 import type { Command } from './parser';
 import {
   PERIOD_LABELS, MAP_GROUP_LABELS, SOURCE_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION,
-  CONSUMER_NOTE, CONSUMER_TAKEAWAY, ROMAN_CARD, K_REFUSAL, beakerBridge, traitSourceLabel,
+  CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_NOTE, ROMAN_CARD, K_REFUSAL, beakerBridge, traitSourceLabel,
 } from './content';
 
 export type PlotAction =
@@ -122,12 +122,13 @@ function alleleFreq(data: WorkshopData, gene: GeneId): CommandResult {
 
 function ancestryTest(data: WorkshopData, person: PeriodId | 'me'): CommandResult {
   if (person === 'me') {
+    // The hook screen shows only one sentence of the note: the rest is the Beat 4 debrief and waits for a period's result.
     return ok([
       ME_HEADING,
       'Compared with: people living in Europe today',
       ...shareLines(ME_RESULT),
       HOOK_QUESTION,
-      CONSUMER_NOTE,
+      HOOK_NOTE,
     ]);
   }
   // Every period, Today included, has a consumer entry (spec v2.1 §5.3), so Today is not a special case.

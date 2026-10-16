@@ -1,7 +1,7 @@
 import type { Frame, PeriodId, Pt, WorkshopData } from '../types';
 import type { PlotState } from '../plotState';
 import {
-  MAP_GROUP_LABELS, NORTH_SEA_LABEL, PCA_CAPTION, PERIOD_LABELS, withN,
+  EAST_ENGLAND_LEGEND, MAP_GROUP_LABELS, NORTH_SEA_LABEL, PCA_CAPTION, PERIOD_LABELS, withN,
 } from '../content';
 import {
   INK, MAP_GREY, PERIOD_COLORS, PERIOD_SHAPES, shapePath, svgEl, wireTips,
@@ -15,6 +15,10 @@ const ARROW_PERIODS: PeriodId[] = ['Roman', 'AngloSaxon'];
 
 /** Opacity of a clipped point. A string on purpose: svgEl rounds numbers to one decimal, which would turn 0.35 into 0.4. */
 const GHOST_OPACITY = '0.35';
+
+/** An eastern-England Anglo-Saxon point is drawn this much bigger than its neighbours, with a black outline this thick. The legend item that explains it uses the same two numbers. */
+const EAST_GROW = 1.5;
+const EAST_STROKE = 2.5;
 
 /** Width estimate for a 16 px bold centre label: about 9.3 px per character (measured 7.8 to 10.7 in Chrome). */
 const LABEL_CHAR_W = 9.3;
@@ -147,10 +151,10 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState):
       const cls = ['pt', east ? 'east' : '', c.clipped ? 'clipped' : ''].filter(Boolean).join(' ');
       layer.append(svgEl('path', {
         class: cls,
-        d: shapePath(PERIOD_SHAPES[id], q.x, q.y, east ? r + 1.5 : r),
+        d: shapePath(PERIOD_SHAPES[id], q.x, q.y, east ? r + EAST_GROW : r),
         fill: ghost ? 'none' : PERIOD_COLORS[id],
         stroke: east ? INK : ghost ? PERIOD_COLORS[id] : '#FFFFFF',
-        'stroke-width': east ? 2.5 : ghost ? 1.5 : 0.8,
+        'stroke-width': east ? EAST_STROKE : ghost ? 1.5 : 0.8,
         ...(ghost ? { opacity: GHOST_OPACITY } : {}),
       }));
     }
@@ -250,19 +254,31 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState):
   const legend = svgEl('g', { class: 'legend' });
   let lx = PCA_VIEW.left;
   let ly = PCA_VIEW.bottom + 26;
-  for (const id of ['Today' as PeriodId, ...layers]) {
-    const n = data.periods.find((pi) => pi.id === id)?.n_pca ?? 0;
-    const text = withN(PERIOD_LABELS[id], n);
+  /** One legend item: its mark, then its words. It starts a new row when it would run past the right edge. */
+  const addLegendItem = (key: string, tip: string, text: string, mark: (x: number, y: number) => SVGPathElement): void => {
     const w = 22 + text.length * 7.6 + 22;
     if (lx + w > PCA_VIEW.right && lx > PCA_VIEW.left) {
       lx = PCA_VIEW.left;
       ly += 22;
     }
-    const item = svgEl('g', { class: 'legend-item', 'data-legend': id, 'data-tip': PERIOD_LABELS[id] });
-    item.append(svgEl('path', { d: shapePath(PERIOD_SHAPES[id], lx + 7, ly - 5, 6), fill: PERIOD_COLORS[id] }));
+    const item = svgEl('g', { class: 'legend-item', 'data-legend': key, 'data-tip': tip });
+    item.append(mark(lx + 7, ly - 5));
     item.append(svgEl('text', { x: lx + 20, y: ly, 'font-size': 14, fill: INK }, text));
     legend.append(item);
     lx += w;
+  };
+  // Beat 3: the Anglo-Saxon points flagged east are outlined in black. When any are drawn, the legend says what the outline means.
+  const hasEast = (data.points.find((pp) => pp.period === 'AngloSaxon')?.points ?? []).some((pt) => pt.east === true);
+  for (const id of ['Today' as PeriodId, ...layers]) {
+    const n = data.periods.find((pi) => pi.id === id)?.n_pca ?? 0;
+    addLegendItem(id, PERIOD_LABELS[id], withN(PERIOD_LABELS[id], n),
+      (x, y) => svgEl('path', { d: shapePath(PERIOD_SHAPES[id], x, y, 6), fill: PERIOD_COLORS[id] }));
+    if (id === 'AngloSaxon' && hasEast) {
+      addLegendItem('east', EAST_ENGLAND_LEGEND, EAST_ENGLAND_LEGEND, (x, y) => svgEl('path', {
+        d: shapePath(PERIOD_SHAPES.AngloSaxon, x, y, 6 + EAST_GROW),
+        fill: PERIOD_COLORS.AngloSaxon, stroke: INK, 'stroke-width': EAST_STROKE,
+      }));
+    }
   }
   const caption = svgEl('text', {
     class: 'pca-caption', x: PCA_VIEW.left, y: PCA_VIEW.height - 8, 'font-size': 14, fill: INK, 'font-style': 'italic',

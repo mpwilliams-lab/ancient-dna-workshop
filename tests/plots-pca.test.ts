@@ -4,8 +4,8 @@ import fixture from './fixtures/data.fixture.json';
 import type { PeriodId, WorkshopData } from '../src/types';
 import { INITIAL_PLOT, type PlotState } from '../src/plotState';
 import { PCA_VIEW, clampToFrame, frameTransition, makeScale, renderPca } from '../src/plots/pca';
-import { OKABE_ITO, PERIOD_COLORS, PERIOD_SHAPES, f1, textBlock, wrapText } from '../src/plots/svg';
-import { MAP_GROUP_LABELS, NORTH_SEA_LABEL, PCA_CAPTION, PERIOD_LABELS, withN } from '../src/content';
+import { INK, OKABE_ITO, PERIOD_COLORS, PERIOD_SHAPES, f1, textBlock, wrapText } from '../src/plots/svg';
+import { EAST_ENGLAND_LEGEND, MAP_GROUP_LABELS, NORTH_SEA_LABEL, PCA_CAPTION, PERIOD_LABELS, withN } from '../src/content';
 
 // The shared fixture supplies everything else; the PCA geometry is pinned here so the
 // expected pixel values below do not depend on how the fixture's points were chosen.
@@ -565,5 +565,123 @@ describe('palette: shapes back up the colours', () => {
       expect(normal(a, b), `${a} and ${b}, normal vision`).toBeGreaterThanOrEqual(NORMAL_FLOOR);
       expect(cvd(a, b), `${a} and ${b}, colour-vision deficiency`).toBeGreaterThanOrEqual(CVD_TARGET);
     }
+  });
+});
+
+// ---------- final review: the outlined eastern-England points get a legend item (Beat 3) ----------
+// The Anglo-Saxon layer outlines the burials flagged `east` in black. Nothing on screen said what the outline meant,
+// so a student who asked "why are some of them black-edged?" had no answer in the plot itself.
+describe('the legend explains the outlined eastern-England points', () => {
+  const ALL_LAYERS: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
+  const eastItem = (svg: SVGSVGElement) => svg.querySelector('.legend .legend-item[data-legend="east"]');
+  const legendTexts = (svg: SVGSVGElement) => [...svg.querySelectorAll('.legend-item')].map((t) => t.textContent);
+
+  it('the label is "Eastern England (outlined)", written once in content.ts', () => {
+    expect(EAST_ENGLAND_LEGEND).toBe('Eastern England (outlined)');
+  });
+
+  it('adds exactly one item, straight after the Anglo-Saxon one, when that layer is drawn and a point carries east', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ['IronAge', 'AngloSaxon', 'Viking'], frame: 'britain' }));
+    expect(legendTexts(svg)).toEqual([
+      withN(PERIOD_LABELS.Today, 4),
+      withN(PERIOD_LABELS.IronAge, 5),
+      withN(PERIOD_LABELS.AngloSaxon, 5),
+      EAST_ENGLAND_LEGEND,
+      withN(PERIOD_LABELS.Viking, 2),
+    ]);
+    expect(svg.querySelectorAll('.legend-item[data-legend="east"]')).toHaveLength(1);
+    // the plot itself has the outlined points the item talks about
+    expect(svg.querySelectorAll('.pt.east')).toHaveLength(2);
+  });
+
+  it('appears on the Europe frame too, and once even when the layer is listed twice', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ['AngloSaxon', 'AngloSaxon'], frame: 'europe' }));
+    expect(legendTexts(svg)).toEqual([withN(PERIOD_LABELS.Today, 4), withN(PERIOD_LABELS.AngloSaxon, 5), EAST_ENGLAND_LEGEND]);
+  });
+
+  it('is absent whenever the Anglo-Saxon layer is not drawn (nothing is outlined, so nothing to explain)', () => {
+    const cases: PeriodId[][] = [[], ['IronAge', 'Roman'], ['FirstFarmers', 'BellBeaker'], ['BronzeAge', 'Viking'], ['Today']];
+    for (const frame of ['europe', 'britain'] as const) {
+      for (const layers of cases) {
+        const svg = newSvg();
+        renderPca(svg, makeData(), pca({ layers, frame, showNorthSea: true }));
+        const what = `${frame}: ${layers.join(', ') || 'no layers'}`;
+        expect(legendTexts(svg), what).not.toContain(EAST_ENGLAND_LEGEND);
+        expect(eastItem(svg), what).toBeNull();
+        expect(svg.querySelectorAll('.pt.east'), what).toHaveLength(0);
+      }
+    }
+  });
+
+  it('is absent when the Anglo-Saxon layer is drawn but no point carries east (nothing is outlined)', () => {
+    const d = makeData();
+    for (const g of d.points) for (const pt of g.points) delete (pt as { east?: boolean }).east;
+    const svg = newSvg();
+    renderPca(svg, d, pca({ layers: ['AngloSaxon'], frame: 'britain' }));
+    expect(svg.querySelectorAll('.pt.east')).toHaveLength(0);
+    expect(eastItem(svg)).toBeNull();
+    expect(legendTexts(svg)).toEqual([withN(PERIOD_LABELS.Today, 4), withN(PERIOD_LABELS.AngloSaxon, 5)]);
+    // east: false everywhere is the same
+    const e = makeData();
+    for (const pt of e.points.find((g) => g.period === 'AngloSaxon')!.points) pt.east = false;
+    const svg2 = newSvg();
+    renderPca(svg2, e, pca({ layers: ['AngloSaxon'], frame: 'britain' }));
+    expect(eastItem(svg2)).toBeNull();
+  });
+
+  it('is gone again when a later render drops the Anglo-Saxon layer (a redraw never keeps a stale item)', () => {
+    const svg = newSvg();
+    const d = makeData();
+    renderPca(svg, d, pca({ layers: ['AngloSaxon'], frame: 'britain' }));
+    expect(eastItem(svg)).not.toBeNull();
+    renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'britain' }));
+    expect(eastItem(svg)).toBeNull();
+    expect(svg.querySelectorAll('.legend-item[data-legend="east"]')).toHaveLength(0);
+  });
+
+  it('its mark looks like the plotted points it explains: an Anglo-Saxon triangle in its colour with the same black outline', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ['AngloSaxon'], frame: 'britain' }));
+    const mark = eastItem(svg)!.querySelector('path')!;
+    const plotted = svg.querySelector('.pt.east')!;
+    const plain = svg.querySelector('.legend-item[data-legend="AngloSaxon"] path')!;
+    expect(PERIOD_SHAPES.AngloSaxon).toBe('triangle');
+    expect(mark.getAttribute('stroke')).toBe(INK);
+    expect(mark.getAttribute('stroke')).toBe(plotted.getAttribute('stroke'));
+    expect(mark.getAttribute('stroke-width')).toBe(plotted.getAttribute('stroke-width'));
+    expect(mark.getAttribute('fill')).toBe(PERIOD_COLORS.AngloSaxon);
+    expect(mark.getAttribute('fill')).toBe(plotted.getAttribute('fill'));
+    // the same shape as the plain Anglo-Saxon item beside it (path commands only: M, L, L, Z for a triangle)
+    const commands = (el: Element) => (el.getAttribute('d') ?? '').replace(/[^A-Za-z]/g, '');
+    expect(commands(mark)).toBe('MLLZ');
+    expect(commands(mark)).toBe(commands(plain));
+    // and the plain item keeps its plain look: no outline
+    expect(plain.getAttribute('stroke')).toBeNull();
+  });
+
+  it('has a hover tip with the same words, and flows into the legend rows: never past the right edge or into the caption', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ALL_LAYERS, frame: 'britain' }));
+    const item = eastItem(svg)!;
+    expect(item.getAttribute('data-tip')).toBe(EAST_ENGLAND_LEGEND);
+    item.querySelector('path')!.dispatchEvent(new Event('pointerover', { bubbles: true }));
+    expect(svg.querySelector('.plot-tip')?.textContent).toBe(EAST_ENGLAND_LEGEND);
+    // nine items (eight layers and this one) now share the rows under the plot box
+    expect(svg.querySelectorAll('.legend-item')).toHaveLength(9);
+    const captionY = num(svg.querySelector('.pca-caption'), 'y');
+    for (const t of svg.querySelectorAll('.legend text')) {
+      expect(num(t, 'y'), t.textContent ?? '').toBeLessThan(captionY - 14);
+      expect(num(t, 'x') + (t.textContent ?? '').length * 7.6, t.textContent ?? '').toBeLessThanOrEqual(PCA_VIEW.right + 1);
+    }
+  });
+
+  it('adds no text that breaks a §6 rule (no ages, no Group or sample IDs)', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ALL_LAYERS, frame: 'europe', showNorthSea: true }));
+    const text = eastItem(svg)?.textContent ?? '';
+    expect(text).toBe(EAST_ENGLAND_LEGEND);
+    expect(text).not.toMatch(/\d|BCE|BC\b|BP\b|years|ago|Neolithic|Mesolithic|_/i);
   });
 });

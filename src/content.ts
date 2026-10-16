@@ -87,12 +87,16 @@ export const ROMAN_CARD =
 export const ANGLO_SAXON_TAKEAWAY =
   'A real migration: eastern-England burials carry up to 76% continental ancestry (Gretzinger et al. 2022). ' +
   'Yet the Anglo-Saxon bar looks almost the same as the Iron Age and Roman bars, because a tool only sees differences its reference groups can tell apart.';
+/** PCA legend item (src/plots/pca.ts) for the black-outlined Anglo-Saxon points flagged as eastern England; shown only when such points are drawn. */
+export const EAST_ENGLAND_LEGEND = 'Eastern England (outlined)';
 
 // ---- Beat 4: consumer DNA (spec §3, §5.3, §6 rule 8) ----
+/** The one sentence of CONSUMER_NOTE that the hook screen (ancestry_test(person = "me")) shows; the rest is the Beat 4 debrief. */
+export const HOOK_NOTE = 'These labels are illustrative, not a measurement.';
 export const CONSUMER_NOTE =
   'These labels show where similar people live today, not who anyone\'s ancestors were. ' +
   'The reference set has no Dutch, German or Danish group, so "Scandinavian" stands in for the North Sea region. It does not mean Vikings. ' +
-  'These labels are illustrative, not a measurement.';
+  HOOK_NOTE;
 export const CONSUMER_TAKEAWAY =
   'Consumer tests compare you with living people: AncestryDNA\'s reference panel is "people with long family histories in a particular region or group" (AncestryDNA Ethnicity Estimate 2023 white paper). ' +
   'Only ancient DNA reveals the turnovers.';
@@ -143,18 +147,30 @@ export const WRAP_CREDIT = 'WWU Biology · Walla Walla University';
 export const RESTORED_NOTICE = 'Restored previous session — reload with ?reset to start fresh';
 export const PREDICT_HINT = 'Predict: where will the Beaker newcomers land? Then run run_pca(period = "BellBeaker")';
 export const HINT_PREFIX = 'Try: ';
+// Every line is at most 60 characters: the terminal pane is about 69 characters wide at 1366 x 768, and a longer line wraps
+// under its own command. Each command has a line to itself with its description indented below it (tests/content.test.ts).
 export const HELP_LINES: string[] = [
   'Commands (type one, then press Enter):',
-  '  help()                                      show this list',
-  '  load_genomes()                              load the genomes',
-  '  run_pca(period = "IronAge")                 map one period: Today, FirstFarmers, BellBeaker,',
-  '                                              BronzeAge, IronAge, Roman, AngloSaxon, Viking or all',
-  '  run_admixture(K = 3)                        ancestry bars for the periods you have mapped',
-  '  run_admixture(K = 3, period = "BellBeaker") one thin bar per person in that period',
-  '  allele_freq(gene = "LCT")                   a trait through time: LCT, SLC45A2, HERC2, TYK2, HLA-DQ2',
-  '  ancestry_test(person = "me")                a consumer-style test: "me" or any period',
-  '  clear()                                     clear the text (the plot stays)',
-  'Keys: Tab completes, Up/Down shows earlier commands, Esc fills in the hint.',
+  '  help()',
+  '      show this list',
+  '  load_genomes()',
+  '      load the genomes',
+  '  run_pca(period = "IronAge")',
+  '      map one period: Today, FirstFarmers, BellBeaker,',
+  '      BronzeAge, IronAge, Roman, AngloSaxon, Viking or all',
+  '  run_admixture(K = 3)',
+  '      ancestry bars for the periods you have mapped',
+  '  run_admixture(K = 3, period = "BellBeaker")',
+  '      one thin bar per person in that period',
+  '  allele_freq(gene = "LCT")',
+  '      a trait through time: LCT, SLC45A2, HERC2,',
+  '      TYK2, HLA-DQ2',
+  '  ancestry_test(person = "me")',
+  '      a consumer-style test: "me" or any period',
+  '  clear()',
+  '      clear the text (the plot stays)',
+  'Keys: Tab completes, Up/Down shows earlier commands,',
+  '      Esc fills in the hint.',
 ];
 
 // ---- Rule-test hook ----
