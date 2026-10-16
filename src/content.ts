@@ -181,6 +181,7 @@ export function allRenderableStrings(): string[] {
   for (const pct of [0, 64, 100]) out.push(beakerBridge(pct));
   out.push(countNote(7 / 68, 68), withN(PERIOD_LABELS.Roman, 15));
   out.push(steppePctLabel(65), admixPeopleTitle(PERIOD_LABELS.BellBeaker, 64));
+  out.push(...SHELL_STRINGS);
   return out;
 }
 
@@ -193,3 +194,8 @@ export function admixPeopleTitle(label: string, n: number): string {
   return `${label}: one bar per person (n = ${n})`;
 }
 export const TRAIT_Y_LABEL = 'How common the variant is';
+
+// ---- Shell strings (Task 13); APP_TITLE, WRAP_QR_CAPTION and WRAP_CREDIT are declared above (Task 6) ----
+export const WRAP_BUTTON = 'Take this home';
+export const WRAP_CLOSE = 'Back to the terminal';
+export const SHELL_STRINGS: string[] = [APP_TITLE, WRAP_BUTTON, WRAP_QR_CAPTION, WRAP_CREDIT, WRAP_CLOSE];
