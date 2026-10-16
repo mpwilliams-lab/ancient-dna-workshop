@@ -3,9 +3,18 @@ import type { PlotState } from '../plotState';
 import {
   ANGLO_SAXON_TAKEAWAY, BEAKER_CALLOUT, PERIOD_LABELS, SOURCE_LABELS, admixPeopleTitle, beakerBridge, steppePctLabel,
 } from '../content';
-import { INK, SOURCE_COLORS, svgEl, textBlock } from './svg';
+import { INK, SOURCE_COLORS, svgEl, textBlock, wrapText } from './svg';
 
-export const ADMIX_VIEW = { width: 1000, height: 700, left: 40, right: 960, barsBottom: 560 } as const;
+/**
+ * barsBottom leaves room below the bars for the bar labels (up to four lines for the longest period name when all
+ * eight bars are shown) and the three-line Anglo-Saxon takeaway, all inside the 700 px viewBox.
+ */
+export const ADMIX_VIEW = { width: 1000, height: 700, left: 40, right: 960, barsBottom: 530 } as const;
+
+// The takeaway is anchored to the bottom edge and grows upward: its last baseline sits TAKEAWAY_BOTTOM above the edge.
+const TAKEAWAY_CHARS = 90;
+const TAKEAWAY_LINE = 22;
+const TAKEAWAY_BOTTOM = 12;
 
 const SOURCES: SourceId[] = ['STEPPE', 'FARMER', 'WHG'];      // stacked bottom -> top
 const DEFAULT_BARS: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'Today'];
@@ -111,7 +120,9 @@ export function renderAdmixture(svg: SVGSVGElement, data: WorkshopData, p: PlotS
       body.append(g);
     });
     if (bars.some((b) => b.period === 'AngloSaxon')) {
-      const take = textBlock(ANGLO_SAXON_TAKEAWAY, 90, ADMIX_VIEW.left, ADMIX_VIEW.height - 22, 22, {
+      const lines = wrapText(ANGLO_SAXON_TAKEAWAY, TAKEAWAY_CHARS).length;
+      const first = ADMIX_VIEW.height - TAKEAWAY_BOTTOM - (lines - 1) * TAKEAWAY_LINE;
+      const take = textBlock(ANGLO_SAXON_TAKEAWAY, TAKEAWAY_CHARS, ADMIX_VIEW.left, first, TAKEAWAY_LINE, {
         class: 'admix-takeaway', 'font-size': 18, 'font-weight': '700', fill: INK,
       });
       body.append(take.el);
