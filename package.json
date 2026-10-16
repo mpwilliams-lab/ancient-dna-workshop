@@ -19,7 +19,8 @@
     "check-data": "REAL_DATA=1 vitest run tests/real-data.test.ts",
     "prebuild": "node scripts/make-qr.mjs",
     "e2e": "npm run build && playwright test",
-    "export-offline": "npm run build && node scripts/export-offline.mjs"
+    "export-offline": "npm run build && node scripts/export-offline.mjs",
+    "run-sheet": "vite build --ssr scripts/runsheet-cli.ts --outDir .runsheet --emptyOutDir && node .runsheet/runsheet-cli.js"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
