@@ -16,7 +16,7 @@ import { formatCommand } from '../src/parser';
 import { SCRIPT, EXTRAS } from '../src/hints';
 import { INITIAL_PLOT, type PlotState } from '../src/plotState';
 import { loadSession, type Session, type SessionStorageLike } from '../src/session';
-import { RESTORED_NOTICE } from '../src/content';
+import { PREDICT_HINT, RESTORED_NOTICE } from '../src/content';
 import { ruleViolations } from './contentRules';
 
 const data = fixtureJson as unknown as WorkshopData;
@@ -131,6 +131,10 @@ const flushMicrotasks = async (): Promise<void> => {
 
 const STEP = (k: number): string => formatCommand(SCRIPT[k]);
 
+/** The transcript's output lines that say "did you mean". */
+const didYouMeanLines = (transcript: Session['transcript']): string[] =>
+  transcript.filter((l) => l.kind === 'output' && /did you mean/i.test(l.text)).map((l) => l.text);
+
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
@@ -206,8 +210,41 @@ describe('RF1: students typing loosely', () => {
     const said = r.term.output.join('\n');
     expect(said).toMatch(/did you mean/i);
     expect(said).toContain(expected);
+    // The real parser already folds its suggestion into the message, so the controller must not add a second line.
+    expect(didYouMeanLines(r.c.session.transcript)).toHaveLength(1);
     expect(r.c.badTries).toBe(1);
     expect(r.renders).toHaveLength(1);
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, string, boolean]>([
+    ['adds its own line when the parser message lacks it', 'That is not a period in this workshop.', true],
+    [
+      'adds nothing when the parser message already says it',
+      'That is not a period in this workshop. Did you mean run_pca(period = "IronAge")?',
+      false,
+    ],
+  ])('a stubbed parser error that %s: exactly one did-you-mean line', async (_label, message, controllerAdds) => {
+    // The real parser always folds its suggestion into the message (fail() in parser.ts), so the controller's own
+    // did-you-mean line can only be reached through a stub.
+    const suggestion = 'run_pca(period = "IronAge")';
+    vi.resetModules();
+    vi.doMock('../src/parser', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('../src/parser')>()),
+      parse: () => ({ ok: false, kind: 'unknown_value', message, suggestion }),
+    }));
+    try {
+      const mod = await import('../src/controller');
+      const term = new FakeTerminal([]);
+      const c = new mod.Controller({ data, terminal: term, renderPlot: () => undefined, store: null }, null);
+      c.submit('anything');
+      expect(didYouMeanLines(c.session.transcript)).toHaveLength(1);
+      expect(term.output.includes(mod.didYouMean(suggestion))).toBe(controllerAdds);
+      expect(c.badTries).toBe(1);
+    } finally {
+      vi.doUnmock('../src/parser');
+      vi.resetModules();
+    }
   });
 
   it('an error is followed by the hint line', () => {
@@ -261,6 +298,8 @@ describe('RF1: students typing loosely', () => {
     expect(said).not.toMatch(/TypeError|ReferenceError|RangeError|SyntaxError|\[object |\n\s+at /);
     expect(() => r.c.submit(undefined as unknown as string)).not.toThrow();
     expect(() => r.c.submit(42 as unknown as string)).not.toThrow();
+    // Nothing was swallowed on the way either: a parser or command that threw would have been logged here.
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it('blank input does nothing and does not count', () => {
@@ -286,6 +325,7 @@ describe('RF1: students typing loosely', () => {
     expect(r.c.session.plot).toEqual(INITIAL_PLOT);
     expect(() => r.c.submit('a'.repeat(2000))).not.toThrow();
     expect(r.c.badTries).toBe(2);
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it('three incorrect tries in a row fill the hinted command and reset the counter', () => {
@@ -322,14 +362,18 @@ describe('RF1: students typing loosely', () => {
     expect(r.term.prompt).toBe(STEP(0));
   });
 
-  it('a refusal neither draws nor moves the hint pointer', () => {
+  it('a refusal neither draws nor moves the hint pointer', async () => {
     const r = rig();
     for (let k = 0; k < 5; k++) r.c.submit(STEP(k));
     expect(SCRIPT[5]).toEqual({ name: 'run_admixture', K: 3 });
     const before = r.c.session.plot;
+    const rendersBefore = r.renders.length;
     r.c.submit('run_admixture(K = 4)');
     expect(r.c.hintIndex).toBe(5);
     expect(r.c.session.plot).toEqual(before);
+    expect(r.renders).toHaveLength(rendersBefore);
+    await flushMicrotasks(); // a draw scheduled behind the log's promise would land here
+    expect(r.renders).toHaveLength(rendersBefore);
   });
 
   it('a successful command resets the counter', () => {
@@ -389,6 +433,16 @@ describe('hint pointer and plot wiring', () => {
     expect(r.term.hint).toContain(STEP(1));
     r.c.submit(STEP(0));
     expect(r.c.hintIndex).toBe(1);
+  });
+
+  it.each(['help()', 'clear()'])('%s does not end the Predict beat', (cmd) => {
+    const r = rig();
+    for (let k = 0; k < 4; k++) r.c.submit(STEP(k));
+    expect(SCRIPT[3]).toEqual({ name: 'run_pca', period: 'FirstFarmers' });
+    expect(r.term.hint).toBe(PREDICT_HINT);
+    r.c.submit(cmd);
+    expect(r.term.hint).toBe(PREDICT_HINT);
+    expect(r.c.hintIndex).toBe(4);
   });
 
   it('renders the reduced plot after each drawing command, not after text-only ones', () => {
@@ -530,6 +584,29 @@ describe('Enter during printing (spec §4.2)', () => {
     expect(r.term.isPrinting()).toBe(true);
   });
 
+  it('blank input mid-print is ignored completely: the log keeps printing and nothing is drawn, recorded or counted', async () => {
+    const r = rig();
+    r.term.holdPrints = true;
+    r.c.submit('run_pca(period = "Today")');
+    expect(r.term.isPrinting()).toBe(true);
+    const events = [...r.events];
+    const hint = r.term.hint;
+    const saved = r.c.session;
+    for (const blank of ['', '    ', '\t']) r.c.submit(blank);
+    expect(r.term.isPrinting()).toBe(true);
+    expect(r.events).toEqual(events); // no flush, no echo, no draw
+    expect(r.renders).toHaveLength(1);
+    expect(r.term.hint).toBe(hint);
+    expect(r.c.session.history).toEqual(saved.history);
+    expect(r.c.session.transcript).toEqual(saved.transcript);
+    expect(r.c.badTries).toBe(0);
+    // The running log was left alone, so it still draws its plot once, when it ends.
+    r.term.flush();
+    await flushMicrotasks();
+    expect(r.renders).toHaveLength(2);
+    expect(r.renders[1].layers).toContain('Today');
+  });
+
   it('the session saved mid-print already holds the new plot', () => {
     const r = rig();
     r.term.holdPrints = true;
@@ -627,6 +704,7 @@ describe('fault isolation', () => {
     expect(() => c.submit('run_pca(period = "Today")')).not.toThrow();
     expect(() => c.submit(STEP(0))).not.toThrow();
     expect(c.hintIndex).toBe(1);
+    expect(console.error).toHaveBeenCalled(); // swallowed for the student, but not silently
   });
 
   it('a command that throws prints a friendly line and does not count', async () => {
@@ -645,6 +723,7 @@ describe('fault isolation', () => {
       expect(term.output).toEqual([mod.INTERNAL_ERROR_LINE]);
       expect(c.badTries).toBe(0);
       expect(c.hintIndex).toBe(0);
+      expect(console.error).toHaveBeenCalled(); // the student sees only the friendly line; the cause is logged
     } finally {
       vi.doUnmock('../src/commands');
       vi.resetModules();

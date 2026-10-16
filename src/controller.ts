@@ -118,9 +118,10 @@ export class Controller {
   }
 
   submit(line: string): void {
-    this.settlePrinting();
     const raw = typeof line === 'string' ? line : String(line ?? '');
+    // Blank input is ignored completely, even while a log is printing: only a real line flushes the running log.
     if (raw.trim() === '') return;
+    this.settlePrinting();
     const shown = raw.length > MAX_ECHO_CHARS ? `${raw.slice(0, MAX_ECHO_CHARS)}…` : raw;
     this.t.echoInput(shown);
     this.record('input', shown);
@@ -150,6 +151,9 @@ export class Controller {
       return;
     }
 
+    // help() and clear() print at once and draw nothing. They are not recorded as the last command run, so they do
+    // not end the Predict beat that follows run_pca(FirstFarmers).
+    const housekeeping = res.command.name === 'help' || res.command.name === 'clear';
     if (out.clear) {
       this.t.clearScreen();
       this.lines = [];
@@ -159,14 +163,14 @@ export class Controller {
       const before = this.hint;
       this.hint = clampHint(advance(this.hint, res.command));
       if (before >= SCRIPT.length) this.extrasTick++;
-      this.lastRan = res.command;
+      if (!housekeeping) this.lastRan = res.command;
     }
     let target: PlotState | null = null;
     if (!out.refused && out.plot.kind !== 'none') {
       this.plot = reducePlot(this.plot, out.plot, this.data);
       target = this.plot;
     }
-    const stagger = !out.refused && res.command.name !== 'help' && res.command.name !== 'clear';
+    const stagger = !out.refused && !housekeeping;
     this.refreshHint();
     this.pendingRender = target;
     this.print(out.lines, stagger);
@@ -242,8 +246,9 @@ export class Controller {
     }
   }
 
-  /** What Esc and the three-tries auto-fill insert: script[i], or the extra the hint line is showing after the last step.
-   *  hintText derives its command from the same hintCommand(), so the prompt and the hint line cannot disagree. */
+  /** What Esc and the three-tries auto-fill insert: script[i], or the extra the hint line shows after the last step.
+   *  hintText does not call hintCommand; both read the script and the extras rotation through the same helpers in
+   *  hints.ts, and the "Esc always inserts what the hint line shows" test in tests/hints.test.ts pins that they agree. */
   private fillText(): string {
     return formatCommand(hintCommand(this.hint, this.extrasTick));
   }
