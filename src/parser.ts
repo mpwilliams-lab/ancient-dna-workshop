@@ -189,6 +189,14 @@ function suggest(c: Command): string {
 function clean(input: string): string {
   return input.normalize('NFKC').replace(ZERO_WIDTH, '').replace(/\t/g, ' ').replace(CONTROL, '');
 }
+// What comes along when a student copies from the screen: a prompt (`>` or `$`, however many and however spaced) and the hint
+// line's own label ("Next:" or "Try an extra:", any case, any spacing, as hints.ts NEXT_PREFIX and EXTRA_PREFIX show them).
+// Any run of them, in any order, in front of the command is dropped. tests/hints.test.ts parses every hint line as shown, so
+// a label that changes there fails a test here. Applied after clean(), so fullwidth and invisible characters are already gone.
+const LEAD_IN = /^(?:[>$]|\s|next\s*:|try\s+an\s+extra\s*:)+/i;
+function stripLeadIn(s: string): string { return s.replace(LEAD_IN, ''); }
+/** The prompts, labels and spaces at the front of a raw line, exactly as typed ('' when there are none). Tab completion keeps them in place. */
+export function leadInOf(raw: string): string { return LEAD_IN.exec(raw)?.[0] ?? ''; }
 const QUOTES = /["'`‘’“”]/g;
 function stripQuotes(s: string): string { return s.replace(QUOTES, '').trim(); }
 
@@ -373,8 +381,9 @@ export function parseCore(input: string): ParseResult {
   if (input.length > MAX_INPUT_LENGTH * 4) return fail('too_long', PARSE_TEXT.tooLong);
   let t = clean(input).trim();
   if (t.length > MAX_INPUT_LENGTH) return fail('too_long', PARSE_TEXT.tooLong);
-  // Forgive a copied prompt (> or $) in front, and any run of ; , and spaces after the command.
-  t = t.replace(/^[>$]+\s*/, '').replace(/[;,\s]+$/, '');
+  // Forgive a copied prompt (> or $, repeated or spaced) and the hint line's label ("Next:", "Try an extra:") in front,
+  // and any run of ; , and spaces after the command.
+  t = stripLeadIn(t).replace(/[;,\s]+$/, '');
   if (t === '') return fail('syntax', PARSE_TEXT.empty);
 
   const open = t.indexOf('(');
@@ -458,7 +467,7 @@ function completeValues(name: CommandName, inner: string): string[] {
 /** completions() without its safety net (see the header). Tests call it; app code calls completions(). */
 export function completionsCore(partial: string): string[] {
   if (typeof partial !== 'string' || partial.length > MAX_INPUT_LENGTH) return [];
-  const lead = clean(partial).replace(/^\s*[>$]*\s*/, '');
+  const lead = stripLeadIn(clean(partial));
   const open = lead.indexOf('(');
   if (open < 0) {
     const key = normKey(lead);

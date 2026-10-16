@@ -1,7 +1,7 @@
 // Wires parse -> execute -> hints -> plotState -> session, owns the three-tries counter
 // and the Enter-mid-print ordering (spec §4.2-§4.4, §7 persistence).
 import type { WorkshopData } from './types';
-import { parse, formatCommand, completions, type Command, type ParseError, type ParseResult } from './parser';
+import { parse, formatCommand, completions, leadInOf, type Command, type ParseError, type ParseResult } from './parser';
 import { execute, type CommandResult } from './commands';
 import { SCRIPT, advance, hintCommand, hintText } from './hints';
 import { INITIAL_PLOT, reducePlot, type PlotState } from './plotState';
@@ -51,6 +51,9 @@ function commonPrefix(xs: string[]): string {
 /** A completion is either a full prompt line (starts with the partial) or a token that replaces the partial's last token. */
 export function completeLine(partial: string, cand: string): string {
   if (cand.toLowerCase().startsWith(partial.toLowerCase())) return cand;
+  // A copied prompt or hint label in front of the command ("> ", "Next: ") stays as typed; the candidate completes what follows it.
+  const lead = leadInOf(partial);
+  if (lead !== '' && cand.toLowerCase().startsWith(partial.slice(lead.length).toLowerCase())) return lead + cand;
   const m = /[A-Za-z0-9_\-]*$/.exec(partial);
   const start = m ? partial.length - m[0].length : partial.length;
   const before = partial.slice(0, start);

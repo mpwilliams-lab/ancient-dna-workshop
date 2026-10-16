@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   COMMAND_NAMES, GENE_ALIASES, MAX_INPUT_LENGTH, PARSER_GENE_ORDER, PARSER_PERIOD_ORDER, PARSE_TEXT, PERIOD_ALIASES,
-  completions, completionsCore, editDistance, formatCommand, normKey, parse, parseCore,
+  completions, completionsCore, editDistance, formatCommand, leadInOf, normKey, parse, parseCore,
   type Command, type ParseResult,
 } from '../src/parser';
 import { ruleViolations } from './contentRules';
@@ -908,5 +908,143 @@ describe('fuzzing from the real vocabulary', () => {
   });
   it('Tab completion is exercised: lists come back for a good share of the inputs', () => {
     expect(run.completionLists).toBeGreaterThan(FUZZ_INPUTS / 20);
+  });
+});
+
+// =====================================================================================================
+// Added in the final-review fix wave. A student who types the hint line as it is shown ("Next: ..." or
+// "Try an extra: ...") or copies a prompt along with a command (once, twice, spaced) must not be told the
+// command is unknown: that is an incorrect try, and three in a row fill in the command they just typed.
+// =====================================================================================================
+describe('lead-ins: copied prompts and the hint line labels are forgiven (RF1)', () => {
+  // Written as escapes on purpose (see "source hygiene" above): no raw tab characters in this file.
+  const LEAD_INS: string[] = [
+    '> ', '$ ', '>', '$', '> > ', '>> ', '>>>', '$ $ ', '$>', ' > $ ', '\t> ',
+    'Next: ', 'Next:', 'next: ', 'NEXT: ', 'Next : ', 'Next   :   ', 'Next:\t',
+    'Try an extra: ', 'Try an extra:', 'try an extra: ', 'TRY AN EXTRA: ', 'Try  an   extra : ', 'Try\tan\textra:',
+    '> Next: ', '$ Try an extra: ', 'Next: > ', '> > Next: > ', 'Next: Next: ', 'Try an extra: Next: ',
+  ];
+
+  it('accepts `> > help()` (a repeated, spaced prompt) and the other spellings of the same thing', () => {
+    expect(parse('> > help()')).toEqual(ok({ name: 'help' }));
+    const rows: [string, Command][] = [
+      ['> > help()', { name: 'help' }],
+      ['>> help()', { name: 'help' }],
+      ['>>help()', { name: 'help' }],
+      ['$ $ help()', { name: 'help' }],
+      ['> $ > help()', { name: 'help' }],
+      ['Next: ancestry_test(person = "me")', { name: 'ancestry_test', person: 'me' }],
+      ['Try an extra: run_pca(period = "BronzeAge")', { name: 'run_pca', period: 'BronzeAge' }],
+      ['Try an extra: run_admixture(K = 3, period = "BellBeaker")', { name: 'run_admixture', K: 3, period: 'BellBeaker' }],
+      ['next:run_pca(period = "IronAge")', { name: 'run_pca', period: 'IronAge' }],
+      ['NEXT : RUN_PCA(PERIOD = "IRONAGE")', { name: 'run_pca', period: 'IronAge' }],
+      ['try   an   extra :   run_pca iron age', { name: 'run_pca', period: 'IronAge' }],
+      ['> Next: allele_freq(gene = "HLA-DQ2")', { name: 'allele_freq', gene: 'HLA-DQ2' }],
+      ['Next: ancestry_test(person = "me");', { name: 'ancestry_test', person: 'me' }],
+      ['Ｎｅｘｔ： help()', { name: 'help' }], // fullwidth "Next:" (NFKC folds it, like the fullwidth command in ACCEPT)
+    ];
+    for (const [input, command] of rows) expect(parseCore(input), input).toEqual(ok(command));
+  });
+
+  it('every command the workshop can run still parses to itself behind every lead-in', () => {
+    expect(WORKSHOP_COMMANDS.length).toBe(35);
+    for (const lead of LEAD_INS) {
+      for (const c of WORKSHOP_COMMANDS) expect(parseCore(lead + formatCommand(c)), JSON.stringify(lead + formatCommand(c))).toEqual(ok(c));
+    }
+  });
+
+  it('every accepted spelling in the ACCEPT table parses the same behind every lead-in', () => {
+    for (const lead of LEAD_INS) {
+      for (const [input, command] of ACCEPT) expect(parseCore(lead + input), JSON.stringify(lead + input)).toEqual(ok(command));
+    }
+  });
+
+  it('every REJECT row is rejected the same way behind every lead-in (kind, suggestion and message unchanged)', () => {
+    for (const lead of LEAD_INS) {
+      for (const [input] of REJECT) {
+        const behind = parseCore(lead + input);
+        const alone = parseCore(input);
+        expect(behind, JSON.stringify(lead + input)).toEqual(alone);
+      }
+    }
+  });
+
+  it('a lead-in with nothing after it is the empty-input message, like a bare prompt', () => {
+    const empty = { ok: false, kind: 'syntax', message: PARSE_TEXT.empty };
+    for (const lead of ['>', '> >', '$', 'Next:', 'Next: ', 'next :', 'Try an extra:', 'Try an extra: ', '> Next: ', 'Next: >']) {
+      expect(parseCore(lead), JSON.stringify(lead)).toEqual(empty);
+    }
+  });
+
+  it('a label needs its colon and its own words: only the real hint labels are forgiven', () => {
+    // Unchanged behaviour on purpose: these are not what the hint line shows, so they are not forgiven.
+    for (const input of ['Next ancestry_test(person = "me")', 'Try an extra run_pca(period = "BronzeAge")', 'Try: run_pca(period = "BronzeAge")']) {
+      const r = parseCore(input);
+      expect(r.ok, input).toBe(false);
+    }
+  });
+
+  it('a label does not make a bad command good, and its messages never echo the student', () => {
+    const r = parseCore('Next: run_pca(period = "Neolithic")');
+    expect(r).toEqual(parseCore('run_pca(period = "Neolithic")'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).not.toMatch(/neolithic|next/i);
+    expect(parseCore('Try an extra: Neolithic')).toEqual(parseCore('Neolithic'));
+  });
+
+  it('a label is only a lead-in: after the command it is not stripped, so a second command stays one-at-a-time', () => {
+    const r = parseCore('run_pca(period = "Roman") Next: help()');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.kind).toBe('syntax');
+  });
+
+  it('completions skip the same lead-ins, so Tab works on a line that starts with the hint label', () => {
+    const partials = ['', 'r', 'run_p', 'RUN PCA', 'he', 'a', 'run_pca(', 'run_pca(period = "Ir', 'run_pca ir', 'allele_freq(gene = "H', 'ancestry_test(person = "m', 'run_admixture(K = 3, p', 'zzz', 'run_pca(period = "IronAge")'];
+    for (const lead of LEAD_INS) {
+      for (const partial of partials) expect(completionsCore(lead + partial), JSON.stringify(lead + partial)).toEqual(completionsCore(partial));
+    }
+    expect(completionsCore('Next: run_p')).toEqual(['run_pca(period = "']);
+    expect(completions('> > run_pca(period = "Ir')).toEqual(['run_pca(period = "IronAge")']);
+  });
+
+  it('3,000 random vocabulary inputs mean the same with a lead-in in front (parse and completions)', () => {
+    const rnd = mulberry32(20261031);
+    let compared = 0;
+    for (let n = 0; n < 3000; n++) {
+      const body = fuzzInput(rnd);
+      const lead = choose(rnd, LEAD_INS);
+      if ((lead + body).length > MAX_INPUT_LENGTH) continue; // the cap counts the lead-in too, so those inputs are not comparable
+      expect(parseCore(lead + body), JSON.stringify(lead + body)).toEqual(parseCore(body));
+      expect(completionsCore(lead + body), JSON.stringify(lead + body)).toEqual(completionsCore(body));
+      compared++;
+    }
+    expect(compared).toBeGreaterThan(2000);
+  });
+});
+
+// ---------- leadInOf: the part of a raw line that completeLine keeps in front ----------
+describe('leadInOf (what a completion keeps in front of the command)', () => {
+  it('returns the prompts, labels and spaces in front of the command, exactly as typed', () => {
+    expect(leadInOf('run_pca')).toBe('');
+    expect(leadInOf('')).toBe('');
+    expect(leadInOf('> run_pca')).toBe('> ');
+    expect(leadInOf('> > help()')).toBe('> > ');
+    expect(leadInOf('$>help')).toBe('$>');
+    expect(leadInOf('Next: run_p')).toBe('Next: ');
+    expect(leadInOf('next:run_p')).toBe('next:');
+    expect(leadInOf('  Try  an   extra : allele_freq')).toBe('  Try  an   extra : ');
+    expect(leadInOf('> Next: > run_pca')).toBe('> Next: > ');
+    expect(leadInOf('Next: ')).toBe('Next: ');
+    // not a lead-in: no colon, a different label, or the label in the middle
+    expect(leadInOf('Next run_pca')).toBe('');
+    expect(leadInOf('Try: run_pca')).toBe('');
+    expect(leadInOf('run_pca Next: ')).toBe('');
+    expect(leadInOf('nextrun_pca(period = "Roman")')).toBe('');
+  });
+  it('agrees with what parse and completions skip: the rest of the line is what they read', () => {
+    for (const line of ['> run_pca(period = "Roman")', 'Next: help()', 'Try an extra: run_pca(period = "all")', '> > Next: ancestry_test(person = "me")']) {
+      const rest = line.slice(leadInOf(line).length);
+      expect(parseCore(line)).toEqual(parseCore(rest));
+    }
   });
 });

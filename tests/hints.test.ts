@@ -163,3 +163,54 @@ describe('hintText and hintCommand', () => {
     for (const s of texts) expect(ruleViolations(s), s).toEqual([]);
   });
 });
+
+// ---------- final review: the hint line typed exactly as it is shown ----------
+// A student who types the whole hint line, label and all, is doing what the screen asks. Before this fix the parser took
+// "Next:" for part of an unknown command name, so that line counted as an incorrect try (three in a row fill in the very
+// command the student had just typed). The label is forgiven the way a copied prompt is.
+describe('the hint line, typed exactly as shown, runs the command it names (RF1)', () => {
+  const TICKS = 2 * EXTRAS.length + 1; // a full rotation twice, so the wrap-around is covered too
+
+  it('parse(hintText(i, null, t)) is ok, with the same command as hintCommand(i, t), for every guided step and every extras tick', () => {
+    let checked = 0;
+    for (let i = 0; i <= SCRIPT.length; i++) {
+      for (let t = 0; t < TICKS; t++) {
+        const shown = hintText(i, null, t);
+        expect(parse(shown), `i=${i} t=${t}: ${shown}`).toEqual({ ok: true, command: hintCommand(i, t) });
+        checked++;
+      }
+    }
+    expect(checked).toBe((SCRIPT.length + 1) * TICKS);
+  });
+
+  it('the two labels are the ones the parser forgives, and every extra is shown with its own label', () => {
+    expect(NEXT_PREFIX).toBe('Next: ');
+    expect(EXTRA_PREFIX).toBe('Try an extra: ');
+    for (let t = 0; t < EXTRAS.length; t++) {
+      expect(hintText(SCRIPT.length, null, t)).toBe(`Try an extra: ${formatCommand(EXTRAS[t]!)}`);
+      expect(parse(hintText(SCRIPT.length, null, t))).toEqual({ ok: true, command: EXTRAS[t] });
+    }
+  });
+
+  it('still runs when a prompt is copied in front of it, however many and however spaced, in any case', () => {
+    const fronts = ['', '> ', '$ ', '> > ', '>> ', ' > $ ', '\t> '];
+    for (let i = 0; i <= SCRIPT.length; i++) {
+      for (let t = 0; t < EXTRAS.length; t++) {
+        const shown = hintText(i, null, t);
+        const want = { ok: true, command: hintCommand(i, t) };
+        for (const front of fronts) {
+          expect(parse(front + shown), JSON.stringify(front + shown)).toEqual(want);
+          expect(parse(front + shown.toLowerCase()), JSON.stringify(front + shown.toLowerCase())).toEqual(want);
+          expect(parse(front + shown.toUpperCase()), JSON.stringify(front + shown.toUpperCase())).toEqual(want);
+        }
+      }
+    }
+  });
+
+  it('the predict line is not a label and a command: it is answered with a did-you-mean for the command it names', () => {
+    // Boundary of this fix, not a goal of it: PREDICT_HINT is a sentence, so only the command inside it is offered back.
+    const r = parse(PREDICT_HINT);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.suggestion).toBe('run_pca(period = "BellBeaker")');
+  });
+});

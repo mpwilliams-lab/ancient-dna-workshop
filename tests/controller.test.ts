@@ -494,6 +494,19 @@ describe('Tab completion', () => {
     expect(completeLine('', 'help()')).toBe('help()');
   });
 
+  // Final review: the parser forgives a copied prompt and the hint line's label, and completions() skips them. The line that
+  // Tab puts back must keep them in front, not paste the whole command a second time inside the quotes.
+  it('completeLine keeps a copied prompt or hint label in front and completes what follows it', () => {
+    expect(completeLine('> run_pca(period = "Iro', 'run_pca(period = "IronAge")')).toBe('> run_pca(period = "IronAge")');
+    expect(completeLine('Next: run_pca(period = "Iro', 'run_pca(period = "IronAge")')).toBe('Next: run_pca(period = "IronAge")');
+    expect(completeLine('Try an extra: allele_freq(gene = "H', 'allele_freq(gene = "HERC2")')).toBe('Try an extra: allele_freq(gene = "HERC2")');
+    expect(completeLine('> > Next: ru', 'run_pca(period = "')).toBe('> > Next: run_pca(period = "');
+    expect(completeLine('Next: ', 'help()')).toBe('Next: help()');
+    expect(completeLine('next:run_p', 'run_pca(period = "')).toBe('next:run_pca(period = "');
+    // a token completion after a label still replaces only the last word
+    expect(completeLine('Next: run_pca(period = "Iro', 'IronAge')).toBe('Next: run_pca(period = "IronAge');
+  });
+
   it('completes a command name', () => {
     const r = rig();
     expect(r.c.tab('run_p').toLowerCase().startsWith('run_pca')).toBe(true);
@@ -504,6 +517,17 @@ describe('Tab completion', () => {
     const out = r.c.tab('run_pca(period = "Iro');
     expect(out.startsWith('run_pca(period = "')).toBe(true);
     expect(out).toContain('IronAge');
+  });
+
+  it('Tab on a line that starts with a prompt or the hint label completes the command after it, keeping what the student typed in front', () => {
+    const r = rig();
+    expect(r.c.tab('Next: run_pca(period = "Iro')).toBe('Next: run_pca(period = "IronAge")');
+    expect(r.c.tab('Try an extra: run_pca(period = "Vik')).toBe('Try an extra: run_pca(period = "Viking")');
+    expect(r.c.tab('> > help')).toBe('> > help()');
+    expect(r.c.tab('Next: run_p')).toBe('Next: run_pca(period = "');
+    // several options: nothing is filled in beyond the common text, and the list is printed
+    expect(r.c.tab('Next: allele_freq(gene = "H')).toBe('Next: allele_freq(gene = "H');
+    expect(r.term.output.join(' ')).toContain('allele_freq(gene = "HERC2")');
   });
 
   it('leaves unknown text alone', () => {
