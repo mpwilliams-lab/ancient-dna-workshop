@@ -1,5 +1,7 @@
 // Command parser for the terminal (spec §4.1, §4.2).
 // Pure module: no DOM, no data. Never throws: parse() and completions() catch everything.
+// parseCore() and completionsCore() are the same functions without that safety net. Tests call them so that an internal
+// exception fails a test instead of turning into a silent syntax error; app code calls parse() and completions().
 // Error messages never echo the student's own text (keeps §6 rule 1 safe and long pastes short).
 import type { GeneId, PeriodId } from './types';
 
@@ -60,7 +62,9 @@ const PARAMS: Readonly<Record<CommandName, readonly ParamName[]>> = {
   run_pca: ['period'], run_admixture: ['K', 'period'], allele_freq: ['gene'], ancestry_test: ['person'],
 };
 
-const ZERO_WIDTH = /[​-‍⁠﻿]/g;
+// Zero-width space, non-joiner and joiner (U+200B to U+200D), word joiner (U+2060) and byte-order mark (U+FEFF).
+// Written as escapes on purpose: raw invisible characters are easy to lose in an editor and impossible to review.
+const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/g;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F]/g;
 
@@ -172,9 +176,18 @@ function fail(kind: ErrorKind, base: string, suggestion?: string, fallbackTail?:
   return { ok: false, kind, message: fallbackTail ? `${base} ${fallbackTail}` : base };
 }
 
+/**
+ * What a did-you-mean offers for a command. The workshop runs K = 3 only, so run_admixture is always suggested with K = 3,
+ * never with the student's own number (that keeps a message free of anything the student typed).
+ */
+function suggest(c: Command): string {
+  return formatCommand(c.name === 'run_admixture' ? { ...c, K: 3 } : c);
+}
+
 // ---- input cleaning and splitting ----
+// NFKC already folds a non-breaking space (and every other no-break or wide space) to a plain U+0020, so none needs a replacement of its own.
 function clean(input: string): string {
-  return input.normalize('NFKC').replace(ZERO_WIDTH, '').replace(/\t/g, ' ').replace(CONTROL, '').replace(/ /g, ' ');
+  return input.normalize('NFKC').replace(ZERO_WIDTH, '').replace(/\t/g, ' ').replace(CONTROL, '');
 }
 const QUOTES = /["'`‘’“”]/g;
 function stripQuotes(s: string): string { return s.replace(QUOTES, '').trim(); }
@@ -331,7 +344,7 @@ function parseArgs(name: CommandName, argText: string): ParseResult {
   const first = [...b.problems].sort((x, y) => KIND_ORDER.indexOf(x.kind) - KIND_ORDER.indexOf(y.kind))[0];
   const allFixable = b.problems.every((p) => p.fixable);
   const fixed = allFixable ? (b.cross ?? build(name, b.values)) : undefined;
-  return fail(first.kind, first.base, fixed ? formatCommand(fixed) : undefined, first.tail);
+  return fail(first.kind, first.base, fixed ? suggest(fixed) : undefined, first.tail);
 }
 
 /** Text that is only a value (`IronAge`, `"LCT"`, `me`) suggests the command that takes it. */
@@ -346,20 +359,22 @@ function commandForValue(text: string): Command | undefined {
 
 function unknownCommand(fixedName: CommandName | undefined, argText: string, whole: string): ParseError {
   const byValue = commandForValue(whole);
-  if (byValue) return fail('unknown_command', PARSE_TEXT.unknownCommand, formatCommand(byValue));
+  if (byValue) return fail('unknown_command', PARSE_TEXT.unknownCommand, suggest(byValue));
   if (!fixedName) return fail('unknown_command', PARSE_TEXT.unknownCommand, undefined, PARSE_TEXT.seeHelp);
   const r = parseArgs(fixedName, argText);
-  if (r.ok) return fail('unknown_command', PARSE_TEXT.unknownCommand, formatCommand(r.command));
+  if (r.ok) return fail('unknown_command', PARSE_TEXT.unknownCommand, suggest(r.command));
   if (r.suggestion !== undefined) return fail('unknown_command', PARSE_TEXT.unknownCommand, r.suggestion);
   return fail('unknown_command', PARSE_TEXT.unknownCommand, fixedName);
 }
 
-function parseInner(input: string): ParseResult {
+/** parse() without its safety net (see the header). Tests call it; app code calls parse(). */
+export function parseCore(input: string): ParseResult {
   if (typeof input !== 'string') return fail('syntax', PARSE_TEXT.empty);
   if (input.length > MAX_INPUT_LENGTH * 4) return fail('too_long', PARSE_TEXT.tooLong);
   let t = clean(input).trim();
   if (t.length > MAX_INPUT_LENGTH) return fail('too_long', PARSE_TEXT.tooLong);
-  t = t.replace(/^[>$]+\s*/, '').replace(/[;\s]+$/, '');
+  // Forgive a copied prompt (> or $) in front, and any run of ; , and spaces after the command.
+  t = t.replace(/^[>$]+\s*/, '').replace(/[;,\s]+$/, '');
   if (t === '') return fail('syntax', PARSE_TEXT.empty);
 
   const open = t.indexOf('(');
@@ -373,13 +388,13 @@ function parseInner(input: string): ParseResult {
     if (!name) {
       if (headKey === '') {
         const byValue = commandForValue(t);
-        return byValue ? fail('unknown_command', PARSE_TEXT.unknownCommand, formatCommand(byValue)) : fail('syntax', PARSE_TEXT.syntax);
+        return byValue ? fail('unknown_command', PARSE_TEXT.unknownCommand, suggest(byValue)) : fail('syntax', PARSE_TEXT.syntax);
       }
       return unknownCommand(closest(headKey, CMD_FUZZY_TABLE), inner.replace(/[()]/g, ''), t);
     }
     if (trailing !== '' || /[()]/.test(inner)) {
       const retry = parseArgs(name, t.slice(open + 1).replace(/[()]/g, ''));
-      return fail('syntax', PARSE_TEXT.oneAtATime, retry.ok ? formatCommand(retry.command) : undefined);
+      return fail('syntax', PARSE_TEXT.oneAtATime, retry.ok ? suggest(retry.command) : undefined);
     }
     return parseArgs(name, inner);
   }
@@ -400,7 +415,7 @@ function parseInner(input: string): ParseResult {
 
 export function parse(input: string): ParseResult {
   try {
-    return parseInner(input);
+    return parseCore(input);
   } catch {
     return fail('syntax', PARSE_TEXT.syntax);
   }
@@ -440,7 +455,8 @@ function completeValues(name: CommandName, inner: string): string[] {
   return matchValues(valuePart, PARSER_PERIOD_ORDER, PERIOD_TABLE).map((period) => formatCommand({ name: 'run_admixture', K: 3, period }));
 }
 
-function completeInner(partial: string): string[] {
+/** completions() without its safety net (see the header). Tests call it; app code calls completions(). */
+export function completionsCore(partial: string): string[] {
   if (typeof partial !== 'string' || partial.length > MAX_INPUT_LENGTH) return [];
   const lead = clean(partial).replace(/^\s*[>$]*\s*/, '');
   const open = lead.indexOf('(');
@@ -463,7 +479,7 @@ function completeInner(partial: string): string[] {
 
 export function completions(partial: string): string[] {
   try {
-    return completeInner(partial);
+    return completionsCore(partial);
   } catch {
     return [];
   }
