@@ -941,7 +941,7 @@ describe('lead-ins: copied prompts and the hint line labels are forgiven (RF1)',
       ['try   an   extra :   run_pca iron age', { name: 'run_pca', period: 'IronAge' }],
       ['> Next: allele_freq(gene = "HLA-DQ2")', { name: 'allele_freq', gene: 'HLA-DQ2' }],
       ['Next: ancestry_test(person = "me");', { name: 'ancestry_test', person: 'me' }],
-      ['Ｎｅｘｔ： help()', { name: 'help' }], // fullwidth "Next:" (NFKC folds it, like the fullwidth command in ACCEPT)
+      ['\uFF2E\uFF45\uFF58\uFF54\uFF1A help()', { name: 'help' }], // fullwidth "Next:" (NFKC folds it, like the fullwidth command in ACCEPT)
     ];
     for (const [input, command] of rows) expect(parseCore(input), input).toEqual(ok(command));
   });
