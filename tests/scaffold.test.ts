@@ -9,9 +9,11 @@ describe('scaffold', () => {
     expect(pkg.devDependencies).toEqual({
       '@playwright/test': '1.63.0',
       '@types/node': '24.13.6',
+      '@types/pngjs': '6.0.5',
       '@types/qrcode': '1.5.6',
       jsdom: '30.1.1',
       jsqr: '1.4.0',
+      pngjs: '7.0.0',
       qrcode: '1.5.4',
       typescript: '5.9.3',
       vite: '8.3.1',

@@ -9,3 +9,4 @@ blob-report/
 .DS_Store
 # Machine-specific path to the data build output, read by scripts/sync-data.mjs. Never commit it.
 local-paths.json
+.runsheet/
