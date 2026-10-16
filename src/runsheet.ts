@@ -2,10 +2,11 @@
 import type { ConsumerShare, PeriodId, WorkshopData } from './types';
 import type { Command } from './parser';
 import { formatCommand } from './parser';
-import { SCRIPT } from './hints';
+import { EXTRAS, SCRIPT } from './hints';
 import {
-  ANGLO_SAXON_TAKEAWAY, BEAKER_CALLOUT, beakerBridge, CONSUMER_NOTE, ME_RESULT, NORTH_SEA_LABEL,
-  PAGES_URL, PERIOD_LABELS, PREDICT_HINT, ROMAN_CARD, traitCaption, traitSourceLabel, WRAP_BUTTON, WRAP_LINE,
+  ANGLO_SAXON_TAKEAWAY, BEAKER_CALLOUT, beakerBridge, CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_QUESTION, ME_RESULT,
+  NORTH_SEA_LABEL, PAGES_URL, PERIOD_LABELS, PREDICT_HINT, RESTORED_NOTICE, ROMAN_CARD, traitCaption, traitSourceLabel,
+  WRAP_BUTTON, WRAP_LINE,
 } from './content';
 
 /** The live site. Re-exported from content.ts so the sheet always names the address the wrap screen and QR code use. */
@@ -39,7 +40,7 @@ export function beats(data: WorkshopData): Beat[] {
   return [
     { min: '0–3', beat: 'Hook', commands: [at(0)], say: [
       `This is what a consumer DNA test tells an example customer: ${me}.`,
-      'Can a test like this tell us who lived in Britain long ago? Hold on to that question.',
+      `${HOOK_QUESTION} Hold on to that question.`,
     ] },
     { min: '3–7', beat: "Load + today's Europe", commands: [at(1), at(2)], say: [
       `load_genomes() loads real ancient and modern genomes. The map uses ${data.logs.snps_used.toLocaleString('en-US')} DNA positions.`,
@@ -59,7 +60,8 @@ export function beats(data: WorkshopData): Beat[] {
     ] },
     { min: '16–20', beat: 'Beat 3: Anglo-Saxons (migration)', commands: [at(8), at(9)], say: [
       `${PERIOD_LABELS.AngloSaxon}-period Britons move toward the "${NORTH_SEA_LABEL}" marker. Eastern-England burials are furthest along (Gretzinger et al. 2022: up to 76% continental ancestry).`,
-      `Now the bars: the new outlined ${PERIOD_LABELS.AngloSaxon} bar looks almost the same as the ${PERIOD_LABELS.IronAge} and ${PERIOD_LABELS.Roman} bars.`,
+      `Now the bars: the bars added since the last ADMIXTURE run are outlined: ${PERIOD_LABELS.IronAge}, ${PERIOD_LABELS.Roman} and ${PERIOD_LABELS.AngloSaxon}.`,
+      `The ${PERIOD_LABELS.AngloSaxon} bar looks almost the same as the ${PERIOD_LABELS.IronAge} and ${PERIOD_LABELS.Roman} bars.`,
       ANGLO_SAXON_TAKEAWAY,
     ] },
     { min: '20–22', beat: 'Beat 4: Today + consumer DNA', commands: [at(10)], say: [
@@ -77,7 +79,10 @@ export function beats(data: WorkshopData): Beat[] {
       WRAP_LINE,
       'WWU Biology: point to the QR code to take the app home.',
     ] },
-    { min: '30–35', beat: 'Q&A', commands: [], say: ['Questions.'] },
+    { min: '30–35', beat: 'Q&A', commands: [], say: [
+      'Questions.',
+      `Anyone who wants more can type help() to list the commands. After the last guided step the hint line suggests one extra at a time: ${EXTRAS.map(formatCommand).join(', ')}.`,
+    ] },
   ];
 }
 
@@ -87,6 +92,13 @@ export function sayLines(data: WorkshopData): string[] {
 }
 
 const cell = (s: string): string => s.replace(/\|/g, '\\|');
+
+/** The AncestryDNA definition the app quotes in CONSUMER_TAKEAWAY, without its quote marks. Fails loudly if content.ts changes shape. */
+function ancestryPanelQuote(): string {
+  const quoted = /"([^"]+)"/.exec(CONSUMER_TAKEAWAY);
+  if (!quoted) throw new Error('CONSUMER_TAKEAWAY no longer quotes the AncestryDNA definition; update src/runsheet.ts');
+  return quoted[1];
+}
 
 export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePath: string): string {
   const steppe = data.admixture.beaker_steppe_pct;
@@ -155,8 +167,8 @@ export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePa
   L.push('');
   L.push('- Name periods only: "First farmers / Stonehenge builders", "Bell Beaker", "Bronze Age", "Iron Age", "Roman", "Anglo-Saxon", "Viking", "Britain today". Describe the earliest group only by order: "the people living in Britain before the Beaker newcomers".');
   L.push('- Do not give prehistoric dates or ages. The only time phrases on screen are "about 2,000 years ago" (Kerner), "about 100 generations ago" (Colbran) and "over the last 4,000 years" (Akbari); Roman and later periods may use CE dates.');
-  L.push('- If someone asks how old the bones are, answer with the wrap line: "We are looking at the genetic family tree: the physical pattern of who is related to whom in the DNA. That holds no matter which timeline you use."');
-  L.push('- Consumer tests: quote only AncestryDNA\'s own white papers (it compares customers with "people with long family histories in a particular region"). No 23andMe-specific numbers.');
+  L.push(`- If someone asks how old the bones are, answer with the wrap line: "${WRAP_LINE}"`);
+  L.push(`- Consumer tests: quote only AncestryDNA's own white papers (it compares customers with "${ancestryPanelQuote()}"). No 23andMe-specific numbers.`);
   L.push('- The consumer-test labels are illustrative, not a measurement; "Scandinavian" stands in for the North Sea region, not Vikings.');
   L.push('');
   L.push('## Before each group (every station)');
@@ -175,7 +187,7 @@ export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePa
   L.push(`- [ ] Pages: open ${PAGES_URL} on the lab network; run the first three commands.`);
   L.push(`- [ ] Offline: copy \`${OFFLINE_NAME}\` from the USB stick or the lab shared drive onto every lab machine's desktop; double-click it on two machines and run \`load_genomes()\`.`);
   L.push('- [ ] Practise `?reset` on both the Pages URL and the desktop copy.');
-  L.push('- [ ] Refresh mid-session once: the session comes back with "Restored previous session — reload with ?reset to start fresh".');
+  L.push(`- [ ] Refresh mid-session once: the session comes back with "${RESTORED_NOTICE}".`);
   L.push('- [ ] Timed dry run through the wrap: target about 30 minutes.');
   L.push('');
   L.push('## Fallbacks');
@@ -185,10 +197,10 @@ export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePa
   L.push(`| Pages URL will not load | Use the desktop copy \`${OFFLINE_NAME}\`. |`);
   L.push('| A station is frozen or shows an error | Press F5. The session restores; if it does not, reload with `?reset` and have the student press Esc + Enter to catch up (every command works from the start). |');
   L.push('| A student is lost | Esc fills in the hinted command; Enter runs it. |');
-  L.push('| A student is far behind | They can skip ahead: run the command you are on; the plots follow the last command. |');
+  L.push('| A student is far behind | Have them press Esc to fill in their next guided step, then Enter, and repeat until they catch up (the hint line shows that step). Skipping a step leaves their hint behind: it only moves on when the hinted command is run. |');
   L.push('| Projector shows a cut-off page | Press F11 on the instructor machine; Ctrl+0 resets the zoom. |');
   L.push('| A trait plot looks wrong | Read its caption aloud and move on; captions are exact (spec §6 rule 6). |');
-  L.push('| Running long | Skip the per-person bars and the Bronze Age / Viking extras; say the hook aloud instead of typing it. |');
+  L.push('| Running long | Drop the hook discussion, not the command: ask the question aloud, then have students press Esc and Enter (about 10 s). Skipping the command leaves every hint stuck on it. Leave out the optional extras (Bronze Age, Viking, per-person bars). |');
   L.push('');
   return L.join('\n');
 }
