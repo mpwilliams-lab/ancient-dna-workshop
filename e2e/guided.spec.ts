@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { SCRIPT } from '../src/hints';
-import { formatCommand } from '../src/parser';
-import { beakerBridge, HLA_TEXT_CARD, PERIOD_LABELS, ROMAN_CARD } from '../src/content';
+import { formatCommand, PARSE_TEXT } from '../src/parser';
+import { beakerBridge, EAST_ENGLAND_LEGEND, HLA_TEXT_CARD, PERIOD_LABELS, ROMAN_CARD } from '../src/content';
 import { centreOf, DATA, freshStart, hintIndex, idle, plotSettled, run, screenViolations, watch } from './helpers';
 
 test('the full guided script runs over file:// with zero network requests and no page errors', async ({ page }) => {
@@ -42,6 +42,19 @@ test('the full guided script runs over file:// with zero network requests and no
     if (step.name === 'run_pca' && step.period === 'Roman') {
       // Spec §3 beat 2: run_pca(period = "Roman") prints the Roman card in the terminal.
       await expect(page.locator('#terminal')).toContainText(ROMAN_CARD);
+    }
+
+    if (step.name === 'run_pca') {
+      // Beat 3: the black-outlined eastern-England points are explained in the legend, from the real data's `east` flags,
+      // and only once the Anglo-Saxon layer is drawn (the last run_pca step of the script).
+      const item = page.locator('#plot .legend-item[data-legend="east"]');
+      if (step.period === 'AngloSaxon') {
+        await expect(item).toHaveCount(1);
+        await expect(item).toHaveText(EAST_ENGLAND_LEGEND);
+        expect(await page.locator('#plot .pt.east').count(), 'outlined points on the plot').toBeGreaterThan(0);
+      } else {
+        await expect(item, `after ${cmd}`).toHaveCount(0);
+      }
     }
 
     if (step.name === 'allele_freq') {
@@ -108,5 +121,21 @@ test('Enter while a log is printing keeps plot actions in command order', async 
   await run(page, 'run_pca(period = "AngloSaxon")');
   await plotSettled(page);
   await expect(page.locator('#plot .centre[data-centre="AngloSaxon"]')).toHaveCount(1);
+  expect(w.errors).toEqual([]);
+});
+
+test('typing the hint line exactly as shown, label and all, runs that step: no unknown-command error, and the hint moves on', async ({ page }) => {
+  const w = watch(page);
+  await freshStart(page);
+  // The first three steps (hook, load, Today) show "Next: <command>"; the fourth onwards is covered at unit level for every
+  // step and every extra (tests/hints.test.ts), since the predict line replaces the hint after run_pca(FirstFarmers).
+  for (let i = 0; i < 3; i++) {
+    const shown = ((await page.locator('#terminal .term-hint').textContent()) ?? '').trim();
+    expect(shown, `the hint before step ${i}`).toBe(`Next: ${formatCommand(SCRIPT[i])}`);
+    await run(page, shown, { typeDelay: 5 });
+    expect(await hintIndex(page), `after typing "${shown}"`).toBe(i + 1);
+  }
+  await expect(page.locator('#terminal')).not.toContainText(PARSE_TEXT.unknownCommand);
+  expect(w.requests).toEqual([]);
   expect(w.errors).toEqual([]);
 });
