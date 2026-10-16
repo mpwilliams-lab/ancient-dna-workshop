@@ -46,4 +46,13 @@ describe('a fixture build', () => {
     const html = readFileSync(join(out, 'index.html'), 'utf8');
     expect(html).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|sendBeacon|modulepreload/);
   }, 60_000);
+
+  it('keeps the inline icon link, so the browser never asks the server for /favicon.ico', () => {
+    const out = mkdtempSync(join(tmpdir(), 'fixture-build-'));
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const key of Object.keys(env)) if (key === 'NODE_ENV' || key.startsWith('VITEST')) delete env[key];
+    const r = spawnSync(process.execPath, [VITE, 'build', '--mode', 'fixture', '--outDir', out, '--emptyOutDir'], { cwd: ROOT, env, encoding: 'utf8' });
+    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+    expect(readFileSync(join(out, 'index.html'), 'utf8')).toMatch(/<link rel="icon" href="data:[^"]*"\s*\/?>/);
+  }, 60_000);
 });

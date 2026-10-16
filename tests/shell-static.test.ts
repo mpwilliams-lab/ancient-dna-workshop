@@ -14,6 +14,13 @@ describe('shell static files', () => {
     expect(css).not.toMatch(/@import|@font-face|url\(/i);
     expect(html).not.toMatch(/(src|href)="https?:/i);
   });
+  it('declares an inline data: icon, so no browser asks the server for /favicon.ico', () => {
+    const head = /<head>([\s\S]*?)<\/head>/i.exec(html)?.[1] ?? '';
+    const links = head.match(/<link\b[^>]*>/gi) ?? [];
+    expect(links.some((l) => /\brel="icon"/.test(l))).toBe(true);
+    // Nothing the head links to is fetched: every <link> carries its content inline.
+    for (const l of links) expect(l).toMatch(/\bhref="data:/);
+  });
   it('locks the page itself against scrolling (terminal output scrolls inside its pane)', () => {
     expect(css).toMatch(/html,\s*body\s*\{[^}]*overflow:\s*hidden/);
     expect(css).toMatch(/#terminal \.term-out\s*\{[^}]*overflow-y:\s*auto/);

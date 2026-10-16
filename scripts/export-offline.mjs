@@ -1,5 +1,5 @@
 // Copies the single-file build (dist/index.html) to the offline copy, after checking that it is fully
-// self-contained (no external scripts, styles, images, fonts or imports).
+// self-contained (no external scripts, styles, images, fonts or imports; a <link> must be a data: URL).
 // Usage: node scripts/export-offline.mjs [outFile] [srcFile]
 // No machine-specific path lives in this repo. Without an outFile argument, the destination folder comes from, in order:
 //   1. the WORKSHOP_OFFLINE_DIR environment variable, or
@@ -50,7 +50,9 @@ const html = bytes.toString('utf8');
 const problems = [];
 const markupChecks = [
   [/<script\b[^>]*\bsrc\s*=/i, 'a <script src=...> (scripts must be inlined)'],
-  [/<link\b[^>]*\bhref\s*=/i, 'a <link href=...> (styles/icons must be inlined)'],
+  // A data: href is inline content (index.html's <link rel="icon" href="data:,"> keeps browsers from asking for /favicon.ico).
+  // The lookahead sits right after `=` so the engine cannot back off into the quote or the spaces and flag a data: URL.
+  [/<link\b[^>]*\bhref\s*=(?!\s*["']?data:)/i, 'a <link href=...> that is not a data: URL (styles/icons must be inlined)'],
   [/<(img|iframe|source|video|audio|embed)\b[^>]*\bsrc\s*=\s*["']?(?!data:)/i, 'an element loading a non-data: src'],
 ];
 // Only CSS inside <style> is checked for url(: the inlined JS legitimately contains `new URL(`.

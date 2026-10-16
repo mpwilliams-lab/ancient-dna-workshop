@@ -37,6 +37,31 @@ describe('scripts/export-offline.mjs', () => {
     expect(r.status, why).toBe(1);
     expect(r.stderr).toContain('is not self-contained');
   });
+  // index.html declares <link rel="icon" href="data:,"> so browsers never ask the server for /favicon.ico. A data: URL
+  // is inline content, so it is self-contained; anything that would be fetched is not.
+  it.each([
+    ['<link rel="icon" href="data:,">'],
+    ["<link rel='icon' href='data:,'>"],
+    ['<link rel="icon" href = "data:," />'],
+    ['<link rel="icon" href=data:,>'],
+    ['<link rel="icon" href="data:image/png;base64,AA==">'],
+  ])('accepts an inline data: icon link: %s', (snippet) => {
+    const r = exportTo(GOOD.replace('<head>', `<head>${snippet}`));
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(r.out, 'utf8')).toContain(snippet);
+  });
+  it.each([
+    ['<link rel="icon" href="/favicon.ico">'],
+    ['<link rel="icon" href="favicon.png">'],
+    ['<link rel="icon" href="https://cdn.example/f.png">'],
+    ["<link rel='icon' href='//cdn.example/f.png'>"],
+    ['<link rel="icon" href=favicon.ico>'],
+    ['<link rel="icon" href="data:,"><link rel="icon" href="/favicon.ico">'],
+  ])('still refuses an icon link that is not a data: URL: %s', (snippet) => {
+    const r = exportTo(GOOD.replace('<head>', `<head>${snippet}`));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('is not self-contained');
+  });
   it('refuses a build with no inlined module script', () => {
     const r = exportTo('<!doctype html><html><body>hi</body></html>');
     expect(r.status).toBe(1);
