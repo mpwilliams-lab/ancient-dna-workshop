@@ -1,4 +1,4 @@
-// App shell: storage probe, ?reset, guarded session restore + notice, wrap screen with QR.
+// App shell: storage probe, ?reset, guarded session restore + notice, wrap screen with QR, prompt focus.
 // The shell prints RESTORED_NOTICE exactly once, after the Controller is built on a restored session,
 // and only when that restore actually took effect. The Controller (Task 10) never prints it.
 import type { WorkshopData } from './types';
@@ -96,8 +96,9 @@ export function boot(env: BootEnv): Booted {
 
   try {
     controller = new Controller(deps, restoredSession);
-  } catch {
+  } catch (err) {
     // A saved session that the controller cannot replay must never crash the page.
+    console.error('Controller could not replay the saved session; starting fresh', err);
     clearSession(store);
     terminal.clearScreen();
     restoredSession = null;
@@ -114,6 +115,7 @@ export function boot(env: BootEnv): Booted {
   if (restoredSession) terminal.notice(RESTORED_NOTICE);
 
   setupWrap(doc, termRoot);
+  keepPromptFocused(doc, termRoot);
   focusPrompt(termRoot);
   return { controller, terminal, store, restored: restoredSession !== null, reset };
 }
@@ -127,6 +129,30 @@ function holdsSavedState(c: Controller): boolean {
 function focusPrompt(termRoot: HTMLElement): void {
   const input = termRoot.querySelector<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
   input?.focus();
+}
+
+/** Buttons, links and form controls take focus or act on a click themselves; the prompt must not take it from them. */
+const TAKES_OWN_CLICK = 'a[href], button, input, select, textarea';
+
+/**
+ * A click anywhere on the page puts the prompt back in focus, so typing and Esc keep working after the user clicks
+ * the plot or the title bar. It stays out of the way of the wrap screen (while it is open), of anything that takes
+ * the click itself (buttons, links, form controls) and of a text selection (so output can be copied).
+ * Registered in the capture phase, so it sees every click whatever the page's own handlers do with the event.
+ */
+function keepPromptFocused(doc: Document, termRoot: HTMLElement): void {
+  const wrap = el(doc, 'wrap');
+  doc.addEventListener(
+    'mouseup',
+    (e) => {
+      if (!wrap.hidden) return;
+      const target = e.target as Element | null;
+      if (target && typeof target.closest === 'function' && target.closest(TAKES_OWN_CLICK)) return;
+      if (doc.getSelection()?.toString()) return;
+      focusPrompt(termRoot);
+    },
+    true,
+  );
 }
 
 function setupWrap(doc: Document, termRoot: HTMLElement): void {
@@ -155,8 +181,5 @@ function setupWrap(doc: Document, termRoot: HTMLElement): void {
       e.preventDefault();
       hide();
     }
-  });
-  termRoot.addEventListener('mouseup', () => {
-    if (!doc.getSelection()?.toString()) focusPrompt(termRoot);
   });
 }

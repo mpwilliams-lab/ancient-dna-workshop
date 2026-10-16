@@ -23,9 +23,13 @@ import { FIXTURE, MemStore, countText, loadIndexHtml } from './helpers/shellEnv'
 beforeEach(() => loadIndexHtml());
 
 it('a saved session the controller cannot replay is discarded and the app starts fresh', () => {
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   const store = new MemStore();
   saveSession(store, { history: ['load_genomes()'], transcript: [], hintIndex: 2, plot: INITIAL_PLOT });
   const b = boot({ doc: document, href: 'file:///C:/x.html', getStorage: () => store as unknown as Storage, replaceUrl: () => {}, data: FIXTURE });
+  // The failure is logged with its cause (like every other swallowed failure in the app), not dropped silently.
+  expect(errors).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ message: 'cannot replay' }));
+  errors.mockRestore();
   expect(b.restored).toBe(false);
   expect(b.controller.hintIndex).toBe(0);
   expect(countText(RESTORED_NOTICE)).toBe(0);

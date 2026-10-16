@@ -103,6 +103,12 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* The restore notice (printed by shell.ts) reads as a system message, not as command output. */
+#terminal .term-line--notice {
+  color: var(--muted);
+  font-style: italic;
+}
+
 #terminal .term-hint,
 #terminal .term-prompt {
   flex: 0 0 auto;
