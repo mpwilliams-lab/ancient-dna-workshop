@@ -2,16 +2,25 @@
 import type { ConsumerShare, PeriodId, WorkshopData } from './types';
 import type { Command } from './parser';
 import { formatCommand } from './parser';
-import { EXTRAS, SCRIPT } from './hints';
+import { EXTRA_PREFIX, EXTRAS, NEXT_PREFIX, SCRIPT } from './hints';
 import {
   ANGLO_SAXON_TAKEAWAY, BEAKER_CALLOUT, beakerBridge, CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_QUESTION, ME_RESULT,
   NORTH_SEA_LABEL, PAGES_URL, PERIOD_LABELS, PREDICT_HINT, RESTORED_NOTICE, ROMAN_CARD, traitCaption, traitSourceLabel,
-  WRAP_BUTTON, WRAP_LINE,
+  WRAP_BUTTON, WRAP_CLOSE, WRAP_LINE,
 } from './content';
 
 /** The live site. Re-exported from content.ts so the sheet always names the address the wrap screen and QR code use. */
 export { PAGES_URL };
 export const OFFLINE_NAME = 'ancient-dna-workshop.html';
+
+/** The exported offline file as it was when the sheet was generated: its size in bytes and its sha256 (64 lower-case hex digits). Read by the CLI, never typed. */
+export interface OfflineFileInfo { bytes: number; sha256: string }
+
+function isOfflineFileInfo(x: unknown): x is OfflineFileInfo {
+  if (x === null || typeof x !== 'object') return false;
+  const { bytes, sha256 } = x as Partial<Record<keyof OfflineFileInfo, unknown>>;
+  return typeof bytes === 'number' && Number.isInteger(bytes) && bytes >= 0 && typeof sha256 === 'string' && /^[0-9a-f]{64}$/.test(sha256);
+}
 
 export interface Beat { min: string; beat: string; commands: Command[]; say: string[] }
 
@@ -59,7 +68,7 @@ export function beats(data: WorkshopData): Beat[] {
       ROMAN_CARD,
     ] },
     { min: '16–20', beat: 'Beat 3: Anglo-Saxons (migration)', commands: [at(8), at(9)], say: [
-      `${PERIOD_LABELS.AngloSaxon}-period Britons move toward the "${NORTH_SEA_LABEL}" marker. Eastern-England burials are furthest along (Gretzinger et al. 2022: up to 76% continental ancestry).`,
+      `${PERIOD_LABELS.AngloSaxon}-period Britons move toward the "${NORTH_SEA_LABEL}" marker. Eastern-England burials are furthest along (Gretzinger et al. 2022: up to 76% continental ancestry). On screen they are the triangles with a black outline, and the legend names them.`,
       `Now the bars: the bars added since the last ADMIXTURE run are outlined: ${PERIOD_LABELS.IronAge}, ${PERIOD_LABELS.Roman} and ${PERIOD_LABELS.AngloSaxon}.`,
       `The ${PERIOD_LABELS.AngloSaxon} bar looks almost the same as the ${PERIOD_LABELS.IronAge} and ${PERIOD_LABELS.Roman} bars.`,
       ANGLO_SAXON_TAKEAWAY,
@@ -100,7 +109,12 @@ function ancestryPanelQuote(): string {
   return quoted[1];
 }
 
-export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePath: string): string {
+/**
+ * The whole sheet as Markdown. `offlineFile` is the exported offline file's size and sha256, read by the CLI when the sheet is
+ * generated (scripts/runsheet-cli.ts). Without it (null, undefined or a damaged record) the "Freeze and verify" section prints
+ * a warning line in place of the numbers; the sheet itself is still built.
+ */
+export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePath: string, offlineFile?: OfflineFileInfo | null): string {
   const steppe = data.admixture.beaker_steppe_pct;
   const sourceOf = (g: string) => data.traits.find((t) => t.gene === g)!.source;
   const L: string[] = [];
@@ -125,7 +139,7 @@ export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePa
   L.push(`- **If the network fails:** double-click \`${OFFLINE_NAME}\` on the desktop (Drive master copy: \`${offlinePath}\`).`);
   L.push('- **New group:** add `?reset` to the end of the address and press Enter (for the desktop copy: click the address bar, press End, type `?reset`, Enter).');
   L.push('- **Keys students need:** Enter runs; Tab completes; **Esc fills in the hinted command**; ↑/↓ recall earlier commands. After 3 wrong tries in a row the hint is filled in automatically; they just press Enter.');
-  L.push('- **Pacing is free:** every command works at any time. You lead by voice and the projector; the hint line always shows the next guided command.');
+  L.push(`- **Keep stations on the guided order:** every command runs at any time, but a station's hint line moves on only when its hinted command is run. It reads \`${NEXT_PREFIX}…\` until the last guided step, then \`${EXTRA_PREFIX}…\`, one optional extra at a time. You set the pace by voice and the projector.`);
   L.push('');
   L.push('## Minute by minute');
   L.push('');
@@ -196,11 +210,53 @@ export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePa
   L.push('|---|---|');
   L.push(`| Pages URL will not load | Use the desktop copy \`${OFFLINE_NAME}\`. |`);
   L.push('| A station is frozen or shows an error | Press F5. The session restores; if it does not, reload with `?reset` and have the student press Esc + Enter to catch up (every command works from the start). |');
+  L.push(`| Keyboard seems dead | A student has opened "${WRAP_BUTTON}" (the screen with the QR code). Press Esc or click "${WRAP_CLOSE}". |`);
   L.push('| A student is lost | Esc fills in the hinted command; Enter runs it. |');
   L.push('| A student is far behind | Have them press Esc to fill in their next guided step, then Enter, and repeat until they catch up (the hint line shows that step). Skipping a step leaves their hint behind: it only moves on when the hinted command is run. |');
   L.push('| Projector shows a cut-off page | Press F11 on the instructor machine; Ctrl+0 resets the zoom. |');
   L.push('| A trait plot looks wrong | Read its caption aloud and move on; captions are exact (spec §6 rule 6). |');
   L.push('| Running long | Drop the hook discussion, not the command: ask the question aloud, then have students press Esc and Enter (about 10 s). Skipping the command leaves every hint stuck on it. Leave out the optional extras (Bronze Age, Viking, per-person bars). |');
   L.push('');
+  L.push(...freezeSection(offlinePath, offlineFile));
   return L.join('\n');
+}
+
+/** "Freeze and verify": the offline file's recorded size and hash, the desktop check, and the hotfix procedure. Ends with a blank line. */
+function freezeSection(offlinePath: string, offlineFile: unknown): string[] {
+  const L: string[] = [];
+  L.push('## Freeze and verify');
+  L.push('');
+  L.push('After the Monday rehearsal, treat the offline file and the Pages build as frozen: change them only through the hotfix procedure below.');
+  L.push('');
+  if (isOfflineFileInfo(offlineFile)) {
+    L.push(`The offline file is the one \`npm run export-offline\` wrote to the Drive master folder (\`${offlinePath}\`). Its size and SHA-256 below were read from that file when this sheet was generated (see \`generated\` at the top), not typed in.`);
+    L.push('');
+    L.push('| File | Size | SHA-256 |');
+    L.push('|---|---|---|');
+    L.push(`| \`${OFFLINE_NAME}\` | ${offlineFile.bytes.toLocaleString('en-US')} bytes | \`${offlineFile.sha256}\` |`);
+  } else {
+    L.push(`> **WARNING: the offline file was not found (or could not be read) at \`${offlinePath}\` when this sheet was generated, so its size and hash are not shown. Run \`npm run export-offline\`, then \`npm run run-sheet\` again, before relying on this section.**`);
+  }
+  L.push('');
+  L.push('### Check every desktop copy');
+  L.push('');
+  L.push('On each lab desktop, open PowerShell and run:');
+  L.push('');
+  L.push('```');
+  L.push('cd "$([Environment]::GetFolderPath(\'Desktop\'))"');
+  L.push(`Get-FileHash -Algorithm SHA256 .\\${OFFLINE_NAME}`);
+  L.push('```');
+  L.push('');
+  L.push('The `Hash` line must equal the SHA-256 of the Drive master copy recorded in this section. PowerShell prints it in capitals; the case does not matter. A different hash means a stale or damaged copy: copy the Drive master over it again, then check it again.');
+  L.push('');
+  L.push('### Hotfix after the freeze');
+  L.push('');
+  L.push('1. In the repo, run `npm test` and `npm run e2e`. Both must pass.');
+  L.push('2. Push to `main`.');
+  L.push('3. Wait until the GitHub Actions run ("Deploy to GitHub Pages") is green.');
+  L.push('4. Run `npm run export-offline`, then `npm run run-sheet` so this sheet records the new size and hash.');
+  L.push(`5. Re-copy \`${OFFLINE_NAME}\` to every lab desktop and check each copy as above.`);
+  L.push('6. At every station that uses the Pages address, press Ctrl+F5. Pages caches for up to 10 minutes, so a plain reload can still show the old build.');
+  L.push('');
+  return L;
 }

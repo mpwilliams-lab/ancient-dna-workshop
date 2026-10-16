@@ -5,7 +5,8 @@
 //   4. otherwise a clear error naming all three.
 // The offline master copy's folder is the one `npm run export-offline` writes to: WORKSHOP_OFFLINE_DIR, then offlineExportDir.
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -203,5 +204,167 @@ describe('the run sheet the CLI writes', () => {
     for (const file of [CLI_SOURCE, RUNSHEET_SOURCE]) {
       expect(readFileSync(file, 'utf8'), file).not.toMatch(/\/Users\/|\/home\/|CloudStorage|GoogleDrive|@gmail\.com/);
     }
+  });
+});
+
+// ---------- final review: "Freeze and verify" records the exported file, hashed at generation time ----------
+describe('the run sheet records the exported offline file, read when the sheet is generated', () => {
+  // Bytes that are not valid UTF-8 and characters that take more than one byte: a text read of this file would give a
+  // different size and a different hash from a read of the bytes, which is what Get-FileHash on a desktop copy sees.
+  const BODY = Buffer.concat([
+    Buffer.from('<!doctype html><title>Ancient DNA — offline copy ✓</title>\n', 'utf8'),
+    Buffer.from([0xff, 0xfe, 0x00, 0x80]),
+    Buffer.from('x'.repeat(777), 'utf8'),
+  ]);
+  const sha256 = (b: Buffer): string => createHash('sha256').update(b).digest('hex');
+  const BYTES = (b: Buffer): string => `${b.length.toLocaleString('en-US')} bytes`;
+  const HEX64 = /\b[0-9a-f]{64}\b/;
+
+  function exportTo(dir: string, body: Buffer = BODY): string {
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, OFFLINE_NAME);
+    writeFileSync(file, body);
+    return file;
+  }
+
+  it('the sample tells bytes from characters (so the tests below would catch a text read)', () => {
+    expect(BODY.length).not.toBe(BODY.toString('utf8').length);
+    expect(sha256(BODY)).not.toBe(createHash('sha256').update(BODY.toString('utf8')).digest('hex'));
+  });
+
+  it('hashes the file in WORKSHOP_OFFLINE_DIR and writes its byte size and sha256 into the sheet', () => {
+    const repo = miniRepo();
+    const dir = join(repo.root, 'export from env');
+    const out = join(repo.root, 'run-sheet.md');
+    exportTo(dir);
+    const r = repo.run([out], { WORKSHOP_OFFLINE_DIR: dir });
+    expect(r.status, r.stderr).toBe(0);
+    const md = readFileSync(out, 'utf8');
+    expect(md).toContain('\n## Freeze and verify\n');
+    expect(md).toContain(`\`${sha256(BODY)}\``);
+    expect(md).toContain(BYTES(BODY));
+    expect(md).toContain(join(dir, OFFLINE_NAME)); // the master copy it describes is the file it hashed
+    expect(md).toContain('Get-FileHash -Algorithm SHA256');
+    expect(r.stderr).not.toMatch(/warning/i);
+    expect(r.stdout.trim()).toBe(`run-sheet: wrote ${out} (${md.length} chars)`);
+  });
+
+  it('finds the file the way export-offline does: WORKSHOP_OFFLINE_DIR first, then offlineExportDir in local-paths.json', () => {
+    const repo = miniRepo();
+    const fromEnv = join(repo.root, 'from-env');
+    const fromFile = join(repo.root, 'from-file');
+    const envBody = Buffer.from('the file in the environment folder');
+    const fileBody = Buffer.from('the file in the local-paths.json folder');
+    exportTo(fromEnv, envBody);
+    exportTo(fromFile, fileBody);
+    repo.localPaths({ offlineExportDir: fromFile });
+
+    const out1 = join(repo.root, 'env.md');
+    expect(repo.run([out1], { WORKSHOP_OFFLINE_DIR: fromEnv }).status).toBe(0);
+    const env = readFileSync(out1, 'utf8');
+    expect(env).toContain(sha256(envBody));
+    expect(env).not.toContain(sha256(fileBody));
+
+    const out2 = join(repo.root, 'file.md');
+    expect(repo.run([out2]).status).toBe(0);
+    const file = readFileSync(out2, 'utf8');
+    expect(file).toContain(sha256(fileBody));
+    expect(file).toContain(BYTES(fileBody));
+    expect(file).not.toContain(sha256(envBody));
+  });
+
+  it('reads the file at generation time: after a new export, the next sheet records the new size and hash', () => {
+    const repo = miniRepo();
+    const dir = join(repo.root, 'export');
+    const out = join(repo.root, 'run-sheet.md');
+    const first = Buffer.from('first build');
+    const second = Buffer.from('second build, a different size');
+    exportTo(dir, first);
+    expect(repo.run([out], { WORKSHOP_OFFLINE_DIR: dir }).status).toBe(0);
+    const a = readFileSync(out, 'utf8');
+    expect(a).toContain(sha256(first));
+    exportTo(dir, second);
+    expect(repo.run([out], { WORKSHOP_OFFLINE_DIR: dir }).status).toBe(0);
+    const b = readFileSync(out, 'utf8');
+    expect(b).toContain(sha256(second));
+    expect(b).toContain(BYTES(second));
+    expect(b).not.toContain(sha256(first));
+    expect(b).not.toContain(BYTES(first));
+  });
+
+  it('hashes only the exported file: not dist/index.html and not its neighbours in the folder', () => {
+    const repo = miniRepo();
+    const dir = join(repo.root, 'export');
+    const out = join(repo.root, 'run-sheet.md');
+    const decoy = Buffer.from('a build that was never exported');
+    exportTo(dir);
+    writeFileSync(join(dir, 'ancient-dna-workshop-old.html'), decoy);
+    mkdirSync(join(repo.root, 'dist'));
+    writeFileSync(join(repo.root, 'dist', 'index.html'), decoy);
+    expect(repo.run([out], { WORKSHOP_OFFLINE_DIR: dir }).status).toBe(0);
+    const md = readFileSync(out, 'utf8');
+    expect(md).toContain(sha256(BODY));
+    expect(md).not.toContain(sha256(decoy));
+    expect(md.match(new RegExp(HEX64, 'g'))).toEqual([sha256(BODY)]);
+  });
+
+  it('a missing offline file is a warning line in the sheet and on stderr, not a crash: the sheet is still written', () => {
+    const repo = miniRepo();
+    const out = join(repo.root, 'run-sheet.md');
+    repo.localPaths({ offlineExportDir: repo.offline }); // the folder does not exist
+    const r = repo.run([out]);
+    expect(r.status, r.stderr).toBe(0);
+    const md = readFileSync(out, 'utf8');
+    const freeze = md.slice(md.indexOf('\n## Freeze and verify\n'));
+    const warning = freeze.split('\n').find((l) => /warning/i.test(l));
+    expect(warning, 'a warning line in the freeze section').toBeDefined();
+    expect(warning).toContain(join(repo.offline, OFFLINE_NAME));
+    expect(warning).toMatch(/not found|could not be read/i);
+    expect(freeze).not.toMatch(HEX64);
+    expect(freeze).not.toMatch(/\d+ bytes/);
+    expect(md).toContain('\n## Fallbacks\n'); // the rest of the sheet is intact
+    expect(md).not.toMatch(/undefined|NaN/);
+    expect(r.stderr).toMatch(/run-sheet: warning: .*not found or could not be read/);
+    expect(r.stderr).toContain(join(repo.offline, OFFLINE_NAME));
+    expect(r.stdout.trim()).toBe(`run-sheet: wrote ${out} (${md.length} chars)`);
+    expect(existsSync(repo.offline)).toBe(false); // it never creates the export folder
+  });
+
+  it('something unreadable where the file should be (a folder of that name) is the same warning, not a crash', () => {
+    const repo = miniRepo();
+    const dir = join(repo.root, 'export');
+    const out = join(repo.root, 'run-sheet.md');
+    mkdirSync(join(dir, OFFLINE_NAME), { recursive: true });
+    const r = repo.run([out], { WORKSHOP_OFFLINE_DIR: dir });
+    expect(r.status, r.stderr).toBe(0);
+    const md = readFileSync(out, 'utf8');
+    expect(md).toMatch(/warning/i);
+    expect(md).not.toMatch(HEX64);
+    expect(r.stderr).toMatch(/run-sheet: warning:/);
+  });
+
+  it('an empty offline file is still a file: its size is 0 bytes and its hash is the hash of nothing', () => {
+    const repo = miniRepo();
+    const dir = join(repo.root, 'export');
+    const out = join(repo.root, 'run-sheet.md');
+    exportTo(dir, Buffer.alloc(0));
+    const r = repo.run([out], { WORKSHOP_OFFLINE_DIR: dir });
+    expect(r.status, r.stderr).toBe(0);
+    const md = readFileSync(out, 'utf8');
+    expect(md).toContain('`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`');
+    expect(md).toContain('0 bytes');
+  });
+
+  it('stays a draft with no verified stamp, with the numbers in the body and nothing about them in the front matter', () => {
+    const repo = miniRepo();
+    const out = join(repo.root, 'run-sheet.md');
+    exportTo(join(repo.root, 'export'));
+    expect(repo.run([out], { WORKSHOP_OFFLINE_DIR: join(repo.root, 'export') }).status).toBe(0);
+    const text = readFileSync(out, 'utf8');
+    const fm = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? '';
+    expect(fm).toContain('status: draft');
+    expect(fm).not.toMatch(/verified/);
+    expect(fm).not.toMatch(HEX64);
+    expect(text).toContain(sha256(BODY));
   });
 });

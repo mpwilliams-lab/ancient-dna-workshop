@@ -7,11 +7,14 @@
 // With none of them set, it stops and names all three.
 // The sheet also names the offline master copy of the app. That is where `npm run export-offline` writes it, so the folder
 // comes from the same two places as there: WORKSHOP_OFFLINE_DIR, then offlineExportDir in local-paths.json.
+// Its "Freeze and verify" section records that file's byte size and sha256, read from the file each time the sheet is
+// generated. If the file is missing the sheet carries a warning line instead (and so does stderr); the run still succeeds.
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DATA } from '../src/data';
-import { buildRunSheet, OFFLINE_NAME } from '../src/runsheet';
+import { buildRunSheet, OFFLINE_NAME, type OfflineFileInfo } from '../src/runsheet';
 
 // The built file sits in <repo>/.runsheet/ (the source in <repo>/scripts/), so the repo root is one folder up either way.
 const LOCAL_PATHS = resolve(dirname(fileURLToPath(import.meta.url)), '../local-paths.json');
@@ -59,7 +62,29 @@ const offlineDir =
 
 const out = resolve(outPath);
 const offline = resolve(join(offlineDir, OFFLINE_NAME));
-const md = buildRunSheet(DATA, new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'), offline);
+
+/**
+ * The exported offline file's size and sha256, read now: the sheet records what is in the Drive folder at generation time and
+ * no number in it is typed by hand. The bytes are read raw (a text read would change both numbers for a file with multi-byte
+ * characters). Null when the file is missing or cannot be read; the sheet then carries a warning line, and this is not a crash.
+ */
+function readOffline(path: string): OfflineFileInfo | null {
+  try {
+    const bytes = readFileSync(path);
+    return { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  } catch {
+    return null;
+  }
+}
+
+const offlineFile = readOffline(offline);
+if (!offlineFile) {
+  console.warn(
+    `run-sheet: warning: ${offline} was not found or could not be read, so the sheet has no size and hash for it. ` +
+      'Run `npm run export-offline`, then run this again.',
+  );
+}
+const md = buildRunSheet(DATA, new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'), offline, offlineFile);
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, md, 'utf8');
 console.log(`run-sheet: wrote ${out} (${md.length} chars)`);
