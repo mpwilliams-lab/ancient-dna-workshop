@@ -3,20 +3,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { boot, hasReset, probeStorage, stripReset } from '../src/shell';
 import { Controller } from '../src/controller';
 import { mountTerminal } from '../src/terminal';
-import { saveSession, loadSession, type Session } from '../src/session';
-import { INITIAL_PLOT } from '../src/plotState';
+import { saveSession, loadSession, LEGACY_SESSION_KEY, SESSION_KEY, type SessionV2 } from '../src/session';
+import { sessionBuildHash } from '../src/replay';
 import { APP_TITLE, RESTORED_NOTICE, WRAP_BUTTON, WRAP_CREDIT, WRAP_LINE, WRAP_QR_CAPTION } from '../src/content';
 import { FIXTURE, MemStore, countText, loadIndexHtml } from './helpers/shellEnv';
 
 const FILE_URL = 'file:///C:/Users/lab/Desktop/ancient-dna-workshop.html';
 const PAGES = 'https://mpwilliams-lab.github.io/ancient-dna-workshop/';
 
-function savedSession(): Session {
+function savedSession(): SessionV2 {
   return {
+    version: 2,
+    build: sessionBuildHash(),
     history: ['ancestry_test(person = "me")'],
-    transcript: [{ kind: 'input', text: 'ancestry_test(person = "me")' }],
-    hintIndex: 1,
-    plot: INITIAL_PLOT,
+    transcript: [{ seq: 1, kind: 'input', text: 'ancestry_test(person = "me")' }],
+    steps: [{ cmd: 'ancestry_test(person = "me")', endSeq: 1 }],
+    cursor: { step: 1, card: 0 },
+    nextSeq: 2,
   };
 }
 
@@ -138,6 +141,23 @@ describe('boot', () => {
     const b = boot(env(store));
     expect(b.restored).toBe(false);
     expect(b.controller.hintIndex).toBe(0);
+    expect(countText(RESTORED_NOTICE)).toBe(0);
+  });
+
+  it('refresh reads the v2 key', () => {
+    const store = new MemStore();
+    saveSession(store, savedSession());
+    expect([...store.map.keys()]).toEqual([SESSION_KEY]);
+    expect(boot(env(store)).restored).toBe(true);
+  });
+
+  it('a v1 session (the old key) is removed and ignored: fresh start, no notice', () => {
+    const store = new MemStore();
+    store.setItem(LEGACY_SESSION_KEY, JSON.stringify({ history: ['load_genomes()'], transcript: [], hintIndex: 2, plot: {} }));
+    const b = boot(env(store));
+    expect(b.restored).toBe(false);
+    expect(b.controller.hintIndex).toBe(0);
+    expect(store.map.has(LEGACY_SESSION_KEY)).toBe(false);
     expect(countText(RESTORED_NOTICE)).toBe(0);
   });
 

@@ -335,3 +335,36 @@ describe('keys', () => {
     expect(document.activeElement).toBe(m.input);
   });
 });
+
+describe('showLines (session v2 restore)', () => {
+  it('replaces the log at once, without stagger, and writes input lines with the prompt in front', () => {
+    const m = mount();
+    void m.view.printLines(['old line']);
+    m.view.showLines([
+      { kind: 'input', text: 'load_genomes()' },
+      { kind: 'output', text: 'Genomes loaded.' },
+      { kind: 'notice', text: 'a notice' },
+    ]);
+    expect(texts(m.out)).toEqual(['> load_genomes()', 'Genomes loaded.', 'a notice']);
+    expect([...m.out.children].map((c) => c.className)).toEqual([
+      'term-line term-line--input', 'term-line term-line--output', 'term-line term-line--notice',
+    ]);
+    expect(m.view.isPrinting()).toBe(false);
+  });
+
+  it('finishes a running staggered log first, then replaces it', () => {
+    const m = mount();
+    void m.view.printLines(['a', 'b', 'c'], { stagger: true });
+    expect(m.view.isPrinting()).toBe(true);
+    m.view.showLines([{ kind: 'output', text: 'x' }]);
+    expect(m.view.isPrinting()).toBe(false);
+    expect(texts(m.out)).toEqual(['x']);
+  });
+
+  it('keeps at most MAX_DOM_LINES lines on screen', () => {
+    const m = mount();
+    m.view.showLines(Array.from({ length: MAX_DOM_LINES + 10 }, (_, k) => ({ kind: 'output' as const, text: `l${k}` })));
+    expect(m.out.childElementCount).toBe(MAX_DOM_LINES);
+    expect(texts(m.out)[MAX_DOM_LINES - 1]).toBe(`l${MAX_DOM_LINES + 9}`);
+  });
+});

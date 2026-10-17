@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from 'vitest';
 
-// The real Controller, except that replaying a restored session throws (simulates a saved
-// session from an older build that the controller cannot replay).
+// The real Controller, except that replaying a restored session throws (simulates a saved session the controller
+// cannot replay at all).
 vi.mock('../src/controller', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../src/controller')>();
   class ThrowOnRestore extends mod.Controller {
@@ -16,7 +16,7 @@ vi.mock('../src/controller', async (importOriginal) => {
 
 import { boot } from '../src/shell';
 import { loadSession, saveSession } from '../src/session';
-import { INITIAL_PLOT } from '../src/plotState';
+import { sessionBuildHash } from '../src/replay';
 import { RESTORED_NOTICE } from '../src/content';
 import { FIXTURE, MemStore, countText, loadIndexHtml } from './helpers/shellEnv';
 
@@ -25,9 +25,11 @@ beforeEach(() => loadIndexHtml());
 it('a saved session the controller cannot replay is discarded and the app starts fresh', () => {
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   const store = new MemStore();
-  saveSession(store, { history: ['load_genomes()'], transcript: [], hintIndex: 2, plot: INITIAL_PLOT });
+  saveSession(store, {
+    version: 2, build: sessionBuildHash(), history: ['load_genomes()'], transcript: [],
+    steps: [{ cmd: 'load_genomes()', endSeq: 0 }], cursor: { step: 1, card: 0 }, nextSeq: 1,
+  });
   const b = boot({ doc: document, href: 'file:///C:/x.html', getStorage: () => store as unknown as Storage, replaceUrl: () => {}, data: FIXTURE });
-  // The failure is logged with its cause (like every other swallowed failure in the app), not dropped silently.
   expect(errors).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ message: 'cannot replay' }));
   errors.mockRestore();
   expect(b.restored).toBe(false);

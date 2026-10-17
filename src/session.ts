@@ -1,73 +1,99 @@
-import type { PeriodId } from './types';
-import { PERIOD_IDS, GENE_IDS, FRAME_IDS } from './types';
-import type { PcaFocus, PlotState } from './plotState';
-import { SCRIPT } from './hints';
+// Session v2 (spec v3 §4.2, CONTRACT §4.7): the command log, a cursor and the build hash. Plot, hint pointer and cards
+// are not stored: they are rebuilt by replaying the log (replay.ts), so refresh (P1) and Back (P2) share one mechanism.
+import { sessionBuildHash } from './replay';
 
-export interface TranscriptLine { kind: 'input' | 'output' | 'notice'; text: string }
-export interface Session { history: string[]; transcript: TranscriptLine[]; hintIndex: number; plot: PlotState }
-export type SessionStorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
-
-export const SESSION_KEY = 'adna-workshop-session-v1';
+export const SESSION_KEY = 'adna-workshop-session-v2';
+/** The v2.1 key. Ignored and removed on every load. */
+export const LEGACY_SESSION_KEY = 'adna-workshop-session-v1';
+export const MAX_STEPS = 1000;
 export const MAX_TRANSCRIPT = 2000;
 export const MAX_HISTORY = 200;
 
-const VIEWS: readonly PlotState['view'][] = ['none', 'pca', 'admixture', 'trait', 'consumer'];
-const FOCI: readonly PcaFocus[] = [...PERIOD_IDS, 'Europe', 'all'];
-const PERSONS: readonly (PeriodId | 'me')[] = [...PERIOD_IDS, 'me'];
-const KINDS: readonly TranscriptLine['kind'][] = ['input', 'output', 'notice'];
+export type TranscriptKind = 'input' | 'output' | 'notice' | 'clear';
+export interface TranscriptEntry { seq: number; kind: TranscriptKind; text: string }
+/** cmd = formatCommand(parsed command); endSeq = last transcript seq of that step's output. */
+export interface SessionStep { cmd: string; endSeq: number }
+/** step = number of steps applied (0..steps.length); card = open card index, or cards.length when none is open. */
+export interface Cursor { step: number; card: number }
+export interface SessionV2 {
+  version: 2;
+  build: string;
+  history: string[];
+  transcript: TranscriptEntry[];
+  steps: SessionStep[];
+  cursor: Cursor;
+  nextSeq: number;
+}
+export type SessionStorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+const KINDS: readonly TranscriptKind[] = ['input', 'output', 'notice', 'clear'];
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const isOneOf = <T extends string>(list: readonly T[], v: unknown): v is T => typeof v === 'string' && (list as readonly string[]).includes(v);
-const isPeriodList = (v: unknown): v is PeriodId[] => Array.isArray(v) && v.every((x) => isOneOf(PERIOD_IDS, x));
+const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
+const isKind = (v: unknown): v is TranscriptKind => typeof v === 'string' && (KINDS as readonly string[]).includes(v);
 
-function toPlot(v: unknown): PlotState | null {
-  if (!isObj(v)) return null;
-  if (!isOneOf(VIEWS, v.view) || !isOneOf(FRAME_IDS, v.frame) || typeof v.showNorthSea !== 'boolean') return null;
-  if (!isPeriodList(v.layers) || !isPeriodList(v.admixShown) || !isPeriodList(v.admixNew)) return null;
-  if (v.admixPeriod !== undefined && !isOneOf(PERIOD_IDS, v.admixPeriod)) return null;
-  if (v.gene !== undefined && !isOneOf(GENE_IDS, v.gene)) return null;
-  if (v.focus !== undefined && !isOneOf(FOCI, v.focus)) return null;
-  if (v.person !== undefined && !isOneOf(PERSONS, v.person)) return null;
-  const plot: PlotState = {
-    view: v.view, layers: v.layers, frame: v.frame, showNorthSea: v.showNorthSea, admixShown: v.admixShown, admixNew: v.admixNew,
-  };
-  if (v.admixPeriod !== undefined) plot.admixPeriod = v.admixPeriod;
-  if (v.gene !== undefined) plot.gene = v.gene;
-  if (v.focus !== undefined) plot.focus = v.focus;
-  if (v.person !== undefined) plot.person = v.person;
-  return plot;
-}
-
-function toSession(v: unknown): Session | null {
-  if (!isObj(v)) return null;
-  const { history, transcript, hintIndex } = v;
+function toSession(v: unknown, build: string): SessionV2 | null {
+  if (!isObj(v) || v.version !== 2 || v.build !== build) return null;
+  const { history, transcript, steps, cursor, nextSeq } = v;
   if (!Array.isArray(history) || !history.every((h) => typeof h === 'string')) return null;
-  if (!Array.isArray(transcript) || !transcript.every((t) => isObj(t) && isOneOf(KINDS, t.kind) && typeof t.text === 'string')) return null;
-  if (typeof hintIndex !== 'number' || !Number.isInteger(hintIndex) || hintIndex < 0 || hintIndex > SCRIPT.length) return null;
-  const plot = toPlot(v.plot);
-  if (!plot) return null;
+  if (!Array.isArray(transcript) || !Array.isArray(steps)) return null;
+  const t: TranscriptEntry[] = [];
+  let last = 0;
+  for (const e of transcript) {
+    if (!isObj(e) || !isInt(e.seq) || e.seq <= last || !isKind(e.kind) || typeof e.text !== 'string') return null;
+    last = e.seq;
+    t.push({ seq: e.seq, kind: e.kind, text: e.text });
+  }
+  if (steps.length > MAX_STEPS) return null;
+  const st: SessionStep[] = [];
+  for (const s of steps) {
+    if (!isObj(s) || typeof s.cmd !== 'string' || !isInt(s.endSeq) || s.endSeq < 0) return null;
+    st.push({ cmd: s.cmd, endSeq: s.endSeq });
+  }
+  if (!isObj(cursor) || !isInt(cursor.step) || !isInt(cursor.card)) return null;
+  if (cursor.step < 0 || cursor.step > st.length || cursor.card < 0) return null;
+  if (!isInt(nextSeq) || nextSeq <= last) return null;
   return {
-    history: history as string[],
-    transcript: (transcript as TranscriptLine[]).map((t) => ({ kind: t.kind, text: t.text })),
-    hintIndex,
-    plot,
+    version: 2,
+    build,
+    history: (history as string[]).slice(-MAX_HISTORY),
+    transcript: t,
+    steps: st,
+    cursor: { step: cursor.step, card: cursor.card },
+    nextSeq,
   };
 }
 
-/** Saves the session; silently does nothing if storage is missing, blocked or full. */
-export function saveSession(store: SessionStorageLike | null, s: Session): void {
+let warnedTooLong = false;
+
+/** Saves the session, keeping the newest MAX_HISTORY / MAX_TRANSCRIPT entries. Past MAX_STEPS steps it stops saving and
+ *  warns once per page. Silently does nothing if storage is missing, blocked or full. Never throws. */
+export function saveSession(store: SessionStorageLike | null, s: SessionV2): void {
   if (!store) return;
+  if (s.steps.length > MAX_STEPS) {
+    if (!warnedTooLong) {
+      warnedTooLong = true;
+      console.warn(`Session not saved: more than ${MAX_STEPS} steps. The workshop carries on; a refresh would start from the last save.`);
+    }
+    return;
+  }
   try {
-    const trimmed: Session = { ...s, history: s.history.slice(-MAX_HISTORY), transcript: s.transcript.slice(-MAX_TRANSCRIPT) };
-    store.setItem(SESSION_KEY, JSON.stringify(trimmed));
+    const out: SessionV2 = { ...s, history: s.history.slice(-MAX_HISTORY), transcript: s.transcript.slice(-MAX_TRANSCRIPT) };
+    store.setItem(SESSION_KEY, JSON.stringify(out));
   } catch {
     // blocked or over quota: the workshop carries on without persistence
   }
 }
 
-/** The saved session, or null when it is missing, corrupt, wrong-shaped or storage is blocked. A bad entry is removed. */
-export function loadSession(store: SessionStorageLike | null): Session | null {
+/** The saved session, or null when it is missing, corrupt, wrong-shaped, from another build, or storage is blocked.
+ *  Always removes the v1 key; a rejected v2 entry is removed too. Never throws. */
+export function loadSession(store: SessionStorageLike | null, build: string = sessionBuildHash()): SessionV2 | null {
   if (!store) return null;
+  try {
+    store.removeItem(LEGACY_SESSION_KEY);
+  } catch {
+    // blocked storage: nothing to remove
+  }
   let raw: string | null;
   try {
     raw = store.getItem(SESSION_KEY);
@@ -75,23 +101,31 @@ export function loadSession(store: SessionStorageLike | null): Session | null {
     return null;
   }
   if (raw === null) return null;
-  let session: Session | null = null;
+  let session: SessionV2 | null = null;
   try {
-    session = toSession(JSON.parse(raw));
+    session = toSession(JSON.parse(raw), build);
   } catch {
     session = null;
   }
-  if (!session) clearSession(store);
+  if (!session) {
+    try {
+      store.removeItem(SESSION_KEY);
+    } catch {
+      // nothing to do
+    }
+  }
   return session;
 }
 
-/** Removes the saved session (?reset). Never throws. */
+/** Removes the saved session and the v1 key (?reset). Never throws. */
 export function clearSession(store: SessionStorageLike | null): void {
   if (!store) return;
-  try {
-    store.removeItem(SESSION_KEY);
-  } catch {
-    // nothing to do
+  for (const key of [SESSION_KEY, LEGACY_SESSION_KEY]) {
+    try {
+      store.removeItem(key);
+    } catch {
+      // nothing to do
+    }
   }
 }
 
@@ -109,4 +143,17 @@ export function getSessionStore(w: { sessionStorage: Storage } | null): SessionS
   } catch {
     return null;
   }
+}
+
+/** The entries after the last 'clear' marker with seq <= uptoSeq, markers excluded (uptoSeq = Infinity: everything). */
+export function visibleTranscript(t: readonly TranscriptEntry[], uptoSeq: number): TranscriptEntry[] {
+  let start = 0;
+  t.forEach((e, i) => {
+    if (e.kind === 'clear' && e.seq <= uptoSeq) start = i + 1;
+  });
+  return t.slice(start).filter((e) => e.kind !== 'clear' && e.seq <= uptoSeq);
+}
+
+export function emptySession(): SessionV2 {
+  return { version: 2, build: sessionBuildHash(), history: [], transcript: [], steps: [], cursor: { step: 0, card: 0 }, nextSeq: 1 };
 }

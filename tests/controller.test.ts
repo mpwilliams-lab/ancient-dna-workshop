@@ -1,141 +1,29 @@
 // @vitest-environment jsdom
+// Controller v3 (Task 6): typing rules (unchanged from v2.1), the hint pointer, the session v2 log, restore by replay,
+// headless card state and the Enter/Esc rules of spec §4.4 and §5.3. The DOM card view is Task 12.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import fixtureJson from './fixtures/data.fixture.json';
 import type { WorkshopData } from '../src/types';
 import {
-  Controller,
-  AUTOFILL_NOTE,
-  INTERNAL_ERROR_LINE,
-  MAX_BAD_TRIES,
-  CONTROLLER_STRINGS,
-  didYouMean,
-  completeLine,
+  Controller, AUTOFILL_NOTE, INTERNAL_ERROR_LINE, MAX_BAD_TRIES, CARD_REPEAT_GUARD_MS, CONTROLLER_STRINGS, didYouMean, completeLine,
 } from '../src/controller';
-import { mountTerminal, type TerminalView } from '../src/terminal';
+import { mountTerminal } from '../src/terminal';
 import { formatCommand } from '../src/parser';
-import { SCRIPT, EXTRAS } from '../src/hints';
+import { EXTRAS, EXTRA_PREFIX, SCRIPT, SCRIPT_STEPS, hintText } from '../src/hints';
 import { INITIAL_PLOT, type PlotState } from '../src/plotState';
-import { loadSession, type Session, type SessionStorageLike } from '../src/session';
+import { ALL_OFF } from '../src/features';
+import { loadSession, visibleTranscript, type SessionV2, type TranscriptEntry } from '../src/session';
+import { sessionBuildHash } from '../src/replay';
 import {
-  ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN, EUROPE_ALREADY_SHOWN, EUROPE_HELD_BACK, PREDICT_HINT, RESTORED_NOTICE, REVEAL_HINT,
+  ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN, CARD_HINT, EUROPE_ALREADY_SHOWN, EUROPE_HELD_BACK, PREDICT_HINT, REVEAL_HINT, RESTORED_NOTICE,
 } from '../src/content';
 import { ruleViolations } from './contentRules';
-
-const data = fixtureJson as unknown as WorkshopData;
-
-/** Records every terminal call into a shared event log. With holdPrints, staggered prints stay "printing" until flush(). */
-class FakeTerminal implements TerminalView {
-  hint = '';
-  prompt = '';
-  history: string[] = [];
-  holdPrints = false;
-  private printing: { lines: string[]; resolve: () => void } | null = null;
-  constructor(readonly events: string[]) {}
-  printLines(lines: string[], opts?: { stagger?: boolean }): Promise<void> {
-    if (this.printing) this.flush();
-    if (opts?.stagger && this.holdPrints && lines.length > 0) {
-      return new Promise<void>((resolve) => {
-        this.printing = { lines, resolve };
-      });
-    }
-    for (const l of lines) this.events.push(`out:${l}`);
-    return Promise.resolve();
-  }
-  flush(): void {
-    const p = this.printing;
-    if (!p) return;
-    this.printing = null;
-    for (const l of p.lines) this.events.push(`out:${l}`);
-    p.resolve();
-  }
-  isPrinting(): boolean {
-    return this.printing !== null;
-  }
-  echoInput(text: string): void {
-    this.events.push(`echo:${text}`);
-  }
-  setHint(text: string): void {
-    this.hint = text;
-  }
-  fillPrompt(text: string): void {
-    this.prompt = text;
-  }
-  clearScreen(): void {
-    this.events.push('clear');
-  }
-  notice(text: string): void {
-    this.events.push(`notice:${text}`);
-  }
-  setHistory(lines: string[]): void {
-    this.history = [...lines];
-  }
-  get output(): string[] {
-    return this.events.filter((e) => e.startsWith('out:')).map((e) => e.slice(4));
-  }
-}
-
-function memStore(): SessionStorageLike & { map: Map<string, string> } {
-  const map = new Map<string, string>();
-  return {
-    map,
-    getItem: (k: string) => map.get(k) ?? null,
-    setItem: (k: string, v: string) => {
-      map.set(k, String(v));
-    },
-    removeItem: (k: string) => {
-      map.delete(k);
-    },
-  };
-}
-
-const blockedStore: SessionStorageLike = {
-  getItem: () => {
-    throw new DOMException('blocked', 'SecurityError');
-  },
-  setItem: () => {
-    throw new DOMException('quota', 'QuotaExceededError');
-  },
-  removeItem: () => {
-    throw new DOMException('blocked', 'SecurityError');
-  },
-};
-
-interface Rig {
-  c: Controller;
-  term: FakeTerminal;
-  events: string[];
-  renders: PlotState[];
-  store: SessionStorageLike & { map: Map<string, string> };
-}
-
-function rig(restored: Session | null = null, store = memStore()): Rig {
-  const events: string[] = [];
-  const renders: PlotState[] = [];
-  const term = new FakeTerminal(events);
-  const c = new Controller(
-    {
-      data,
-      terminal: term,
-      renderPlot: (p) => {
-        renders.push(p);
-        events.push(`render:${p.view}`);
-      },
-      store,
-    },
-    restored,
-  );
-  return { c, term, events, renders, store };
-}
-
-const flushMicrotasks = async (): Promise<void> => {
-  for (let i = 0; i < 5; i++) await Promise.resolve();
-};
-
-const STEP = (k: number): string => formatCommand(SCRIPT[k]);
+import {
+  FakeTerminal, STEP, blockedStore, closeCards, data, flushMicrotasks, memStore, rig, runSteps, settle, type Rig,
+} from './helpers/controllerRig';
 
 /** The transcript's output lines that say "did you mean". */
-const didYouMeanLines = (transcript: Session['transcript']): string[] =>
-  transcript.filter((l) => l.kind === 'output' && /did you mean/i.test(l.text)).map((l) => l.text);
+const didYouMeanLines = (t: readonly TranscriptEntry[]): string[] =>
+  t.filter((l) => l.kind === 'output' && /did you mean/i.test(l.text)).map((l) => l.text);
 
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -145,27 +33,43 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('the script this file relies on (Task 4)', () => {
+  it('has the step ids and cards the tests below use', () => {
+    expect(SCRIPT).toHaveLength(19);
+    expect(SCRIPT_STEPS.map((s) => s.id)).toEqual([
+      'hook', 'load', 'europe', 'firstFarmers', 'bellBeaker', 'admix1', 'bronzeAge', 'ironAge', 'consumerIA',
+      'revealPca', 'revealAdmix', 'roman', 'angloSaxon', 'finale', 'lct', 'slc45a2', 'herc2', 'tyk2', 'hla',
+    ]);
+    expect(SCRIPT_STEPS[7]!.cards).toEqual({ placement: 'after', ids: ['E1', 'E2', 'E3'] });
+    expect(SCRIPT_STEPS[14]!.cards).toEqual({ placement: 'before', ids: ['H1', 'H2'] });
+  });
+});
+
 describe('Controller start-up', () => {
-  it('renders the initial plot once and shows the first hint', () => {
+  it('renders the initial plot once, without animation, and shows the first hint', () => {
     const r = rig();
     expect(r.renders).toEqual([INITIAL_PLOT]);
+    expect(r.renderOpts).toEqual([{ animate: false }]);
     expect(r.c.hintIndex).toBe(0);
     expect(r.c.badTries).toBe(0);
     expect(r.term.hint).toContain(STEP(0));
     expect(r.events.filter((e) => e.startsWith('notice:'))).toEqual([]);
+    expect(r.c.screen).toEqual({ step: 0, card: 0 });
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.c.canGoBack).toBe(false);
   });
 
-  it('exports its on-screen strings for the §6 content scan', () => {
+  it('exports its on-screen strings for the content scan, and the repeat guard', () => {
     expect(MAX_BAD_TRIES).toBe(3);
+    expect(CARD_REPEAT_GUARD_MS).toBe(400);
     expect(CONTROLLER_STRINGS).toContain(AUTOFILL_NOTE);
     expect(CONTROLLER_STRINGS).toContain(INTERNAL_ERROR_LINE);
     expect(didYouMean('run_pca()')).toBe('Did you mean run_pca()?');
   });
 
-  it('every controller on-screen string passes the §6 content rules', () => {
+  it('every controller on-screen string passes the content rules', () => {
     expect(CONTROLLER_STRINGS.length).toBe(3);
     for (const s of CONTROLLER_STRINGS) expect(ruleViolations(s), s).toEqual([]);
-    // did-you-mean is shown with a real command filled in; check every command the hints can suggest.
     for (const c of [...SCRIPT, ...EXTRAS]) {
       const line = didYouMean(formatCommand(c));
       expect(ruleViolations(line), line).toEqual([]);
@@ -187,18 +91,19 @@ describe('RF1: students typing loosely', () => {
     const r = rig();
     r.c.submit(input);
     expect(r.c.badTries).toBe(0);
-    expect(r.c.session.plot.view).toBe('pca');
-    expect(r.c.session.plot.layers).toContain('IronAge');
-    expect(r.c.session.plot.frame).toBe('britain');
+    expect(r.c.derived.plot.view).toBe('pca');
+    expect(r.c.derived.plot.layers).toContain('IronAge');
+    expect(r.c.derived.plot.frame).toBe('britain');
+    expect(r.c.session.steps.map((s) => s.cmd)).toEqual(['run_pca(period = "IronAge")']);
   });
 
   it('resolves aliases through the controller', () => {
     const r = rig();
     r.c.submit('run_pca(period = "romans")');
-    expect(r.c.session.plot.layers).toContain('Roman');
+    expect(r.c.derived.plot.layers).toContain('Roman');
     r.c.submit('allele_freq(gene = "lactase")');
-    expect(r.c.session.plot.view).toBe('trait');
-    expect(r.c.session.plot.gene).toBe('LCT');
+    expect(r.c.derived.plot.view).toBe('trait');
+    expect(r.c.derived.plot.gene).toBe('LCT');
     expect(r.c.badTries).toBe(0);
   });
 
@@ -212,23 +117,18 @@ describe('RF1: students typing loosely', () => {
     const said = r.term.output.join('\n');
     expect(said).toMatch(/did you mean/i);
     expect(said).toContain(expected);
-    // The real parser already folds its suggestion into the message, so the controller must not add a second line.
     expect(didYouMeanLines(r.c.session.transcript)).toHaveLength(1);
     expect(r.c.badTries).toBe(1);
     expect(r.renders).toHaveLength(1);
+    expect(r.c.session.steps).toEqual([]);
     expect(console.error).not.toHaveBeenCalled();
   });
 
   it.each<[string, string, boolean]>([
     ['adds its own line when the parser message lacks it', 'That is not a period in this workshop.', true],
-    [
-      'adds nothing when the parser message already says it',
-      'That is not a period in this workshop. Did you mean run_pca(period = "IronAge")?',
-      false,
-    ],
+    ['adds nothing when the parser message already says it',
+      'That is not a period in this workshop. Did you mean run_pca(period = "IronAge")?', false],
   ])('a stubbed parser error that %s: exactly one did-you-mean line', async (_label, message, controllerAdds) => {
-    // The real parser always folds its suggestion into the message (fail() in parser.ts), so the controller's own
-    // did-you-mean line can only be reached through a stub.
     const suggestion = 'run_pca(period = "IronAge")';
     vi.resetModules();
     vi.doMock('../src/parser', async (importOriginal) => ({
@@ -259,37 +159,15 @@ describe('RF1: students typing loosely', () => {
     const r = rig();
     r.c.submit('run_pca(period = "Neolithic")');
     expect(r.c.badTries).toBe(1);
-    expect(r.c.session.plot).toEqual(INITIAL_PLOT);
+    expect(r.c.derived.plot).toEqual(INITIAL_PLOT);
     expect(r.renders).toHaveLength(1);
   });
 
   const JUNK = [
-    ')))(((',
-    '"',
-    "'",
-    'run_pca(',
-    'run_pca(period=)',
-    'run_pca(period = "")',
-    'run_pca(period = "IronAge"',
-    'allele_freq(gene = )',
-    '()',
-    '=',
-    ',,,,',
-    'NaN',
-    'undefined',
-    'null',
-    '__proto__',
-    'constructor',
-    'run_pca(period = "__proto__")',
-    'run_admixture(K = "three")',
-    'run_admixture(K = Infinity)',
-    'drop table students;',
-    '<script>alert(1)</script>',
-    '\u0000\u0001\u0002',
-    '💥🧬',
-    'ancestry_test(person = "all")',
-    '\\',
-    '${process}',
+    ')))(((', '"', "'", 'run_pca(', 'run_pca(period=)', 'run_pca(period = "")', 'run_pca(period = "IronAge"',
+    'allele_freq(gene = )', '()', '=', ',,,,', 'NaN', 'undefined', 'null', '__proto__', 'constructor',
+    'run_pca(period = "__proto__")', 'run_admixture(K = "three")', 'run_admixture(K = Infinity)', 'drop table students;',
+    '<script>alert(1)</script>', '\u0000\u0001\u0002', '💥🧬', 'ancestry_test(person = "all")', '\\', '${process}',
   ];
 
   it('junk never crashes and never shows a stack trace', () => {
@@ -300,11 +178,10 @@ describe('RF1: students typing loosely', () => {
     expect(said).not.toMatch(/TypeError|ReferenceError|RangeError|SyntaxError|\[object |\n\s+at /);
     expect(() => r.c.submit(undefined as unknown as string)).not.toThrow();
     expect(() => r.c.submit(42 as unknown as string)).not.toThrow();
-    // Nothing was swallowed on the way either: a parser or command that threw would have been logged here.
     expect(console.error).not.toHaveBeenCalled();
   });
 
-  it('blank input does nothing and does not count', () => {
+  it('blank input with no card open and nothing animating does nothing and does not count', () => {
     const r = rig();
     r.c.submit('');
     r.c.submit('    ');
@@ -323,8 +200,8 @@ describe('RF1: students typing loosely', () => {
     const echo = r.events.find((e) => e.startsWith('echo:')) as string;
     expect(echo.length).toBe('echo:'.length + 201);
     expect(echo.endsWith('…')).toBe(true);
-    expect(r.c.session.history[0].length).toBe(201);
-    expect(r.c.session.plot).toEqual(INITIAL_PLOT);
+    expect(r.c.session.history[0]!.length).toBe(201);
+    expect(r.c.derived.plot).toEqual(INITIAL_PLOT);
     expect(() => r.c.submit('a'.repeat(2000))).not.toThrow();
     expect(r.c.badTries).toBe(2);
     expect(console.error).not.toHaveBeenCalled();
@@ -345,18 +222,19 @@ describe('RF1: students typing loosely', () => {
 
   it('auto-fill inserts script[i] for the current pointer', () => {
     const r = rig();
-    r.c.submit(STEP(0));
-    r.c.submit(STEP(1));
+    runSteps(r, 0, 2);
     expect(r.c.hintIndex).toBe(2);
     for (let k = 0; k < MAX_BAD_TRIES; k++) r.c.submit('nope');
     expect(r.term.prompt).toBe(STEP(2));
+    expect(r.term.prompt).toBe('run_pca(period = "Europe")');
   });
 
-  it('a friendly refusal (K = 4) is not an incorrect try', () => {
+  it('a friendly refusal (K = 4) is not an incorrect try and not a step', () => {
     const r = rig();
     r.c.submit('bad1');
     r.c.submit('run_admixture(K = 4)');
     expect(r.term.output.join('\n')).toContain('K = 3');
+    expect(r.c.session.steps).toEqual([]);
     r.c.submit('bad2');
     expect(r.c.badTries).toBe(2);
     expect(r.term.prompt).toBe('');
@@ -366,15 +244,15 @@ describe('RF1: students typing loosely', () => {
 
   it('a refusal neither draws nor moves the hint pointer', async () => {
     const r = rig();
-    for (let k = 0; k < 5; k++) r.c.submit(STEP(k));
+    runSteps(r, 0, 5);
     expect(SCRIPT[5]).toEqual({ name: 'run_admixture', K: 3 });
-    const before = r.c.session.plot;
+    const before = r.c.derived.plot;
     const rendersBefore = r.renders.length;
     r.c.submit('run_admixture(K = 4)');
     expect(r.c.hintIndex).toBe(5);
-    expect(r.c.session.plot).toEqual(before);
+    expect(r.c.derived.plot).toEqual(before);
     expect(r.renders).toHaveLength(rendersBefore);
-    await flushMicrotasks(); // a draw scheduled behind the log's promise would land here
+    await flushMicrotasks();
     expect(r.renders).toHaveLength(rendersBefore);
   });
 
@@ -402,25 +280,36 @@ describe('RF1: students typing loosely', () => {
 
   it('Esc after the predict step still inserts the BellBeaker step', () => {
     const r = rig();
-    for (let k = 0; k < 4; k++) r.c.submit(STEP(k));
+    runSteps(r, 0, 4);
     expect(SCRIPT[3]).toEqual({ name: 'run_pca', period: 'FirstFarmers' });
-    expect(r.term.hint).toMatch(/^Predict:/);
+    expect(r.term.hint).toBe(PREDICT_HINT);
     r.c.escape();
     expect(r.term.prompt).toBe('run_pca(period = "BellBeaker")');
   });
 
-  it('after the last step, Esc inserts the extra the hint line shows', () => {
+  it('the Reveal line shows before step 9, after ancestry_test(person = "IronAge")', () => {
     const r = rig();
-    for (let k = 0; k < SCRIPT.length; k++) r.c.submit(STEP(k));
+    runSteps(r, 0, 9);
+    expect(SCRIPT[8]).toEqual({ name: 'ancestry_test', person: 'IronAge' });
+    expect(r.term.hint).toBe(REVEAL_HINT);
+    r.c.escape();
+    expect(r.term.prompt).toBe('run_pca(period = "Today")');
+  });
+
+  it('after the last step, Esc inserts the extra the hint line shows; help() keeps the rotation, a step moves it', () => {
+    const r = rig();
+    runSteps(r, 0, SCRIPT.length);
     expect(r.c.hintIndex).toBe(SCRIPT.length);
     r.c.escape();
-    expect(EXTRAS.map((e) => formatCommand(e))).toContain(r.term.prompt);
-    expect(r.term.hint).toContain(r.term.prompt);
-    const first = r.term.prompt;
+    expect(r.term.prompt).toBe(formatCommand(EXTRAS[0]!));
+    expect(r.term.hint).toBe(EXTRA_PREFIX + formatCommand(EXTRAS[0]!));
     r.c.submit('help()');
     r.c.escape();
+    expect(r.term.prompt).toBe(formatCommand(EXTRAS[0]!));
+    r.c.submit(formatCommand(EXTRAS[0]!));
+    r.c.escape();
+    expect(r.term.prompt).toBe(formatCommand(EXTRAS[1]!));
     expect(r.term.hint).toContain(r.term.prompt);
-    expect(r.term.prompt).not.toBe(first);
   });
 });
 
@@ -429,7 +318,7 @@ describe('hint pointer and plot wiring', () => {
     const r = rig();
     r.c.submit(STEP(3));
     expect(r.c.hintIndex).toBe(0);
-    expect(r.c.session.plot.layers).toContain('FirstFarmers');
+    expect(r.c.derived.plot.layers).toContain('FirstFarmers');
     r.c.submit(STEP(0));
     expect(r.c.hintIndex).toBe(1);
     expect(r.term.hint).toContain(STEP(1));
@@ -439,8 +328,7 @@ describe('hint pointer and plot wiring', () => {
 
   it.each(['help()', 'clear()'])('%s does not end the Predict beat', (cmd) => {
     const r = rig();
-    for (let k = 0; k < 4; k++) r.c.submit(STEP(k));
-    expect(SCRIPT[3]).toEqual({ name: 'run_pca', period: 'FirstFarmers' });
+    runSteps(r, 0, 4);
     expect(r.term.hint).toBe(PREDICT_HINT);
     r.c.submit(cmd);
     expect(r.term.hint).toBe(PREDICT_HINT);
@@ -448,40 +336,470 @@ describe('hint pointer and plot wiring', () => {
   });
 
   it('renders the reduced plot after each drawing command, not after text-only ones', () => {
-    const r = rig();
+    const r = rig({ features: ALL_OFF }); // consumerBars off: ancestry_test draws nothing
     r.c.submit('load_genomes()');
     r.c.submit('ancestry_test(person = "me")');
     expect(r.renders).toHaveLength(1);
     r.c.submit('run_pca(period = "Roman")');
     r.c.submit('run_pca(period = "BellBeaker")');
     expect(r.renders).toHaveLength(3);
-    expect(r.renders[1].frame).toBe('britain');
-    expect(r.renders[2].frame).toBe('europe');
-    expect(r.renders[2].layers).toEqual(expect.arrayContaining(['Roman', 'BellBeaker']));
+    expect(r.renders[1]!.frame).toBe('britain');
+    expect(r.renders[2]!.frame).toBe('europe');
+    expect(r.renders[2]!.layers).toEqual(expect.arrayContaining(['Roman', 'BellBeaker']));
     r.c.submit('run_admixture(K = 3)');
-    expect(r.renders[3].view).toBe('admixture');
+    expect(r.renders[3]!.view).toBe('admixture');
+    expect(r.renderOpts.slice(1)).toEqual([undefined, undefined, undefined]); // live draws animate as usual
   });
 
-  it('clear() clears the screen and transcript, not the plot', () => {
+  it('clear() clears the screen and appends a clear marker; nothing is deleted and the plot stays', () => {
     const r = rig();
     r.c.submit('run_pca(period = "Today")');
-    const plot = r.c.session.plot;
+    const plot = r.c.derived.plot;
+    const before = r.c.session.transcript.length;
     r.c.submit('clear()');
     expect(r.events).toContain('clear');
-    expect(r.c.session.transcript).toEqual([]);
-    expect(r.c.session.plot).toEqual(plot);
+    const t = r.c.session.transcript;
+    expect(t).toHaveLength(before + 2); // the clear() input line, then the marker
+    expect(t[t.length - 1]).toMatchObject({ kind: 'clear', text: '' });
+    expect(visibleTranscript(t, Infinity)).toEqual([]);
+    expect(r.c.derived.plot).toEqual(plot);
     expect(r.renders).toHaveLength(2);
+    expect(r.c.session.steps.map((s) => s.cmd)).toEqual(['run_pca(period = "Today")']);
   });
 
-  it('records history (bad tries included) and the transcript', () => {
+  it('records history (bad tries included) and the transcript with growing seqs', () => {
     const r = rig();
     r.c.submit('help()');
     r.c.submit('oops');
     r.c.submit('load_genomes()');
     expect(r.c.session.history).toEqual(['help()', 'oops', 'load_genomes()']);
-    const inputs = r.c.session.transcript.filter((l) => l.kind === 'input').map((l) => l.text);
-    expect(inputs).toEqual(['help()', 'oops', 'load_genomes()']);
-    expect(r.c.session.transcript.filter((l) => l.kind === 'output').length).toBeGreaterThan(3);
+    const t = r.c.session.transcript;
+    expect(t.filter((l) => l.kind === 'input').map((l) => l.text)).toEqual(['help()', 'oops', 'load_genomes()']);
+    expect(t.filter((l) => l.kind === 'output').length).toBeGreaterThan(3);
+    expect(t.map((l) => l.seq)).toEqual(t.map((_, k) => k + 1));
+    expect(r.c.session.nextSeq).toBe(t.length + 1);
+  });
+});
+
+describe('extrasTick (spec §2.2): only steps run after the script end move the extras rotation', () => {
+  it('help(), clear(), Tab listings, bad tries and refusals never tick it; a step ticks it once', () => {
+    const r = rig();
+    runSteps(r, 0, SCRIPT.length);
+    expect(r.c.derived.extrasTick).toBe(0);
+    const first = EXTRA_PREFIX + formatCommand(EXTRAS[0]!);
+    expect(r.term.hint).toBe(first);
+    r.c.submit('help()');
+    r.c.submit('clear()');
+    r.c.tab('run_');
+    r.c.submit('oops');
+    r.c.submit('run_admixture(K = 4)');
+    expect(r.c.derived.extrasTick).toBe(0);
+    expect(r.term.hint).toBe(first);
+    r.c.submit('load_genomes()');
+    expect(r.c.derived.extrasTick).toBe(1);
+    expect(r.term.hint).toBe(EXTRA_PREFIX + formatCommand(EXTRAS[1]!));
+  });
+});
+
+describe('session v2 log (spec §4.2)', () => {
+  it('a step is one successful command other than help() and clear(); it stores formatCommand of the parsed command', () => {
+    const r = rig();
+    r.c.submit('help()');
+    r.c.submit('oops');
+    r.c.submit('run_admixture(K = 4)');
+    r.c.submit('clear()');
+    r.c.submit('RUN_PCA(PERIOD="romans")');
+    r.c.submit('ancestry_test(person = "me")');
+    expect(r.c.session.steps.map((s) => s.cmd)).toEqual(['run_pca(period = "Roman")', 'ancestry_test(person = "me")']);
+    expect(r.c.screen).toEqual({ step: 2, card: 0 });
+    expect(r.c.canGoBack).toBe(true);
+  });
+
+  it("endSeq is the seq of the step's last output line", () => {
+    const r = rig();
+    r.c.submit('load_genomes()');
+    r.c.submit('oops');
+    const s = r.c.session;
+    expect(s.transcript.find((e) => e.seq === s.steps[0]!.endSeq)?.text).toBe('Genomes loaded.');
+    expect(s.transcript[s.transcript.length - 1]!.seq).toBeGreaterThan(s.steps[0]!.endSeq);
+  });
+
+  it('saves after every command and every card advance, with the build hash', () => {
+    const r = rig();
+    r.c.submit(STEP(0));
+    expect(loadSession(r.store)?.steps.map((s) => s.cmd)).toEqual([STEP(0)]);
+    r.c.submit('garbage');
+    expect(loadSession(r.store)?.history).toEqual([STEP(0), 'garbage']);
+    runSteps(r, 1, 7);
+    r.c.submit(STEP(7));
+    expect(loadSession(r.store)?.cursor).toEqual({ step: 8, card: 0 });
+    r.c.continueCard();
+    expect(loadSession(r.store)?.cursor).toEqual({ step: 8, card: 1 });
+    expect(loadSession(r.store)?.build).toBe(sessionBuildHash());
+  });
+
+  it('derived hands out a copy: editing it does not touch the controller', () => {
+    const r = rig();
+    runSteps(r, 0, 3);
+    const d = r.c.derived;
+    d.cardsFor[2]!.push('L3');
+    d.cardsFor.length = 0;
+    expect(r.c.derived.cardsFor).toEqual([[], [], ['A1']]);
+  });
+
+  it('works with blocked storage and with no storage', () => {
+    for (const store of [blockedStore, null]) {
+      const r = rig({ store });
+      expect(() => {
+        r.c.submit(STEP(0));
+        r.c.submit('junk');
+        r.c.escape();
+        r.c.tab('run_');
+      }).not.toThrow();
+      expect(r.c.hintIndex).toBe(1);
+    }
+  });
+});
+
+describe('restore by replay (spec §4.2)', () => {
+  it('rebuilds plot, hint, lastRan, extras, cards, history and transcript from the log; draws once without animation', () => {
+    const a = rig();
+    runSteps(a, 0, 3);
+    a.c.submit('run_pca(period = "Roman")');
+    a.c.submit('oops');
+    const saved = loadSession(a.store)!;
+    const b = rig({ restored: saved, store: a.store });
+    expect(b.c.hintIndex).toBe(3);
+    expect(b.c.derived).toEqual(a.c.derived);
+    expect(b.renders).toEqual([a.c.derived.plot]);
+    expect(b.renderOpts).toEqual([{ animate: false }]);
+    expect(b.term.history).toEqual(saved.history);
+    expect(b.term.shownLines).toEqual(visibleTranscript(saved.transcript, Infinity).map(({ kind, text }) => ({ kind, text })));
+    expect(b.events.filter((e) => e.startsWith('echo:') || e.startsWith('out:'))).toEqual([]); // drawn at once
+    expect(b.c.session).toEqual(a.c.session);
+    expect(b.term.hint).toBe(a.term.hint);
+    expect(b.events.some((e) => e.includes(RESTORED_NOTICE))).toBe(false); // the shell prints the notice, never the controller
+  });
+
+  it('the Predict and Reveal lines survive a refresh (lastRan is replayed)', () => {
+    const a = rig();
+    runSteps(a, 0, 4);
+    expect(rig({ restored: loadSession(a.store) }).term.hint).toBe(PREDICT_HINT);
+    runSteps(a, 4, 9);
+    expect(rig({ restored: loadSession(a.store) }).term.hint).toBe(REVEAL_HINT);
+  });
+
+  it('reopens the card the cursor points at', () => {
+    const a = rig();
+    runSteps(a, 0, 7);
+    a.c.submit(STEP(7));
+    a.c.continueCard();
+    expect(a.c.cardOpen).toBe('E2');
+    const b = rig({ restored: loadSession(a.store) });
+    expect(b.c.cardOpen).toBe('E2');
+    expect(b.cards.opens).toEqual([{ id: 'E2', index: 1, count: 3, placement: 'after' }]);
+    expect(b.term.hint).toBe(CARD_HINT);
+    expect(b.c.screen).toEqual({ step: 8, card: 1 });
+  });
+
+  it('a session saved after the whole guided script restores at SCRIPT.length, with the extras hint and no card', () => {
+    const a = rig();
+    runSteps(a, 0, SCRIPT.length);
+    const saved = loadSession(a.store)!;
+    expect(saved.steps).toHaveLength(SCRIPT.length);
+    expect(saved.cursor.step).toBe(SCRIPT.length);
+    const b = rig({ restored: saved });
+    expect(b.c.hintIndex).toBe(SCRIPT.length);
+    expect(b.term.hint).toBe(EXTRA_PREFIX + formatCommand(EXTRAS[0]!));
+    expect(b.c.cardOpen).toBeNull();
+    expect(b.c.derived).toEqual(a.c.derived);
+  });
+
+  it('a refresh while an after-card still waits for its log opens that card at once', () => {
+    const a = rig();
+    runSteps(a, 0, 2);
+    a.term.holdPrints = true;
+    a.c.submit(STEP(2));
+    expect(a.c.cardOpen).toBeNull();
+    const b = rig({ restored: loadSession(a.store) });
+    expect(b.c.cardOpen).toBe('A1');
+  });
+
+  it('shows only the lines after the last clear() marker', () => {
+    const a = rig();
+    a.c.submit('load_genomes()');
+    a.c.submit('clear()');
+    a.c.submit('oops');
+    const b = rig({ restored: loadSession(a.store) });
+    expect(b.term.shownLines.map((l) => l.text)[0]).toBe('oops');
+    expect(b.term.shownLines.some((l) => l.text === 'Genomes loaded.')).toBe(false);
+  });
+
+  it("clamps a card index past the step's cards", () => {
+    const a = rig();
+    a.c.submit(STEP(0));
+    const s = { ...loadSession(a.store)!, cursor: { step: 1, card: 5 } };
+    const b = rig({ restored: s });
+    expect(b.c.screen).toEqual({ step: 1, card: 0 });
+    expect(b.c.cardOpen).toBeNull();
+  });
+
+  const BROKEN: [string, SessionV2['steps'], SessionV2['cursor']][] = [
+    ['an unknown value', [{ cmd: 'run_pca(period = "Neolithic")', endSeq: 1 }], { step: 1, card: 0 }],
+    ['a refused command', [{ cmd: 'run_admixture(K = 4)', endSeq: 1 }], { step: 1, card: 0 }],
+    ['help() as a step', [{ cmd: 'help()', endSeq: 1 }], { step: 1, card: 0 }],
+    ['a cursor past the log', [{ cmd: 'load_genomes()', endSeq: 1 }], { step: 2, card: 0 }],
+  ];
+  it.each(BROKEN)('a log that cannot be replayed starts fresh without throwing (%s)', (_name, steps, cursor) => {
+    const s: SessionV2 = {
+      version: 2, build: sessionBuildHash(), history: ['x'], transcript: [{ seq: 1, kind: 'input', text: 'x' }], steps, cursor, nextSeq: 2,
+    };
+    let r!: Rig;
+    expect(() => {
+      r = rig({ restored: s });
+    }).not.toThrow();
+    expect(console.error).toHaveBeenCalledWith('restore failed; starting fresh', expect.any(Error));
+    expect(r.c.hintIndex).toBe(0);
+    expect(r.c.session.history).toEqual([]);
+    expect(r.c.session.steps).toEqual([]);
+    expect(r.events).toContain('clear');
+    expect(r.renders).toEqual([INITIAL_PLOT]);
+  });
+});
+
+describe('cards (spec §5.3) and the Enter/Esc rules (spec §4.4)', () => {
+  it('"after" cards open only when the step\'s own log has finished, after its plot is drawn', async () => {
+    const r = rig();
+    runSteps(r, 0, 2);
+    r.term.holdPrints = true;
+    r.c.submit(STEP(2)); // run_pca(period = "Europe"): after-card A1
+    expect(r.term.isPrinting()).toBe(true);
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.cards.opens).toEqual([]);
+    expect(r.term.hint).not.toBe(CARD_HINT);
+    expect(r.c.screen).toEqual({ step: 3, card: 0 });
+    await settle(r);
+    expect(r.c.cardOpen).toBe('A1');
+    expect(r.cards.opens).toEqual([{ id: 'A1', index: 0, count: 1, placement: 'after' }]);
+    expect(r.events.lastIndexOf('render:pca')).toBeLessThan(r.events.indexOf('card:open:A1'));
+    expect(r.term.hint).toBe(CARD_HINT);
+  });
+
+  it('a line typed while the log prints flushes it, skips the after-cards (still screens) and runs the line', async () => {
+    const r = rig();
+    runSteps(r, 0, 7);
+    r.term.holdPrints = true;
+    r.c.submit(STEP(7)); // run_pca(period = "IronAge"): E1, E2, E3
+    r.c.submit('help()');
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.c.screen).toEqual({ step: 8, card: 3 });
+    await settle(r);
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.cards.opens.filter((o) => o.id.startsWith('E'))).toEqual([]);
+    expect(r.c.derived.cardsFor[7]).toEqual(['E1', 'E2', 'E3']);
+    expect(r.renders[r.renders.length - 1]!.layers).toContain('IronAge');
+  });
+
+  it('"before" cards open as soon as the command is accepted and stay while the log prints', async () => {
+    const r = rig();
+    runSteps(r, 0, 14);
+    r.term.holdPrints = true;
+    const rendersBefore = r.renders.length;
+    r.c.submit(STEP(14)); // allele_freq(gene = "LCT"): H1, H2 before
+    expect(r.term.isPrinting()).toBe(true);
+    expect(r.c.cardOpen).toBe('H1');
+    expect(r.cards.opens[r.cards.opens.length - 1]).toEqual({ id: 'H1', index: 0, count: 2, placement: 'before' });
+    expect(r.term.hint).toBe(CARD_HINT);
+    expect(r.renders).toHaveLength(rendersBefore);
+    await settle(r);
+    expect(r.renders[r.renders.length - 1]!.view).toBe('trait');
+    expect(r.c.cardOpen).toBe('H1');
+  });
+
+  it('a blank Enter advances one card; after the last card the step hint is back and a blank Enter does nothing', () => {
+    const r = rig();
+    runSteps(r, 0, 7);
+    r.c.submit(STEP(7));
+    expect(r.c.cardOpen).toBe('E1');
+    r.c.submit('');
+    expect(r.c.cardOpen).toBe('E2');
+    expect(r.cards.opens[r.cards.opens.length - 1]).toEqual({ id: 'E2', index: 1, count: 3, placement: 'after' });
+    r.c.submit('');
+    r.c.submit('');
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.events[r.events.length - 1]).toBe('card:close');
+    expect(r.term.hint).toBe(hintText(8, SCRIPT[7]!, 0));
+    expect(r.c.screen).toEqual({ step: 8, card: 3 });
+    const events = [...r.events];
+    r.c.submit('');
+    expect(r.events).toEqual(events);
+  });
+
+  it('a blank Enter on a "before" card advances it without flushing the log that is still printing (RF4)', async () => {
+    const r = rig();
+    runSteps(r, 0, 14);
+    r.term.holdPrints = true;
+    r.c.submit(STEP(14)); // allele_freq(gene = "LCT"): H1, H2 open at once and the log is still printing
+    expect(r.term.isPrinting()).toBe(true);
+    expect(r.c.cardOpen).toBe('H1');
+    const rendersBefore = r.renders.length;
+    r.c.submit('');
+    expect(r.c.cardOpen).toBe('H2');
+    expect(r.term.isPrinting()).toBe(true);
+    r.c.continueCard();
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.c.screen).toEqual({ step: 15, card: 2 });
+    expect(r.term.isPrinting()).toBe(true); // closing the last card does not flush it either
+    expect(r.renders).toHaveLength(rendersBefore);
+    await settle(r);
+    expect(r.renders[r.renders.length - 1]!.view).toBe('trait');
+  });
+
+  it("Enter with text closes the step's remaining cards (they stay screens), then runs the line; a bad line counts", () => {
+    const r = rig();
+    runSteps(r, 0, 7);
+    r.c.submit(STEP(7));
+    r.c.continueCard(); // E2
+    r.c.submit('run_pca(period = "Jurassic")');
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.cards.current).toBeNull();
+    expect(r.c.screen).toEqual({ step: 8, card: 3 });
+    expect(r.c.badTries).toBe(1);
+    expect(r.term.output[r.term.output.length - 1]).toBe(hintText(8, SCRIPT[7]!, 0));
+    r.c.submit(STEP(8));
+    expect(r.c.hintIndex).toBe(9);
+    expect(r.c.badTries).toBe(0);
+  });
+
+  it('Esc advances one card while a card is open and never fills the prompt; with no card it fills script[i]', () => {
+    const r = rig();
+    runSteps(r, 0, 7);
+    r.c.submit(STEP(7));
+    r.c.escape();
+    expect(r.c.cardOpen).toBe('E2');
+    expect(r.term.prompt).toBe('');
+    r.c.escape();
+    r.c.escape();
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.term.prompt).toBe('');
+    r.c.escape();
+    expect(r.term.prompt).toBe(STEP(8));
+  });
+
+  it('the repeat guard ignores repeat keydowns and any Enter or Esc within 400 ms of a card opening or the last advance', () => {
+    let clock = 0;
+    const r = rig({ now: () => clock });
+    runSteps(r, 0, 7); // Continue clicks are never throttled
+    clock = 10_000;
+    r.c.submit(STEP(7)); // E1 opens at 10 000
+    r.c.submit('', { repeat: false });
+    expect(r.c.cardOpen).toBe('E1');
+    clock = 10_399;
+    r.c.escape({ repeat: false });
+    expect(r.c.cardOpen).toBe('E1');
+    clock = 10_400;
+    r.c.submit('', { repeat: false });
+    expect(r.c.cardOpen).toBe('E2');
+    clock = 20_000;
+    r.c.submit('', { repeat: true });
+    r.c.escape({ repeat: true });
+    expect(r.c.cardOpen).toBe('E2');
+    r.c.escape({ repeat: false });
+    expect(r.c.cardOpen).toBe('E3');
+    clock = 20_100;
+    r.c.submit('', { repeat: false });
+    expect(r.c.cardOpen).toBe('E3');
+    r.c.continueCard();
+    expect(r.c.cardOpen).toBeNull();
+  });
+
+  it('ten repeated Enter keydowns on card 1 of 3 leave card 2 open; two Enters 100 ms apart advance one card', () => {
+    let clock = 0;
+    const r = rig({ now: () => clock });
+    runSteps(r, 0, 7);
+    clock = 1_000;
+    r.c.submit(STEP(7));
+    clock = 2_000;
+    r.c.submit('', { repeat: false });
+    for (let k = 0; k < 9; k += 1) r.c.submit('', { repeat: true });
+    expect(r.c.cardOpen).toBe('E2');
+    clock = 3_000;
+    r.c.submit('', { repeat: false });
+    clock = 3_100;
+    r.c.submit('', { repeat: false });
+    expect(r.c.cardOpen).toBe('E3');
+  });
+
+  it('an off-script command draws its plot but opens no card; the card opens when its step is reached', () => {
+    const r = rig();
+    r.c.submit('run_pca(period = "Roman")');
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.cards.opens).toEqual([]);
+    expect(r.renders[r.renders.length - 1]!.layers).toEqual(['Roman']);
+    runSteps(r, 0, 11);
+    r.c.submit(STEP(11));
+    expect(r.c.cardOpen).toBe('F1');
+  });
+
+  it("running a step's command again after passing it never reopens its cards", () => {
+    const r = rig();
+    runSteps(r, 0, 4);
+    const opens = r.cards.opens.length;
+    r.c.submit(STEP(3));
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.cards.opens).toHaveLength(opens);
+  });
+
+  it('card advances leave the three-tries counter alone', () => {
+    const r = rig();
+    runSteps(r, 0, 7);
+    r.c.submit(STEP(7));
+    r.c.submit('');
+    r.c.escape();
+    r.c.continueCard();
+    expect(r.c.badTries).toBe(0);
+    r.c.submit('oops');
+    r.c.submit('oops');
+    expect(r.c.badTries).toBe(2);
+    expect(r.term.prompt).toBe('');
+  });
+
+  it('during the finale animation a blank Enter jumps to the final frame, and so does a new command', () => {
+    let animating = true;
+    const finish = vi.fn(() => {
+      animating = false;
+    });
+    const r = rig({ plotAnimating: () => animating, finishPlotAnimation: finish });
+    r.c.submit('');
+    expect(finish).toHaveBeenCalledTimes(1);
+    animating = true;
+    r.c.submit('load_genomes()');
+    expect(finish).toHaveBeenCalledTimes(2);
+    r.c.submit('');
+    expect(finish).toHaveBeenCalledTimes(2);
+  });
+
+  it('without a card host the card state is still tracked', () => {
+    const r = rig({ cards: false });
+    runSteps(r, 0, 7);
+    r.c.submit(STEP(7));
+    expect(r.c.cardOpen).toBe('E1');
+    expect(r.term.hint).toBe(CARD_HINT);
+    expect(r.cards.opens.length).toBe(0);
+    closeCards(r.c);
+    expect(r.c.cardOpen).toBeNull();
+  });
+
+  it('onScreen reports every cursor change with canGoBack', () => {
+    const seen: string[] = [];
+    const r = rig({ onScreen: (s, back) => seen.push(`${s.step}.${s.card}:${back}`) });
+    expect(seen).toEqual(['0.0:false']);
+    r.c.submit(STEP(0));
+    expect(seen[seen.length - 1]).toBe('1.0:true');
+    runSteps(r, 1, 7);
+    r.c.submit(STEP(7));
+    r.c.continueCard();
+    expect(seen[seen.length - 1]).toBe('8.1:true');
   });
 });
 
@@ -496,8 +814,6 @@ describe('Tab completion', () => {
     expect(completeLine('', 'help()')).toBe('help()');
   });
 
-  // Final review: the parser forgives a copied prompt and the hint line's label, and completions() skips them. The line that
-  // Tab puts back must keep them in front, not paste the whole command a second time inside the quotes.
   it('completeLine keeps a copied prompt or hint label in front and completes what follows it', () => {
     expect(completeLine('> run_pca(period = "Iro', 'run_pca(period = "IronAge")')).toBe('> run_pca(period = "IronAge")');
     expect(completeLine('Next: run_pca(period = "Iro', 'run_pca(period = "IronAge")')).toBe('Next: run_pca(period = "IronAge")');
@@ -505,44 +821,34 @@ describe('Tab completion', () => {
     expect(completeLine('> > Next: ru', 'run_pca(period = "')).toBe('> > Next: run_pca(period = "');
     expect(completeLine('Next: ', 'help()')).toBe('Next: help()');
     expect(completeLine('next:run_p', 'run_pca(period = "')).toBe('next:run_pca(period = "');
-    // a token completion after a label still replaces only the last word
     expect(completeLine('Next: run_pca(period = "Iro', 'IronAge')).toBe('Next: run_pca(period = "IronAge');
   });
 
-  it('completes a command name', () => {
+  it('completes a command name and an argument value', () => {
     const r = rig();
     expect(r.c.tab('run_p').toLowerCase().startsWith('run_pca')).toBe(true);
-  });
-
-  it('completes an argument value inside the call', () => {
-    const r = rig();
     const out = r.c.tab('run_pca(period = "Iro');
     expect(out.startsWith('run_pca(period = "')).toBe(true);
     expect(out).toContain('IronAge');
   });
 
-  it('Tab on a line that starts with a prompt or the hint label completes the command after it, keeping what the student typed in front', () => {
+  it('Tab after a prompt or hint label completes the command after it, keeping what the student typed in front', () => {
     const r = rig();
     expect(r.c.tab('Next: run_pca(period = "Iro')).toBe('Next: run_pca(period = "IronAge")');
     expect(r.c.tab('Try an extra: run_pca(period = "Vik')).toBe('Try an extra: run_pca(period = "Viking")');
     expect(r.c.tab('> > help')).toBe('> > help()');
-    expect(r.c.tab('Next: run_p')).toBe('Next: run_pca(period = "');
-    // several options: nothing is filled in beyond the common text, and the list is printed
     expect(r.c.tab('Next: allele_freq(gene = "H')).toBe('Next: allele_freq(gene = "H');
     expect(r.term.output.join(' ')).toContain('allele_freq(gene = "HERC2")');
   });
 
-  it('leaves unknown text alone', () => {
+  it('leaves unknown text alone, lists the options when there is no longer common prefix, and saves the listing', () => {
     const r = rig();
     expect(r.c.tab('zzzz')).toBe('zzzz');
-  });
-
-  it('lists the options when there is no longer common prefix', () => {
-    const r = rig();
     expect(r.c.tab('run_').toLowerCase()).toBe('run_');
     const said = r.term.output.join(' ');
     expect(said).toContain('run_pca');
     expect(said).toContain('run_admixture');
+    expect(loadSession(r.store)?.transcript.some((e) => e.text.includes('run_admixture'))).toBe(true);
   });
 
   it('never throws on huge or odd input', () => {
@@ -553,12 +859,11 @@ describe('Tab completion', () => {
   });
 });
 
-describe('Enter during printing (spec §4.2)', () => {
+describe('Enter during printing (spec v2.1 §4.2, unchanged)', () => {
   it('flushes the running log, applies its plot, then runs the new command', async () => {
     const r = rig();
     r.term.holdPrints = true;
-    // v3: Britain today now uses the British frame, so a Europe-frame period keeps the frame change in this test.
-    r.c.submit('run_pca(period = "FirstFarmers")');
+    r.c.submit('run_pca(period = "FirstFarmers")'); // off-script at step 0: no card
     expect(r.term.isPrinting()).toBe(true);
     expect(r.renders).toHaveLength(1);
     r.c.submit('run_pca(period = "IronAge")');
@@ -566,29 +871,26 @@ describe('Enter during printing (spec §4.2)', () => {
     const echoB = r.events.indexOf('echo:run_pca(period = "IronAge")');
     expect(renderA).toBeGreaterThan(-1);
     expect(renderA).toBeLessThan(echoB);
-    const lastLineOfA = r.events.slice(0, echoB).filter((e) => e.startsWith('out:'));
-    expect(lastLineOfA.length).toBeGreaterThan(0);
     expect(r.renders).toHaveLength(2);
-    expect(r.renders[1].frame).toBe('europe');
-    expect(r.renders[1].layers).not.toContain('IronAge');
+    expect(r.renders[1]!.frame).toBe('europe');
+    expect(r.renders[1]!.layers).not.toContain('IronAge');
     await flushMicrotasks();
     expect(r.renders).toHaveLength(2);
-    r.term.flush();
-    await flushMicrotasks();
+    await settle(r);
     expect(r.renders).toHaveLength(3);
-    expect(r.renders[2].frame).toBe('britain');
-    expect(r.renders[2].layers).toContain('IronAge');
+    expect(r.renders[2]!.frame).toBe('britain');
+    expect(r.renders[2]!.layers).toContain('IronAge');
   });
 
   it('applies the plot when the log finishes on its own', async () => {
     const r = rig();
     r.term.holdPrints = true;
-    r.c.submit('allele_freq(gene = "LCT")');
+    r.c.submit('allele_freq(gene = "LCT")'); // off-script at step 0: no before-cards
     expect(r.renders).toHaveLength(1);
-    r.term.flush();
-    await flushMicrotasks();
+    expect(r.c.cardOpen).toBeNull();
+    await settle(r);
     expect(r.renders).toHaveLength(2);
-    expect(r.renders[1].gene).toBe('LCT');
+    expect(r.renders[1]!.gene).toBe('LCT');
   });
 
   it('a bad command mid-print still lands after the previous plot', () => {
@@ -600,7 +902,7 @@ describe('Enter during printing (spec §4.2)', () => {
     expect(r.c.badTries).toBe(1);
   });
 
-  it('Esc and Tab mid-print do not disturb the log', () => {
+  it('Esc and a single Tab completion mid-print do not disturb the log', () => {
     const r = rig();
     r.term.holdPrints = true;
     r.c.submit('load_genomes()');
@@ -611,131 +913,63 @@ describe('Enter during printing (spec §4.2)', () => {
     expect(r.term.isPrinting()).toBe(true);
   });
 
-  it('blank input mid-print is ignored completely: the log keeps printing and nothing is drawn, recorded or counted', async () => {
+  it('blank input mid-print is ignored completely: the log keeps printing; nothing is drawn, recorded or counted', async () => {
     const r = rig();
     r.term.holdPrints = true;
     r.c.submit('run_pca(period = "Today")');
-    expect(r.term.isPrinting()).toBe(true);
     const events = [...r.events];
     const hint = r.term.hint;
     const saved = r.c.session;
     for (const blank of ['', '    ', '\t']) r.c.submit(blank);
     expect(r.term.isPrinting()).toBe(true);
-    expect(r.events).toEqual(events); // no flush, no echo, no draw
-    expect(r.renders).toHaveLength(1);
+    expect(r.events).toEqual(events);
     expect(r.term.hint).toBe(hint);
-    expect(r.c.session.history).toEqual(saved.history);
-    expect(r.c.session.transcript).toEqual(saved.transcript);
+    expect(r.c.session).toEqual(saved);
     expect(r.c.badTries).toBe(0);
-    // The running log was left alone, so it still draws its plot once, when it ends.
-    r.term.flush();
-    await flushMicrotasks();
+    await settle(r);
     expect(r.renders).toHaveLength(2);
-    expect(r.renders[1].layers).toContain('Today');
+    expect(r.renders[1]!.layers).toContain('Today');
   });
 
-  it('the session saved mid-print already holds the new plot', () => {
+  it('the session saved mid-print already holds the new step', () => {
     const r = rig();
     r.term.holdPrints = true;
     r.c.submit('run_pca(period = "AngloSaxon")');
-    const saved = loadSession(r.store) as Session;
-    expect(saved.plot.layers).toContain('AngloSaxon');
-    expect(saved.plot.showNorthSea).toBe(true);
-  });
-});
-
-describe('session save and restore (RF4)', () => {
-  it('saves after every command, including incorrect tries', () => {
-    const r = rig();
-    r.c.submit(STEP(0));
-    expect(loadSession(r.store)?.hintIndex).toBe(1);
-    r.c.submit('garbage');
-    expect(loadSession(r.store)?.history).toEqual([STEP(0), 'garbage']);
-  });
-
-  it('works with blocked storage and with no storage', () => {
-    for (const store of [blockedStore, null]) {
-      const events: string[] = [];
-      const term = new FakeTerminal(events);
-      const c = new Controller({ data, terminal: term, renderPlot: () => undefined, store }, null);
-      expect(() => {
-        c.submit(STEP(0));
-        c.submit('junk');
-        c.escape();
-      }).not.toThrow();
-      expect(c.hintIndex).toBe(1);
-    }
-  });
-
-  it('restores transcript, history, hint pointer and plot, and never prints RESTORED_NOTICE (the shell does)', () => {
-    const a = rig();
-    a.c.submit(STEP(0));
-    a.c.submit(STEP(1));
-    a.c.submit('run_pca(period = "Roman")');
-    const saved = loadSession(a.store);
-    expect(saved).not.toBeNull();
-    const b = rig(saved, a.store);
-    expect(b.c.hintIndex).toBe(2);
-    expect(b.renders).toEqual([saved!.plot]);
-    expect(b.term.history).toEqual([STEP(0), STEP(1), 'run_pca(period = "Roman")']);
-    expect(b.events.filter((e) => e.startsWith('echo:'))).toEqual([
-      `echo:${STEP(0)}`,
-      `echo:${STEP(1)}`,
-      'echo:run_pca(period = "Roman")',
-    ]);
-    expect(b.c.session.transcript).toEqual(saved!.transcript);
-    expect(b.events.filter((e) => e.startsWith('notice:'))).toEqual([]);
-    expect(b.events.some((e) => e.includes(RESTORED_NOTICE))).toBe(false);
-    expect(b.term.hint).toContain(STEP(2));
-    b.c.submit(STEP(2));
-    const again = rig(loadSession(b.store), b.store);
-    expect(again.c.hintIndex).toBe(3);
-    expect(again.events.some((e) => e.includes(RESTORED_NOTICE))).toBe(false);
-    expect(again.c.session.transcript.some((l) => l.text === RESTORED_NOTICE)).toBe(false);
-  });
-
-  it('clamps a bad hint index and survives a malformed restored session', () => {
-    const high = rig({ history: [], transcript: [], hintIndex: 999, plot: INITIAL_PLOT });
-    expect(high.c.hintIndex).toBe(SCRIPT.length);
-    const low = rig({ history: [], transcript: [], hintIndex: -5, plot: INITIAL_PLOT });
-    expect(low.c.hintIndex).toBe(0);
-    const weird = {
-      history: [1, null, 'help()'],
-      transcript: [null, { kind: 'output', text: 'ok' }, { kind: 'input' }],
-      hintIndex: Number.NaN,
-      plot: INITIAL_PLOT,
-    } as unknown as Session;
-    const w = rig(weird);
-    expect(w.c.hintIndex).toBe(0);
-    expect(w.c.session.history).toEqual(['help()']);
-    expect(w.events).toContain('out:ok');
-    expect(() => w.c.submit('help()')).not.toThrow();
+    const saved = loadSession(r.store)!;
+    expect(saved.steps.map((s) => s.cmd)).toEqual(['run_pca(period = "AngloSaxon")']);
+    expect(rig({ restored: saved }).c.derived.plot.showNorthSea).toBe(true);
   });
 });
 
 describe('fault isolation', () => {
   it('a throwing renderPlot never breaks the terminal', () => {
-    const events: string[] = [];
-    const term = new FakeTerminal(events);
+    const term = new FakeTerminal([]);
     const c = new Controller(
-      {
-        data,
-        terminal: term,
-        renderPlot: () => {
-          throw new Error('svg failed');
-        },
-        store: null,
-      },
+      { data, terminal: term, renderPlot: () => { throw new Error('svg failed'); }, store: null },
       null,
     );
     expect(() => c.submit('run_pca(period = "Today")')).not.toThrow();
     expect(() => c.submit(STEP(0))).not.toThrow();
     expect(c.hintIndex).toBe(1);
-    expect(console.error).toHaveBeenCalled(); // swallowed for the student, but not silently
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it('a throwing card host never breaks the terminal', () => {
+    const term = new FakeTerminal([]);
+    const c = new Controller(
+      {
+        data, terminal: term, renderPlot: () => undefined, store: null,
+        cards: { open: () => { throw new Error('card failed'); }, close: () => { throw new Error('card failed'); } },
+      },
+      null,
+    );
+    for (let k = 0; k < 3; k += 1) expect(() => c.submit(STEP(k))).not.toThrow();
+    expect(c.cardOpen).toBe('A1');
+    expect(() => c.continueCard()).not.toThrow();
+    expect(console.error).toHaveBeenCalled();
   });
 
   it('a command that throws prints a friendly line and does not count', async () => {
-    // Task 8's execute() catches its own errors, so a throwing execute is simulated with a module mock.
     vi.resetModules();
     vi.doMock('../src/commands', () => ({
       execute: () => {
@@ -750,7 +984,8 @@ describe('fault isolation', () => {
       expect(term.output).toEqual([mod.INTERNAL_ERROR_LINE]);
       expect(c.badTries).toBe(0);
       expect(c.hintIndex).toBe(0);
-      expect(console.error).toHaveBeenCalled(); // the student sees only the friendly line; the cause is logged
+      expect(c.session.steps).toEqual([]);
+      expect(console.error).toHaveBeenCalled();
     } finally {
       vi.doUnmock('../src/commands');
       vi.resetModules();
@@ -800,28 +1035,38 @@ describe('with the real DOM terminal and fake timers', () => {
   it('Enter mid-print keeps log lines and plots in command order', async () => {
     vi.useFakeTimers();
     const w = wire();
-    type(w.input, 'run_pca(period = "FirstFarmers")'); // a Europe-frame period (v3: Britain today is in the British frame)
+    type(w.input, 'run_pca(period = "FirstFarmers")');
     const printedSoFar = lines(w.out).length;
     type(w.input, 'run_pca(period = "IronAge")');
     const all = lines(w.out);
-    const echoB = all.indexOf('> run_pca(period = "IronAge")');
-    expect(echoB).toBeGreaterThan(printedSoFar - 1);
+    expect(all.indexOf('> run_pca(period = "IronAge")')).toBeGreaterThan(printedSoFar - 1);
     expect(all[0]).toBe('> run_pca(period = "FirstFarmers")');
     expect(w.renders).toHaveLength(2);
-    expect(w.renders[1].frame).toBe('europe');
+    expect(w.renders[1]!.frame).toBe('europe');
     await vi.runAllTimersAsync();
     expect(w.renders).toHaveLength(3);
-    expect(w.renders[2].frame).toBe('britain');
+    expect(w.renders[2]!.frame).toBe('britain');
   });
 
-  it('a staggered command log finishes within 3 s', async () => {
+  it('a staggered command log finishes within 3 s and the transcript matches the screen', async () => {
     vi.useFakeTimers();
     const w = wire();
     type(w.input, 'load_genomes()');
     await vi.advanceTimersByTimeAsync(3000);
-    expect(w.c.session.transcript.filter((l) => l.kind === 'output').map((l) => l.text)).toEqual(
-      lines(w.out).slice(1),
-    );
+    expect(w.c.session.transcript.filter((l) => l.kind === 'output').map((l) => l.text)).toEqual(lines(w.out).slice(1));
+  });
+
+  it("a guided step's after-card opens when the real staggered log ends", async () => {
+    vi.useFakeTimers();
+    const w = wire();
+    type(w.input, STEP(0));
+    await vi.runAllTimersAsync();
+    type(w.input, STEP(1));
+    await vi.runAllTimersAsync();
+    type(w.input, STEP(2));
+    expect(w.c.cardOpen).toBeNull();
+    await vi.runAllTimersAsync();
+    expect(w.c.cardOpen).toBe('A1');
   });
 
   it('three bad tries by keyboard fill the prompt; Enter then runs it', async () => {
@@ -848,7 +1093,8 @@ describe('with the real DOM terminal and fake timers', () => {
   });
 });
 
-describe('v3 script wiring (Task 4)', () => {
+// The two Task 4 controller tests that the v3 rewrite of this file would otherwise drop.
+describe('v3 script wiring through the controller (kept from Task 4)', () => {
   it('passes whether Britain today is shown to execute: the Europe and ADMIXTURE lines follow the plot', () => {
     const r = rig();
     r.c.submit('run_pca(period = "Europe")');
@@ -863,15 +1109,11 @@ describe('v3 script wiring (Task 4)', () => {
     expect(r.term.output).toContain(ADMIX_TODAY_SHOWN);
   });
 
-  it('the guided script runs to the end through the controller, with the Reveal line before run_pca(Today)', () => {
+  it('the guided script runs to the end through the controller: every step is logged, no bad tries', () => {
     const r = rig();
-    for (let k = 0; k < 9; k++) r.c.submit(STEP(k));
-    expect(SCRIPT[8]).toEqual({ name: 'ancestry_test', person: 'IronAge' });
-    expect(r.term.hint).toBe(REVEAL_HINT);
-    r.c.escape();
-    expect(r.term.prompt).toBe('run_pca(period = "Today")');
-    for (let k = 9; k < SCRIPT.length; k++) r.c.submit(STEP(k));
-    expect(r.c.hintIndex).toBe(19);
+    runSteps(r, 0, SCRIPT.length);
+    expect(r.c.hintIndex).toBe(SCRIPT.length);
     expect(r.c.badTries).toBe(0);
+    expect(r.c.session.steps.map((s) => s.cmd)).toEqual(SCRIPT.map((c) => formatCommand(c)));
   });
 });

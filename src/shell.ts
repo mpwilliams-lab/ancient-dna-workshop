@@ -5,7 +5,7 @@ import type { WorkshopData } from './types';
 import { Controller } from './controller';
 import { mountTerminal, type TerminalView } from './terminal';
 import { renderPlot } from './plots/index';
-import { clearSession, loadSession, type Session, type SessionStorageLike } from './session';
+import { clearSession, loadSession, type SessionStorageLike, type SessionV2 } from './session';
 import {
   APP_TITLE, RESTORED_NOTICE, WRAP_BUTTON, WRAP_CLOSE, WRAP_CREDIT, WRAP_LINE, WRAP_QR_CAPTION,
 } from './content';
@@ -82,7 +82,7 @@ export function boot(env: BootEnv): Booted {
       /* file:// or sandbox may refuse; the session is already cleared */
     }
   }
-  let restoredSession: Session | null = reset ? null : loadSession(store);
+  let restoredSession: SessionV2 | null = reset ? null : loadSession(store);
 
   const termRoot = el(doc, 'terminal');
   const plotHost = el(doc, 'plot');
@@ -120,10 +120,10 @@ export function boot(env: BootEnv): Booted {
   return { controller, terminal, store, restored: restoredSession !== null, reset };
 }
 
-/** True when the Controller carries anything from a saved session: typing history, transcript lines or a hint step. */
+/** True when the Controller carries anything from a saved session: typing history, transcript lines or a step. */
 function holdsSavedState(c: Controller): boolean {
   const s = c.session;
-  return s.history.length > 0 || s.transcript.length > 0 || s.hintIndex > 0;
+  return s.history.length > 0 || s.transcript.length > 0 || s.steps.length > 0;
 }
 
 function focusPrompt(termRoot: HTMLElement): void {

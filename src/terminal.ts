@@ -10,7 +10,12 @@ export interface TerminalView {
   clearScreen(): void;
   notice(text: string): void;
   setHistory?(lines: string[]): void;     // additive (Task 10): seeds up/down history after a restore
+  /** Session v2 restore: clears the log and draws these lines at once (no stagger). Input lines get the prompt in front. */
+  showLines(lines: readonly { kind: 'input' | 'output' | 'notice'; text: string }[]): void;
 }
+
+/** Key details from the keydown event (Task 12 passes them to onEnter/onEsc; the card repeat guard reads `repeat`). */
+export interface KeyInfo { repeat: boolean }
 
 export interface TerminalHandlers {
   onEnter(line: string): void;
@@ -213,6 +218,11 @@ export function mountTerminal(root: HTMLElement, handlers: TerminalHandlers): Te
       history = lines.filter((l) => typeof l === 'string' && l.trim() !== '').slice(-200);
       cursor = history.length;
       draft = '';
+    },
+    showLines(lines: readonly { kind: 'input' | 'output' | 'notice'; text: string }[]): void {
+      finish();
+      out.replaceChildren();
+      for (const l of lines) append(l.kind === 'input' ? `${PROMPT_SYMBOL} ${String(l.text)}` : String(l.text), l.kind);
     },
   };
 }
