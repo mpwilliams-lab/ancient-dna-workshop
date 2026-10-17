@@ -40,8 +40,8 @@ export function formatCount(n: number): string {
   return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-/** "about 950": the axes people count is shown rounded to the nearest 10 (spec §3.5). */
-function round10(n: number): number {
+/** "about 950": the axes people count is shown rounded to the nearest 10 (spec §3.5). Exported: the run sheet quotes the same number. */
+export function round10(n: number): number {
   return Math.round(n / 10) * 10;
 }
 

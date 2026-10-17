@@ -117,7 +117,7 @@ describe('wrapText / textBlock', () => {
   it('wraps on spaces and keeps the exact sentence in textContent', () => {
     expect(wrapText('one two three four', 9)).toEqual(['one two', 'three', 'four']);
     expect(wrapText('  ', 10)).toEqual([]);
-    const s = "At least 90% ± 2% of Britain's gene pool was replaced";
+    const s = 'Each dot is one person; close dots share more ancestry';
     const { el, lines } = textBlock(s, 20, 10, 20, 18);
     expect(lines).toBe(3);
     expect(el.querySelectorAll('tspan')).toHaveLength(3);

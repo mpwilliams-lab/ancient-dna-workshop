@@ -2,26 +2,45 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { beats, buildRunSheet, sayLines } from '../src/runsheet';
-import { SCRIPT } from '../src/hints';
+import { BEAT_TITLES, beats, buildRunSheet, sayLines, STEP_MINUTES } from '../src/runsheet';
+import { SCRIPT, SCRIPT_STEPS } from '../src/hints';
+import { CARDS } from '../src/cards';
 import { formatCommand } from '../src/parser';
-import { BEAKER_CALLOUT, ROMAN_LOG_LINE, WRAP_LINE } from '../src/content';
+import { WRAP_LINE } from '../src/content';
+import { validateData } from '../src/data';
+import { STEP_IDS } from '../src/types';
+import { ruleViolations } from './contentRules';
 import { FIXTURE } from './helpers/shellEnv';
 
 const AT = '2026-10-19T09:00:00Z';
 const OFFLINE = '/Drive/web-app-dist/ancient-dna-workshop.html';
 const md = buildRunSheet(FIXTURE, AT, OFFLINE);
 
-describe('instructor run sheet', () => {
-  it('starts with OKF frontmatter (draft until Matthew verifies it)', () => {
+/** Every line of a sheet that breaks a spec §6 content rule, with the rules it breaks. One line is one string, as on screen. */
+const flaggedLines = (text: string): string[] =>
+  text.split('\n').flatMap((line) => {
+    const rules = ruleViolations(line);
+    return rules.length > 0 ? [`${rules.join(', ')} :: ${line}`] : [];
+  });
+
+describe('instructor run sheet v3', () => {
+  it('starts with OKF front matter (draft until the instructor verifies it), citing the v3 spec and the v2.1 base spec', () => {
     const fm = /^---\n([\s\S]*?)\n---\n/.exec(md);
     expect(fm).not.toBeNull();
     expect(fm![1]).toContain('status: draft');
     expect(fm![1]).toContain(`generated: { by: agent/ClaudeCode, at: ${AT} }`);
     expect(fm![1]).toContain('stale_after: 2026-10-25');
-    expect(fm![1]).toMatch(/sources:\n  - docs\/superpowers\/specs\/2026-10-15-ancient-dna-terminal-workshop-design.md/);
+    expect(fm![1]).toMatch(/sources:\n  - docs\/superpowers\/specs\/2026-10-16-ancient-dna-workshop-v3-design.md\n  - docs\/superpowers\/specs\/2026-10-15-ancient-dna-terminal-workshop-design.md/);
+    expect(fm![1]).not.toMatch(/verified/);
   });
-  it('lists every guided command exactly once, in script order', () => {
+  it('has 19 steps plus the wrap, in script order, with the step ids of SCRIPT_STEPS', () => {
+    const b = beats(FIXTURE);
+    expect(b).toHaveLength(20);
+    expect(b.map((x) => x.id)).toEqual([...STEP_IDS, 'wrap']);
+    expect(b.map((x) => x.index)).toEqual([...SCRIPT.map((_, i) => i), null]);
+    expect(b.map((x) => x.title)).toEqual(b.map((x) => BEAT_TITLES[x.id]));
+  });
+  it('lists every guided command exactly once, in script order, and the sheet shows them in that order', () => {
     const cmds = beats(FIXTURE).flatMap((b) => b.commands).map(formatCommand);
     expect(cmds).toEqual(SCRIPT.map(formatCommand));
     let from = 0;
@@ -31,20 +50,37 @@ describe('instructor run sheet', () => {
       from = i + 1;
     }
   });
-  it('follows the spec §3 timing', () => {
-    expect(beats(FIXTURE).map((b) => b.min)).toEqual(['0–3', '3–7', '7–13', '13–16', '16–20', '20–22', '22–28', '28–30', '30–35']);
+  it('follows the §2.1 minutes: 48.5 in all', () => {
+    expect(beats(FIXTURE).map((b) => b.min)).toEqual([1.5, 0.5, 3, 3, 3, 4, 1, 4, 1.5, 1.5, 1, 3, 3.5, 2, 3.5, 2.5, 3, 2.5, 3, 1.5]);
+    const total = beats(FIXTURE).reduce((s, b) => s + b.min, 0);
+    expect(Math.round(total * 10) / 10).toBe(48.5);
+    expect(Object.values(STEP_MINUTES).reduce((s, m) => s + m, 0)).toBeCloseTo(48.5, 6);
+    expect(md).toContain('48.5');
   });
-  it('quotes the exact on-screen claims and the JSON numbers', () => {
-    expect(md).toContain(BEAKER_CALLOUT);
-    expect(md).not.toMatch(/rises to \d+%, not 90%/);
-    expect(md).toContain(`| Steppe share, Bell Beaker-period Britons (this run) | ${FIXTURE.admixture.beaker_steppe_pct}% |`);
-    expect(md).toContain(ROMAN_LOG_LINE);
+  it('names each step\'s cards, from SCRIPT_STEPS, with their titles, in order', () => {
+    const b = beats(FIXTURE);
+    for (let i = 0; i < SCRIPT_STEPS.length; i++) expect(b[i]!.cards).toEqual(SCRIPT_STEPS[i]!.cards?.ids ?? []);
+    let from = 0;
+    for (const id of b.flatMap((x) => x.cards)) {
+      const at = md.indexOf(`${id} — ${CARDS[id].title}`, from);
+      expect(at, id).toBeGreaterThan(-1);
+      from = at;
+    }
+  });
+  it('has no v2.1 leftovers: no bridge line, no Roman card, no 90% figure, no "up to 76%", no 30-minute dry run', () => {
+    expect(md).not.toMatch(/not 90%|rises to \d+%|90% ± 2%|±/);
+    expect(md).not.toMatch(/mostly the same people \(Silva/);
+    expect(md).not.toMatch(/up to 76%/);
+    expect(md).not.toMatch(/about 30 minutes|30–35/);
+    expect(md).not.toMatch(/undefined|NaN|\{\{|TBD/);
+  });
+  it('quotes the wrap line and the JSON numbers', () => {
     expect(md).toContain(WRAP_LINE);
     expect(md).toContain(`(n = ${FIXTURE.periods.find((p) => p.id === 'Roman')!.n_pca})`);
     expect(md).toContain('would be called "British"');
+    expect(md).toContain(`| Steppe share, Bell Beaker-period Britons (this run) | ${FIXTURE.admixture.beaker_steppe_pct}% |`);
     expect(md).toContain(OFFLINE);
     expect(md).toContain('?reset');
-    expect(md).not.toMatch(/undefined|NaN|\{\{|TBD/);
   });
   it('has the Monday rehearsal checklist and fallbacks', () => {
     for (const s of ['edge://version', 'Settings → System → Display', 'Projector', 'lab network', "every lab machine's desktop", 'LAB_VIEWPORTS=', '## Fallbacks']) {
@@ -62,5 +98,33 @@ describe('instructor run sheet', () => {
       expect(rest, line).not.toMatch(/\b(BCE|BC|BP|kya|ya)\b|years ago|generations ago/i);
       expect(rest, line).not.toMatch(/Mesolithic|Neolithic|Pal(a)?eolithic|Megalithic|Ice Age/i);
     }
+  });
+});
+
+// The sheet is instructor-only, but it is built from the app's strings and the spec's say-lines, so the same scan that guards
+// the screen (tests/contentRules.ts) runs over every line of it: a banned word, a date, a turnover "90%" or a bare "9 in 10".
+describe('instructor run sheet v3: the on-screen content rules reach the sheet too', () => {
+  it('no line breaks a spec §6 rule (ruleViolations): say-lines, cue lines, tables and checklists included', () => {
+    expect(flaggedLines(md)).toEqual([]);
+  });
+  it('the same scan flags the v2.1 turnover row this sheet dropped, so a clean result above means something', () => {
+    const retired = '| Published Beaker turnover | at least 90% ± 2% by the Middle Bronze Age (Olalde et al. 2018) |';
+    expect(flaggedLines(retired)).toEqual([`rule3:turnover-90 :: ${retired}`]);
+  });
+});
+
+// Skipped in a plain `npm test`; run with `npm run check-data` (REAL_DATA=1). The sheet the CLI writes is built from this file.
+describe.runIf(process.env.REAL_DATA === '1')('instructor run sheet v3 built from the real workshop_data.json', () => {
+  const real = () => validateData(JSON.parse(readFileSync(resolve(__dirname, '../src/data/workshop_data.json'), 'utf8')));
+
+  it('no line breaks a spec §6 rule, and nothing is undefined, NaN or left to fill in', () => {
+    const sheet = buildRunSheet(real(), AT, OFFLINE);
+    expect(flaggedLines(sheet)).toEqual([]);
+    expect(sheet).not.toMatch(/undefined|NaN|\{\{|TBD/);
+  });
+  it('says "about 950" for the people behind the map axes, as the screen does, and never the 1,163 genotype rows', () => {
+    const sheet = buildRunSheet(real(), AT, OFFLINE);
+    expect(sheet).toContain('about 950 present-day Europeans');
+    expect(sheet).not.toContain('1,163');
   });
 });

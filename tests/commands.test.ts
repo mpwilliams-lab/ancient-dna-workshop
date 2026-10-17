@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fixtureRaw from './fixtures/data.fixture.json';
 import type { WorkshopData, PeriodId, GeneId, ConsumerShare } from '../src/types';
 import type { Command } from '../src/parser';
-import { execute, formatCount, roundPercents, asciiBar, DEFAULT_EXEC_CONTEXT, type ExecContext } from '../src/commands';
+import { execute, formatCount, round10, roundPercents, asciiBar, DEFAULT_EXEC_CONTEXT, type ExecContext } from '../src/commands';
 import {
   PERIOD_LABELS, MAP_GROUP_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION, HOOK_NOTE, CONSUMER_NOTE, CONSUMER_TAKEAWAY,
   ROMAN_LOG_LINE, K_REFUSAL, traitSourceLabel, EUROPE_HELD_BACK, EUROPE_ALREADY_SHOWN, TODAY_PLACED, ALL_PROJECTING,
@@ -414,5 +414,9 @@ describe('axes lines read logs.pca_people_unique (Task 7, spec §3.5)', () => {
     expect(at(947)).toContain(mapAxesLine(950));
     expect(at(955)).toContain(mapAxesLine(960));
     expect(at(944)).toContain(mapAxesLine(940));
+  });
+
+  it('round10 is exported so the run sheet shares the rule: nearest 10, a half goes up', () => {
+    expect([0, 4, 5, 944, 947, 949, 950, 954, 955].map(round10)).toEqual([0, 0, 10, 940, 950, 950, 950, 950, 960]);
   });
 });
