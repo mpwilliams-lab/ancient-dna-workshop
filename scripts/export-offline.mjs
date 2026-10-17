@@ -46,6 +46,11 @@ const src = resolve(process.argv[3] || resolve(here, '../dist/index.html'));
 if (!existsSync(src)) fail(`${src} not found. Run \`npm run build\` first.`);
 const bytes = readFileSync(src);
 const html = bytes.toString('utf8');
+// Spec §7.2: the built page, images inlined, stays at or under 3.5 MB (src/release.ts PAGE_MAX_BYTES; tests/export-offline.test.ts pins both).
+const PAGE_MAX_BYTES = Math.round(3.5 * 1024 * 1024);
+if (bytes.length > PAGE_MAX_BYTES) {
+  fail(`${src} is ${bytes.length} bytes, over the ${PAGE_MAX_BYTES}-byte (3.5 MB) page budget (spec §7.2). Shrink or drop images, or set their flags to false.`);
+}
 
 const problems = [];
 const markupChecks = [

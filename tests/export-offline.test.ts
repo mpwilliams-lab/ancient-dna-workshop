@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { PAGE_MAX_BYTES } from '../src/release';
 
 const SCRIPT = resolve(__dirname, '../scripts/export-offline.mjs');
 const PKG = resolve(__dirname, '../package.json');
@@ -25,6 +26,21 @@ describe('scripts/export-offline.mjs', () => {
     expect(r.status).toBe(0);
     expect(readFileSync(r.out, 'utf8')).toBe(GOOD);
     expect(r.stdout).toMatch(/sha256 [0-9a-f]{64}/);
+  });
+  it('refuses a build over the 3.5 MB page budget (spec §7.2)', () => {
+    const big = GOOD.replace(BIG, 'x'.repeat(Math.round(3.5 * 1024 * 1024) + 1));
+    const r = exportTo(big);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('3.5 MB');
+  });
+  it('accepts a page of exactly 3.5 MB and refuses one byte more (the limit is "at or under", the same number as src/release.ts)', () => {
+    const pageOf = (bytes: number): string => GOOD.replace(BIG, 'x'.repeat(bytes - Buffer.byteLength(GOOD.replace(BIG, ''))));
+    expect(Buffer.byteLength(pageOf(PAGE_MAX_BYTES))).toBe(PAGE_MAX_BYTES);
+    const at = exportTo(pageOf(PAGE_MAX_BYTES));
+    expect(at.status, at.stderr).toBe(0);
+    const over = exportTo(pageOf(PAGE_MAX_BYTES + 1));
+    expect(over.status).toBe(1);
+    expect(over.stderr).toContain(`over the ${PAGE_MAX_BYTES}-byte (3.5 MB) page budget`);
   });
   it.each([
     ['<script src="https://cdn.example/x.js"></script>', 'script src'],

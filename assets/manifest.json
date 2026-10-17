@@ -1,0 +1,583 @@
+{
+  "version": 1,
+  "images": [
+    {
+      "id": "stonehenge",
+      "card": "B1",
+      "kind": "photo",
+      "title": "Stonehenge (9816864014)",
+      "commons_file": "Stonehenge (9816864014).jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Stonehenge_(9816864014).jpg",
+      "thumb_url": null,
+      "author": "Gary Todd",
+      "licence": "CC0",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Stonehenge2007 07 30.jpg",
+        "author": "garethwiscombe",
+        "licence": "CC BY 2.0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "avebury",
+      "card": "B1",
+      "kind": "photo",
+      "title": "Avebury in June",
+      "commons_file": "Avebury in June.JPG",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Avebury_in_June.JPG",
+      "thumb_url": null,
+      "author": "Poliphilo",
+      "licence": "CC0",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Avebury Stone Circles.jpg",
+        "author": "Rxfelix",
+        "licence": "CC BY 3.0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "ring-of-brodgar",
+      "card": "B1",
+      "kind": "photo",
+      "title": "Ring of Brogar 2000-1",
+      "commons_file": "Ring of Brogar 2000-1.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Ring_of_Brogar_2000-1.jpg",
+      "thumb_url": null,
+      "author": "Libasstref",
+      "licence": "CC0",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": {
+        "x": 0,
+        "y": 28,
+        "width": 900,
+        "height": 300
+      },
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Ring of Brodgar, Orkney.jpg",
+        "author": "Stevekeiretsu",
+        "licence": "CC BY-SA 3.0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "thornborough-plan",
+      "card": "B1",
+      "kind": "own-svg",
+      "title": "Plan of the three rings",
+      "commons_file": null,
+      "file_page": null,
+      "thumb_url": null,
+      "author": "Plan drawn for this workshop",
+      "licence": "own",
+      "licence_url": null,
+      "source": "this workshop",
+      "ops": [],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Thornborough southern henge - geograph.org.uk - 7398606.jpg",
+        "author": "Gordon Hatton",
+        "licence": "CC BY-SA 2.0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "castlerigg",
+      "card": "B1",
+      "kind": "photo",
+      "title": "Castlerigg Stone Circle 2015 18",
+      "commons_file": "Castlerigg Stone Circle 2015 18.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Castlerigg_Stone_Circle_2015_18.jpg",
+      "thumb_url": null,
+      "author": "Mike Peel (www.mikepeel.net)",
+      "licence": "CC BY-SA 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": "resized",
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Anonymous - The Druids' Circle, Castlerigg, Keswick - B2018.7.112 - Yale Center for British Art.jpg",
+        "author": "Yale Center for British Art",
+        "licence": "CC0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "amesbury-archer",
+      "card": "C1",
+      "kind": "photo",
+      "title": "Amesbury Archer - Salisbury and South Wiltshire Museum",
+      "commons_file": "Amesbury Archer - Salisbury and South Wiltshire Museum.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Amesbury_Archer_-_Salisbury_and_South_Wiltshire_Museum.jpg",
+      "thumb_url": null,
+      "author": "Pasicles",
+      "licence": "CC0",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Amesbury Archer.jpg",
+        "author": "TobyEditor",
+        "licence": "CC BY 4.0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "round-barrow",
+      "card": "C1",
+      "kind": "photo",
+      "title": "Round barrow, Overton Hill",
+      "commons_file": "Round barrow, Overton Hill.JPG",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Round_barrow,_Overton_Hill.JPG",
+      "thumb_url": null,
+      "author": "Poliphilo",
+      "licence": "CC0",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Three bowl barrows, once part of a round barrow cemetery, at Barrowfields.jpg",
+        "author": "Simon Cobb",
+        "licence": "CC0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "shrewton-beaker",
+      "card": "C1",
+      "kind": "photo",
+      "title": "Shrewton Beaker Burial",
+      "commons_file": "Shrewton Beaker Burial.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Shrewton_Beaker_Burial.jpg",
+      "thumb_url": null,
+      "author": "TobyEditor",
+      "licence": "CC BY 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by/4.0",
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": "cropped and resized",
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Bell Beaker culture artefacts from Mere Down, Wiltshire, England.png",
+        "author": "Philip Crocker",
+        "licence": "PD"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "roundhouse",
+      "card": "E2",
+      "kind": "photo",
+      "title": "Interior of Little Woodbury Iron Age Roundhouse 2",
+      "commons_file": "Interior of Little Woodbury Iron Age Roundhouse 2 - 55403896108.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Interior_of_Little_Woodbury_Iron_Age_Roundhouse_2_-_55403896108.jpg",
+      "thumb_url": null,
+      "author": "Tim Sheerman-Chase",
+      "licence": "CC BY 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by/4.0",
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": "cropped and resized",
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Iron Age Village at Butser Ancient Farm.jpg",
+        "author": "Butser Ancient Farm",
+        "licence": "CC BY-SA 4.0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "maiden-castle",
+      "card": "E2",
+      "kind": "photo",
+      "title": "Dorset. Maiden Castle. Luchtfoto, GD000392",
+      "commons_file": "Dorset. Maiden Castle. Luchtfoto, GD000392.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Dorset._Maiden_Castle._Luchtfoto,_GD000392.jpg",
+      "thumb_url": null,
+      "author": "KU Leuven. EuroPhot",
+      "licence": "PD",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Maiden Castle (multivallate hillfort).jpg",
+        "author": "Hadrianus1959",
+        "licence": "CC BY-SA 4.0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "battersea-shield",
+      "card": "E2",
+      "kind": "photo",
+      "title": "British Museum Battersea Shield",
+      "commons_file": "British Museum Battersea Shield.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:British_Museum_Battersea_Shield.jpg",
+      "thumb_url": null,
+      "author": "BabelStone",
+      "licence": "CC0",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize"
+      ],
+      "crop": null,
+      "orientation": "portrait",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Battersea shield 1.jpg",
+        "author": "Jorge Royan",
+        "licence": "CC BY 3.0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "hadrians-wall",
+      "card": "F1",
+      "kind": "photo",
+      "title": "Hadrian's Wall west of Housesteads 3",
+      "commons_file": "Hadrian's Wall west of Housesteads 3.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Hadrian%27s_Wall_west_of_Housesteads_3.jpg",
+      "thumb_url": null,
+      "author": "Steven Fruitsmaak",
+      "licence": "PD",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Hadrian's Wall on Housesteads Crags - 06.jpg",
+        "author": "Benjamin Smith",
+        "licence": "CC BY-SA 4.0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "bignor-medusa",
+      "card": "F1",
+      "kind": "photo",
+      "title": "Bignor Roman Villa- Medusa mosaic",
+      "commons_file": "Bignor Roman Villa- Medusa mosaic.JPG",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Bignor_Roman_Villa-_Medusa_mosaic.JPG",
+      "thumb_url": null,
+      "author": "Poliphilo",
+      "licence": "CC0",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Fishbourne Roman Palace, Medusa Mosaic - geograph.org.uk - 8053992.jpg",
+        "author": "Michael Garlick",
+        "licence": "CC BY-SA 2.0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "hoxne-coins",
+      "card": "F1",
+      "kind": "photo",
+      "title": "Hoxne Hoard coins 6a",
+      "commons_file": "Hoxne Hoard coins 6a.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Hoxne_Hoard_coins_6a.jpg",
+      "thumb_url": null,
+      "author": "The Land",
+      "licence": "PD",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "portrait",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Hoxne Hoard coins 5.JPG",
+        "author": "The Land",
+        "licence": "PD"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "sutton-hoo-helmet",
+      "card": "G2",
+      "kind": "photo",
+      "title": "Replica of the Sutton Hoo helmet, British Museum",
+      "commons_file": "Replica of the Sutton Hoo helmet, British Museum.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Replica_of_the_Sutton_Hoo_helmet,_British_Museum.jpg",
+      "thumb_url": null,
+      "author": "APK",
+      "licence": "CC BY 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by/4.0",
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize"
+      ],
+      "crop": null,
+      "orientation": "portrait",
+      "changes": "resized",
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Anglo-Saxon Shoulder Clasp from Sutton Hoo Burial, 625-630 AD.jpg",
+        "author": "Gary Todd",
+        "licence": "CC0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "square-headed-brooch",
+      "card": "G2",
+      "kind": "photo",
+      "title": "Square-Headed Bow Brooch MET DP30059",
+      "commons_file": "Square-Headed Bow Brooch MET DP30059.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Square-Headed_Bow_Brooch_MET_DP30059.jpg",
+      "thumb_url": null,
+      "author": "The Metropolitan Museum of Art",
+      "licence": "CC0",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "portrait",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Square-Headed Brooch MET DP30025.jpg",
+        "author": "The Metropolitan Museum of Art",
+        "licence": "CC0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "west-stow",
+      "card": "G2",
+      "kind": "photo",
+      "title": "Anglo-Saxon Village re-construction, West Stow",
+      "commons_file": "Anglo-Saxon Village re-construction, West Stow - geograph.org.uk - 6442982.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Anglo-Saxon_Village_re-construction,_West_Stow_-_geograph.org.uk_-_6442982.jpg",
+      "thumb_url": null,
+      "author": "Colin Park",
+      "licence": "CC BY-SA 2.0",
+      "licence_url": "https://creativecommons.org/licenses/by-sa/2.0",
+      "source": "Geograph / Wikimedia Commons",
+      "ops": [
+        "resize"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": "resized",
+      "raw_sha256": null,
+      "fallback": null,
+      "visual_check": null
+    },
+    {
+      "id": "milk",
+      "card": "H1",
+      "kind": "photo",
+      "title": "Milk-2474993 1920",
+      "commons_file": "Milk-2474993 1920.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Milk-2474993_1920.jpg",
+      "thumb_url": null,
+      "author": "Couleur",
+      "licence": "CC0",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": {
+        "commons_file": "Milk 2.jpg",
+        "author": "Daria-Yakovleva",
+        "licence": "CC0"
+      },
+      "visual_check": null
+    },
+    {
+      "id": "cow",
+      "card": "H1",
+      "kind": "photo",
+      "title": "Cow female black white",
+      "commons_file": "Cow female black white.jpg",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Cow_female_black_white.jpg",
+      "thumb_url": null,
+      "author": "Keith Weller, USDA",
+      "licence": "PD",
+      "licence_url": null,
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "crop"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": null,
+      "visual_check": null
+    },
+    {
+      "id": "melanocyte",
+      "card": "I1",
+      "kind": "photo",
+      "title": "Melanocyte",
+      "commons_file": "Blausen 0632 Melanocyte.png",
+      "file_page": "https://commons.wikimedia.org/wiki/File:Blausen_0632_Melanocyte.png",
+      "thumb_url": null,
+      "author": "BruceBlaus (Blausen.com staff 2014, WikiJournal of Medicine)",
+      "licence": "CC BY 3.0",
+      "licence_url": "https://creativecommons.org/licenses/by/3.0",
+      "source": "Wikimedia Commons",
+      "ops": [
+        "resize",
+        "convert"
+      ],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": "resized, converted to JPEG",
+      "raw_sha256": null,
+      "fallback": null,
+      "visual_check": null
+    },
+    {
+      "id": "irises",
+      "card": "J1",
+      "kind": "own-svg",
+      "title": "Brown, green and blue irises",
+      "commons_file": null,
+      "file_page": null,
+      "thumb_url": null,
+      "author": "Drawn for this workshop",
+      "licence": "own",
+      "licence_url": null,
+      "source": "this workshop",
+      "ops": [],
+      "crop": null,
+      "orientation": "landscape",
+      "changes": null,
+      "raw_sha256": null,
+      "fallback": null,
+      "visual_check": null
+    }
+  ],
+  "maps": {
+    "A1": {
+      "visual_check": null
+    },
+    "D1": {
+      "visual_check": null
+    },
+    "E1": {
+      "visual_check": null
+    },
+    "G1": {
+      "visual_check": null
+    },
+    "H2": {
+      "visual_check": null
+    },
+    "I2": {
+      "visual_check": null
+    },
+    "J3": {
+      "visual_check": null
+    },
+    "K2": {
+      "visual_check": null
+    },
+    "L3": {
+      "visual_check": null
+    },
+    "F1inset": {
+      "visual_check": null
+    }
+  }
+}

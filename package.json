@@ -20,7 +20,12 @@
     "prebuild": "node scripts/make-qr.mjs",
     "e2e": "npm run build && playwright test",
     "export-offline": "npm run build && node scripts/export-offline.mjs",
-    "run-sheet": "vite build --ssr scripts/runsheet-cli.ts --outDir .runsheet --emptyOutDir && node .runsheet/runsheet-cli.js"
+    "run-sheet": "vite build --ssr scripts/runsheet-cli.ts --outDir .runsheet --emptyOutDir && node .runsheet/runsheet-cli.js",
+    "fetch-assets": "node scripts/fetch-assets.mjs",
+    "promote-assets": "node scripts/fetch-assets.mjs --promote",
+    "credits": "node scripts/make-credits.mjs",
+    "check-release": "vite build --ssr scripts/check-release.ts --outDir .release-check --emptyOutDir && node .release-check/check-release.js",
+    "visual-check": "node scripts/visual-check.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

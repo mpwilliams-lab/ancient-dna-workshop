@@ -10,3 +10,7 @@ blob-report/
 # Machine-specific path to the data build output, read by scripts/sync-data.mjs. Never commit it.
 local-paths.json
 .runsheet/
+# Image pipeline (Task 15): untrusted downloads and re-encoded files waiting for the instructor's check. Never commit them.
+assets/raw/
+assets/staged/
+.release-check/
