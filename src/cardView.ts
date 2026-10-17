@@ -13,7 +13,7 @@ import {
 } from './content';
 import { chipElement } from './icons';
 import { renderDiagram } from './diagrams';
-import { ASSET_MANIFEST, HIDDEN_WHEN_SHOWN, cropAllowed, type AssetManifest } from './assetManifest';
+import { ASSET_MANIFEST, HIDDEN_WHEN_SHOWN, type AssetManifest } from './assetManifest';
 import { BUNDLED_IMAGES, cardMapId, cardShowsUpgrade, imageReady, imageUrl, type ImageUrls } from './assets';
 import { renderCardMap } from './cardMap';
 import { mapDataReady } from './maps';
@@ -87,7 +87,9 @@ function make<K extends keyof HTMLElementTagNameMap>(doc: Document, tag: K, cls?
  * The tile row (spec §5.2, §7.2). Photo form only when the card is upgraded on screen (flag on, every non-optional tile
  * checked and bundled). There, an optional tile without a ready image is left out, and C1's Shrewton tile is never shown
  * beside the Archer photo. Otherwise every tile is text: name and line, or the caption alone, with no picture and no image
- * caption (that describes a picture that is not shown). object-fit: cover only where the manifest allows cropping.
+ * caption (that describes a picture that is not shown). Every picture is shown WHOLE (object-fit: contain, letterboxed on the
+ * tile background), never cut by CSS: the instructor approves the staged file in Preview, so approval is what students see.
+ * The only crop is a pixel crop already made by scripts/fetch-assets (the Medusa panel), which is part of the file he sees.
  */
 export function renderTiles(doc: Document, card: Card, ctx: CardRenderContext): HTMLDivElement | null {
   const tiles = card.tiles ?? [];
@@ -107,11 +109,9 @@ export function renderTiles(doc: Document, card: Card, ctx: CardRenderContext): 
     const fig = make(doc, 'figure', t.optional === true ? 'card-tile is-optional' : 'card-tile');
     fig.setAttribute('data-image', t.image);
     if (withImage) {
-      const img = make(doc, 'img');
+      const img = make(doc, 'img', 'tile-img tile-img--contain');
       img.alt = '';
       img.src = imageUrl(t.image, urls)!;
-      const entry = manifest.images.find((e) => e.id === t.image);
-      img.className = entry !== undefined && cropAllowed(entry) ? 'tile-img tile-img--cover' : 'tile-img tile-img--contain';
       fig.append(img);
     }
     const cap = make(doc, 'figcaption');

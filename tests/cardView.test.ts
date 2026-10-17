@@ -524,7 +524,7 @@ describe('card image tiles (Task 15, spec §5.2 and §7.2)', () => {
     expect(figures(el).map((f) => f.querySelector('.tile-name')?.textContent)).toEqual(CARDS.B1.tiles!.map((t) => t.name));
     expect(figures(el).map((f) => f.classList.contains('is-optional'))).toEqual(CARDS.B1.tiles!.map((t) => t.optional === true));
   });
-  it('flag on, every tile checked and bundled: one image per tile; cover only where cropping is allowed', () => {
+  it('flag on, every tile checked and bundled: one image per tile, each shown whole (the contain class)', () => {
     const el = renderTiles(document, CARDS.B1, tctx(B1_ON))!;
     expect(el.dataset.form).toBe('images');
     expect(el.dataset.count).toBe('5');
@@ -532,9 +532,26 @@ describe('card image tiles (Task 15, spec §5.2 and §7.2)', () => {
     expect(imgs.map((i) => i.closest('figure')!.getAttribute('data-image'))).toEqual(['stonehenge', 'avebury', 'ring-of-brodgar', 'thornborough-plan', 'castlerigg']);
     expect(imgs.every((i) => i.getAttribute('alt') === '')).toBe(true);
     expect(imgs.map((i) => i.getAttribute('src'))).toEqual(['stonehenge', 'avebury', 'ring-of-brodgar', 'thornborough-plan', 'castlerigg'].map((id) => `data:image/jpeg;base64,${id}`));
-    expect(el.querySelector('[data-image="stonehenge"] img')!.className).toBe('tile-img tile-img--cover');
+    expect(el.querySelector('[data-image="stonehenge"] img')!.className).toBe('tile-img tile-img--contain');   // crop-allowed (CC0), still whole
     expect(el.querySelector('[data-image="castlerigg"] img')!.className).toBe('tile-img tile-img--contain');
     expect(el.querySelector('[data-image="thornborough-plan"] .tile-image-caption')!.textContent).toBe(CARDS.B1.tiles![3]!.imageCaption);
+  });
+  it('every picture on every photo card is shown whole: an image whose ops allow cropping gets the contain class, never a cover class (Task 21 ruling)', () => {
+    // Every entry allows cropping here (in memory, whatever the committed manifest says), which used to earn each picture
+    // object-fit: cover (spec §5.2, now superseded). So this stays a real test if a fallback switch changes an entry's ops.
+    const manifest = checkedManifest();
+    for (const e of manifest.images) e.ops = ['resize', 'crop'];
+    const shown: Record<string, string> = {};
+    for (const card of ['B1', 'C1', 'E2', 'F1', 'G2'] as const) {
+      const el = renderTiles(document, CARDS[card], tctx(ALL_ON, manifest))!;
+      expect(el.dataset.form, card).toBe('images');
+      for (const img of el.querySelectorAll('img')) shown[img.closest('figure')!.getAttribute('data-image')!] = img.className;
+    }
+    expect(Object.keys(shown).sort()).toEqual([
+      'amesbury-archer', 'avebury', 'battersea-shield', 'bignor-medusa', 'castlerigg', 'hadrians-wall', 'hoxne-coins', 'maiden-castle',
+      'ring-of-brodgar', 'round-barrow', 'roundhouse', 'square-headed-brooch', 'stonehenge', 'sutton-hoo-helmet', 'thornborough-plan', 'west-stow',
+    ]);
+    for (const [id, cls] of Object.entries(shown)) expect(cls, id).toBe('tile-img tile-img--contain');
   });
   it('flag on: each tile keeps its name and line under the image, and only the Thornborough tile has an image caption', () => {
     const el = renderTiles(document, CARDS.B1, tctx(B1_ON))!;

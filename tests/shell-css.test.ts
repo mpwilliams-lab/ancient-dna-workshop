@@ -197,6 +197,18 @@ describe('card overlay (spec §5.2, CONTRACT §4.11)', () => {
     expect(rule('#card .card-tile img')['max-height']).toBe('min(26vh, 230px)');
     expect(rule('#card .card-map')['max-height']).toBe('min(52vh, 460px)');
   });
+  it('shows every card picture whole (Task 21 ruling): no card-image rule sets object-fit: cover or an aspect-ratio, and the letterbox has a background', () => {
+    const pictureRules = allRules(css).filter((r) => /\.card-tile img|\.tile-img/.test(r.prelude));
+    expect(pictureRules.length, 'the base, compact and contain rules').toBeGreaterThanOrEqual(3);
+    for (const r of pictureRules) {
+      const d = decls(r.body);
+      expect(d['object-fit'], r.prelude).not.toBe('cover');
+      expect(d['aspect-ratio'], `${r.prelude} (a fixed box would cut or pad a picture that is shown in its own proportions)`).toBeUndefined();
+    }
+    expect(allRules(css).some((r) => r.prelude.includes('tile-img--cover')), 'no selector for a cover class').toBe(false);
+    expect(rule('#card .card-tile img')['object-fit']).toBe('contain');
+    expect(rule('#card .card-tile img.tile-img--contain')).toMatchObject({ 'object-fit': 'contain', background: '#f2f2f2' });
+  });
   it('gives the value labels room for "Europe (large sample)" on one line (label column up to 12em), but not in the long two-column list, which keeps its longer bars', () => {
     expect(rule('#card .value-row')['grid-template-columns']).toBe('minmax(6.5em, 12em) minmax(3em, 1fr) 2.6em');
     expect(rule('#card .card-values[data-long] .value-row')['grid-template-columns']).toBe('minmax(6.5em, 9.5em) minmax(3em, 1fr) 2.6em');

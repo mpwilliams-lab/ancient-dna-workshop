@@ -593,12 +593,11 @@ body {
   }
 }
 
-/* ---- Card images (Task 15, spec §5.2): cover only where the manifest allows cropping; CC BY-SA images are never cropped ---- */
-#card .card-tile img.tile-img--cover {
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-}
-
+/* ---- Card images (Task 15, spec §5.2; the Task 21 ruling): every picture is shown WHOLE, in its own proportions, letterboxed on
+   the tile background where its shape leaves room (a tall picture is held by the height cap above). Nothing is cut by CSS: no
+   object-fit: cover and no fixed aspect ratio. The instructor approves the staged file in Preview, so what he approves is what
+   students see. (Spec §5.2 allowed cover for images whose ops include crop; that is superseded. A pixel crop made by
+   scripts/fetch-assets, the Medusa panel, is part of the file he sees.) ---- */
 #card .card-tile img.tile-img--contain {
   object-fit: contain;
   background: #f2f2f2;

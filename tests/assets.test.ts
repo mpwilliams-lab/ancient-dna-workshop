@@ -11,7 +11,7 @@ import raw from '../assets/manifest.json';
 import rules from '../assets/asset-rules.json';
 import {
   ASSET_MANIFEST, HIDDEN_WHEN_SHOWN, LICENCE_IDS, LICENCE_URLS, MAP_IDS, MEDIA_PREFIXES, ManifestError, attributionString,
-  commonsFilePage, cropAllowed, parseManifest, type ImageEntry,
+  commonsFilePage, parseManifest, type ImageEntry,
 } from '../src/assetManifest';
 import { BUNDLED_IMAGE_IDS, cardMapId, cardShowsUpgrade, imageReady, imageUrl, mapReady, shownTileImages } from '../src/assets';
 import { CARDS, cardUpgraded } from '../src/cards';
@@ -224,11 +224,8 @@ describe('attributionString (spec §7.2)', () => {
       if (e.licence.startsWith('CC BY-SA')) expect(e.ops, e.id).toEqual(['resize']);
     }
   });
-  it('object-fit: cover is allowed only where cropping is allowed', () => {
-    expect(cropAllowed(entry('stonehenge'))).toBe(true);
-    expect(cropAllowed(entry('castlerigg'))).toBe(false);
-    expect(cropAllowed(entry('battersea-shield'))).toBe(false);
-  });
+  // The old "object-fit: cover is allowed only where cropping is allowed" test is gone with cropAllowed(): cards show every picture
+  // whole (Task 21 ruling), pinned in tests/cardView.test.ts and tests/shell-css.test.ts. `ops` still says what the pipeline may do.
 });
 
 describe('readiness (CONTRACT §4.14)', () => {

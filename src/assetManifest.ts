@@ -183,8 +183,3 @@ export function attributionString(e: ImageEntry): string {
   if (e.licence === 'CC0' || e.licence === 'PD') return `Photo: ${e.author} (${e.licence === 'CC0' ? 'CC0' : 'public domain'}), via ${e.source}`;
   return `"${e.title}" by ${e.author}, ${e.licence} (${(e.licence_url ?? '').replace(/^https:\/\//, '')}), via ${e.source}; ${e.changes}`;
 }
-
-/** CSS object-fit: cover (an on-screen crop) is allowed only for images whose ops include crop (spec §5.2). */
-export function cropAllowed(e: ImageEntry): boolean {
-  return e.ops.includes('crop');
-}
