@@ -19,10 +19,11 @@ import { ALLOWED_FITS, CASES, LAB_STANDARD_CASES, NARROW_CASES, withPage, type C
 
 /**
  * The full layout matrix of spec §5.4 (Task 26): every viewport case of e2e/viewports.ts (the 26 of v2.1 and every LAB_VIEWPORTS entry),
- * in Chromium and Edge, over the built file. Each family below runs over all of them:
+ * in Chromium and Edge, over the built file. Families 1, 2, 4, 5 and 6 below run over all of them, so a LAB_VIEWPORTS entry adds a case
+ * to each of those; family 3 runs only on the two narrowest cases (NARROW_CASES: a lab screen at 150%, and the 640 x 360 floor):
  *   1. the panes: no page scroll, the prompt, the hint line and the plot on screen while the terminal output overflows; the wrap screen;
  *   2. every card, as shipped (the shipped flag set, the P1 text forms and whatever has been checked and enabled);
- *   3. a card restored by a refresh, and a card opened in the task that closed another (the narrowest cases);
+ *   3. a card restored by a refresh, and a card opened in the task that closed another (the two narrowest cases only);
  *   4. the plot panel at the steps that crowd it;
  *   5. the consumer bars;
  *   6. every card again in every upgraded form at once (maps and pictures forced on in a scratch build, e2e/mapBuild.ts), and the
@@ -433,12 +434,20 @@ async function panelGeometry(page: Page): Promise<PanelGeometry> {
  * legend, the 16-unit bar labels) times the scale it is drawn at times the device scale factor. At the lab-standard sizes it is
  * 10.4 device px for the legend and 11.9 for the bar labels at 1366 x 768 (the same at 125%, whose CSS pixels are bigger), and 14.7 and
  * 16.8 at 1920 x 1080. This pins that those are not lost; whether 10 px is comfortable on the lab projector is the Mon 19 lab check.
+ *
+ * The size is reported for every case, not only the lab-standard ones: as a Playwright annotation of the test (type "projector text size",
+ * in the HTML and JSON reports) and as a console line starting "projector text size:". So the lab run (LAB_VIEWPORTS="<WxH@scale>,...",
+ * every entry is a case like the others) prints the text sizes of the real lab screens, for which no minimum is asserted: nobody has
+ * measured what the lab projector shows comfortably.
  */
 const MIN_TEXT_DEVICE_PX = 10;
 
 function expectTextLegible(g: PanelGeometry, label: string, c: Case): number | null {
   if (g.smallestText === null) return null;
   const device = g.smallestText * g.svg!.scale * c.dsf;
+  const size = `${label} at ${c.name}: the smallest text (${g.smallestText} units) is ${device.toFixed(1)} device px tall (${g.svg!.scale.toFixed(3)} px per unit, device scale factor ${c.dsf})`;
+  test.info().annotations.push({ type: 'projector text size', description: size });
+  console.log(`projector text size: ${size}`);
   if (LAB_STANDARD_CASES.includes(c)) {
     expect(device, `${label}: the smallest text (${g.smallestText} units) is drawn ${device.toFixed(1)} device px tall at ${c.name}`).toBeGreaterThanOrEqual(MIN_TEXT_DEVICE_PX);
   }
@@ -589,9 +598,9 @@ for (const c of CASES) {
       expectLegendClear(today, 'Today step');
       expectPlotFollowsCaption(today, 'Today step');
       const drawn = expectPcaDrawnBig(today, 'Today step', c);
-      const legible = expectTextLegible(today, 'Today step', c);
+      expectTextLegible(today, 'PCA legend (Today step)', c);   // prints and annotates the text size for every case
       if (LAB_STANDARD_CASES.includes(c)) {
-        console.log(`${c.name}: PCA drawn ${drawn.width.toFixed(0)} x ${drawn.height.toFixed(0)} px (${today.svg!.scale.toFixed(3)} px per unit), the pane ${(today.panel.right - today.panel.left).toFixed(0)} x ${(today.panel.bottom - today.panel.top).toFixed(0)}, smallest text ${legible!.toFixed(1)} device px`);
+        console.log(`${c.name}: PCA drawn ${drawn.width.toFixed(0)} x ${drawn.height.toFixed(0)} px (${today.svg!.scale.toFixed(3)} px per unit), the pane ${(today.panel.right - today.panel.left).toFixed(0)} x ${(today.panel.bottom - today.panel.top).toFixed(0)}`);
       }
       // A caption strip that grows from step to step never moves or resizes a plot that has room (Task 8: no vertical jump).
       if (ironAge.svg!.height >= (ironAge.svg!.width * PCA_VIEW.height) / PCA_VIEW.width - 1 && today.svg!.height >= (today.svg!.width * PCA_VIEW.height) / PCA_VIEW.width - 1) {
@@ -619,8 +628,7 @@ for (const c of CASES) {
       expectPanelHolds(bars, 'ADMIXTURE bars', c, 'bars', ['svg.plot-svg']);
       expectBarsClear(await barsGeometry(page), 'ADMIXTURE bars');
       expectBarsFillWidth(bars, 'ADMIXTURE bars', c);
-      const barText = expectTextLegible(bars, 'ADMIXTURE bars', c);
-      if (LAB_STANDARD_CASES.includes(c)) console.log(`${c.name}: ADMIXTURE bars drawn at ${bars.svg!.scale.toFixed(3)} px per unit, smallest text ${barText!.toFixed(1)} device px`);
+      expectTextLegible(bars, 'ADMIXTURE bars', c);   // prints and annotates the text size (and the scale it is drawn at) for every case
 
       // Step 19: HLA-DQ2, the trajectory with the reveal line under its caption.
       await run(page, 'allele_freq(gene = "HLA-DQ2")');
@@ -823,8 +831,9 @@ async function expectFormShown(page: Page, c: Case, id: CardId, fit: string): Pr
     const size = PHOTO_SIZES[p.id!];
     if (size !== undefined) expect(p.natural, `${id}/${p.id}: the stand-in has the staged photo's size`).toEqual([...size]);
     expect(p.fit, `${id}/${p.id}: object-fit (a picture is shown whole, never cut)`).toBe('contain');
-    // Only the compact fit level hides the pictures (spec §5.2); every other level shows every one of them.
-    expect(p.shown === 'none', `${id}/${p.id}: hidden exactly at compact (fit ${fit})`).toBe(fit === 'compact' || fit === 'scroll');
+    // The pictures are hidden at the compact fit level (spec §5.2) and at scroll, which keeps compact's rules and adds an internal scroll;
+    // at normal and dense every one of them is shown.
+    expect(p.shown === 'none', `${id}/${p.id}: hidden exactly at compact and scroll (fit ${fit})`).toBe(fit === 'compact' || fit === 'scroll');
     if (p.shown === 'none') continue;
     const [w, h] = [p.box.right - p.box.left, p.box.bottom - p.box.top];
     expect(w > 0 && h > 0, `${id}/${p.id}: the picture has a box`).toBe(true);
