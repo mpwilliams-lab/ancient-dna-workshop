@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -86,6 +86,19 @@ describe('GitHub Pages workflow', () => {
     expect(pkg.scripts.build).toMatch(/vite build/);
   });
   it('package.json check-data runs the real-data tests, which skip unless REAL_DATA=1', () => {
-    expect(pkg.scripts['check-data']).toBe('REAL_DATA=1 vitest run tests/real-data.test.ts');
+    expect(pkg.scripts['check-data']).toMatch(/^REAL_DATA=1 vitest run tests\/[\w.-]+\.test\.ts( tests\/[\w.-]+\.test\.ts)*$/);
+  });
+  // Task 26 (carry-forward from the Task 14 review): check-data used to name one of the five files that have a REAL_DATA block, so
+  // the card fit, consumer bars and run sheet on the real data ran only when someone remembered to name them, and the deploy gate
+  // did not run them at all. It names all five, and this keeps it that way when a sixth appears.
+  it('package.json check-data names every test file that has a REAL_DATA block, and no other', () => {
+    const named = [...new Set(String(pkg.scripts['check-data']).match(/tests\/[\w.-]+\.test\.ts/g) ?? [])].sort();
+    const needle = `process.env.${'REAL_DATA'}`;
+    const withBlock = readdirSync(__dirname)
+      .filter((f) => f.endsWith('.test.ts') && readFileSync(resolve(__dirname, f), 'utf8').includes(needle))
+      .map((f) => `tests/${f}`)
+      .sort();
+    expect(withBlock.length, 'the scan found the real-data tests').toBeGreaterThanOrEqual(5);
+    expect(named).toEqual(withBlock);
   });
 });

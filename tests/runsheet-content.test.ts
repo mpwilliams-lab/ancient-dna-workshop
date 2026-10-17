@@ -209,7 +209,7 @@ describe('open checks (spec §11)', () => {
   });
 });
 
-// Skipped in a plain `npm test`. `npm run check-data` does not run this file: run it with REAL_DATA=1 npx vitest run tests/runsheet-content.test.ts.
+// Skipped in a plain `npm test`; `npm run check-data` runs it (tests/pages-workflow.test.ts keeps that list complete).
 describe.runIf(process.env.REAL_DATA === '1')('open check 5 against the real workshop_data.json (O1)', () => {
   it('quotes the 1000 Genomes Britain value the build wrote and what card K2 shows for it', () => {
     const real = validateData(JSON.parse(readFileSync(resolve(ROOT, 'src/data/workshop_data.json'), 'utf8')));

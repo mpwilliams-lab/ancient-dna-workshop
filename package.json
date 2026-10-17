@@ -16,7 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "sync-data": "node scripts/sync-data.mjs",
-    "check-data": "REAL_DATA=1 vitest run tests/real-data.test.ts",
+    "check-data": "REAL_DATA=1 vitest run tests/real-data.test.ts tests/cardView.test.ts tests/plots-consumer.test.ts tests/runsheet.test.ts tests/runsheet-content.test.ts",
     "prebuild": "node scripts/make-qr.mjs",
     "e2e": "npm run build && playwright test",
     "export-offline": "npm run build && node scripts/export-offline.mjs",
