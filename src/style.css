@@ -365,8 +365,39 @@ body {
   color: var(--card-fg);
 }
 
+/* Maps (Task 20, spec §5.2: they fill the image row at max-height min(52vh, 460px)). The slot is as tall as its picture wants to be
+   at the card's width, never above the cap, and it may shrink, down to a floor, to make the card fit with no dense level at the lab
+   screens: the picture fills whatever the slot gets and keeps its own shape (a window is clipped to its own viewBox, so a slot
+   that is wider than the shape leaves blank sides, never more map). */
 #card .card-map {
   max-height: min(52vh, 460px);
+  flex: 0 1 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.75em;
+  min-height: 9em;
+}
+
+#card .card-map .map-svg {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Rows that have no coordinates (the gnomAD ones of the distribution maps, Task 24) sit beside the picture. */
+#card .card-map-side {
+  flex: 0 0 auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+#card .card-map-side .value-num {
+  font-weight: 700;
 }
 
 #card .card-diagram svg {

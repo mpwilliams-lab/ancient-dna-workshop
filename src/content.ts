@@ -1,13 +1,39 @@
 // Every on-screen string lives here (spec §6, v3 §3). tests/content.test.ts scans allRenderableStrings()
 // with tests/contentRules.ts, so any string added to this file is checked automatically.
 import * as self from './content';
-import type { AxisTick, ChipIcon, ChipKey, ConsumerShare, GeneId, MapGroupId, PeriodId, SourceId, Trait } from './types';
+import type { AxisTick, ChipIcon, ChipKey, ConsumerShare, GeneId, MapGroupId, MapId, PeriodId, SourceId, Trait } from './types';
 import { GENE_IDS, MAP_GROUP_IDS } from './types';
 import { CARDS, cardStrings, fillCard, SAMPLE_CARD_VARS } from './cards';
 import { IRELAND_FOOTNOTE, MAP_SOURCE_SUFFIX, SILVA_2026_SHOWN, TRAIT_MAP_LABELS } from './sharedText';
 import { ALL_OFF, ALL_ON, FEATURES, type Features } from './features';
 // Re-exported so every contract name is importable from content.ts and scanned by allRenderableStrings() (CONTRACT §4.1).
 export { IRELAND_FOOTNOTE, MAP_SOURCE_SUFFIX, SILVA_2026_SHOWN, TRAIT_MAP_LABELS };
+
+// ---- Map labels (spec §3.1–§3.3 and §6, verbatim; Task 20). A1 labels are data (europe_pops[].label) and
+//      distribution-map labels are TRAIT_MAP_LABELS plus the value, so their lists are empty here. ----
+export const MAP_TEXT: Readonly<Record<MapId, readonly string[]>> = {
+  A1: [],
+  D1: [
+    "Steppe herders' homeland",
+    'Corded Ware people',
+    'Bell Beaker people',
+    'Britain',
+    'Pot style probably spread from here, mostly as an idea',
+  ],
+  E1: [
+    'France',
+    'Kent: earliest newcomers found here',
+    'A few at a time over many generations',
+    'Scotland: almost no change',
+  ],
+  G1: ['Northern Germany', 'Netherlands', 'Denmark', 'East Anglia', 'Yorkshire', 'Kent', 'From France: a smaller share'],
+  H2: [],
+  I2: [],
+  J3: [],
+  K2: [],
+  L3: [],
+  F1inset: ['Newcomers found here', 'Countryside: mostly the same families'],
+};
 
 export const APP_TITLE = 'Ancient DNA of Britain';
 export const PAGES_URL = 'https://mpwilliams-lab.github.io/ancient-dna-workshop/';

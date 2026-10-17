@@ -5,6 +5,7 @@ import type { Card } from './cards';
 import type { ImageId, MapId } from './types';
 import { FEATURES, type Features } from './features';
 import { ASSET_MANIFEST, HIDDEN_WHEN_SHOWN, IMAGE_IDS, type AssetManifest } from './assetManifest';
+import { MAP_SPECS_BUILT } from './maps';
 
 export type ImageUrls = Readonly<Partial<Record<ImageId, string>>>;
 
@@ -44,13 +45,14 @@ export function cardMapId(card: Card): MapId | undefined {
   return card.feature?.startsWith('map.') ? (card.feature.slice(4) as MapId) : undefined;
 }
 
-/** The card is drawn in its upgraded form: flag on (same rule as cardUpgraded), its map checked, every non-optional tile ready. */
+/** The card is drawn in its upgraded form: flag on (same rule as cardUpgraded), its map built and checked, every non-optional
+ *  tile ready. A map whose spec is not built (src/maps.ts MAP_SPECS_BUILT) is never drawn, whatever the flags and checks. */
 export function cardShowsUpgrade(
   card: Card, features: Features = FEATURES, manifest: AssetManifest = ASSET_MANIFEST, urls: ImageUrls = BUNDLED_IMAGES,
 ): boolean {
   if (card.feature === undefined || !features[card.feature]) return false;
   const map = cardMapId(card);
-  if (map !== undefined && !mapReady(map, manifest)) return false;
+  if (map !== undefined && (!MAP_SPECS_BUILT.has(map) || !mapReady(map, manifest))) return false;
   return (card.tiles ?? []).every((t) => t.optional === true || imageReady(t.image, manifest, urls));
 }
 

@@ -1,10 +1,14 @@
 // Build-time feature flags (spec v3 §10.3, CONTRACT §1). Each flag task (16-30) adds its false-path test here.
 import { describe, expect, it } from 'vitest';
+import { CARDS } from '../src/cards';
+import { renderCardBody } from '../src/cardView';
 import { execute } from '../src/commands';
 import { ALL_OFF, ALL_ON, FEATURE_FLAGS, FEATURES, withFeatures, type FeatureFlag } from '../src/features';
 import { CONSUMER_BARS_LOG, HELP_LINES, helpLines } from '../src/content';
 import { ruleViolations } from './contentRules';
 import { FIXTURE } from './fixtures/fixture';
+import { checkedManifest } from './helpers/assetEnv';
+import { cardCtx, flagSet, openOnCard } from './helpers/cardCtx';
 
 // The flags switched on so far, in landing order (spec §10.3). Each P2/P3 task appends its own flag(s) in its last commit;
 // the release task (31) removes any that are cut at the merge cutoff.
@@ -127,6 +131,33 @@ describe('consumerBars (Task 18) false path', () => {
     expect(r.lines.at(-1)).toBe(CONSUMER_BARS_LOG);
     for (const c of [{ name: 'load_genomes' }, { name: 'run_pca', period: 'IronAge' }, { name: 'run_admixture', K: 3 }, { name: 'allele_freq', gene: 'LCT' }] as const) {
       expect(execute(c, FIXTURE, on), c.name).toEqual(execute(c, FIXTURE, off));
+    }
+  });
+});
+
+describe('map.D1 / map.E1 / map.G1 false paths (Task 20, spec §10.3)', () => {
+  const MAPS = [['D1', 'map.D1'], ['E1', 'map.E1'], ['G1', 'map.G1']] as const;
+  for (const [id, flag] of MAPS) {
+    it(`${flag} false: ${id} renders its P1 text form even with its map checked`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, false), checkedManifest()));
+      expect(el.querySelector('.card-map')).toBeNull();
+      expect(el.querySelector('svg.map-svg')).toBeNull();
+      expect(el.querySelector('.card-source')?.textContent ?? '').not.toContain('Natural Earth');
+      if (id === 'E1') expect(el.textContent).toContain('The earliest found so far were buried in Kent.');
+      expect(openOnCard(id, FIXTURE, flagSet(flag, false), checkedManifest()).querySelector('.card-credits')).toBeNull();
+    });
+    it(`${flag} true with its map checked: ${id} draws the map, with its full source line and the Image credits button`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true), checkedManifest()));
+      expect(el.querySelector(`.card-map[data-map="${id}"] svg.map-svg`)).not.toBeNull();
+      expect(el.querySelector('.card-source')?.textContent ?? '').toContain('Map outline: Made with Natural Earth.');
+      expect(openOnCard(id, FIXTURE, flagSet(flag, true), checkedManifest()).querySelector('.card-credits')).not.toBeNull();
+    });
+  }
+  it('each map has its own flag: with only map.D1 on, E1 and G1 stay in their text form', () => {
+    const only = flagSet('map.D1', true, ALL_OFF);
+    expect(renderCardBody(document, CARDS.D1, cardCtx(FIXTURE, only, checkedManifest())).querySelector('.card-map')).not.toBeNull();
+    for (const id of ['E1', 'G1'] as const) {
+      expect(renderCardBody(document, CARDS[id], cardCtx(FIXTURE, only, checkedManifest())).querySelector('.card-map'), id).toBeNull();
     }
   });
 });

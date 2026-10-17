@@ -6,7 +6,7 @@ import type { CardHost } from './controller';
 import type { CardId, GeneId, ImageId, WorkshopData } from './types';
 import { FEATURES, type Features } from './features';
 import {
-  CARDS, cardSource, cardUpgraded, cardVars, distributionRows, DISTRIBUTION_SCALE_MAX, fillCard, type Card, type CardVar,
+  CARDS, cardSource, cardVars, distributionRows, DISTRIBUTION_SCALE_MAX, fillCard, type Card, type CardVar,
 } from './cards';
 import {
   BACK_BUTTON, BACK_BUTTON_LABEL, CARD_CONTINUE, CARD_CONTINUE_DONE, CARD_CONTINUE_TO_PLOT, cardCounter, CREDITS_LINK,
@@ -14,7 +14,9 @@ import {
 import { chipElement } from './icons';
 import { renderDiagram } from './diagrams';
 import { ASSET_MANIFEST, HIDDEN_WHEN_SHOWN, cropAllowed, type AssetManifest } from './assetManifest';
-import { BUNDLED_IMAGES, cardShowsUpgrade, imageReady, imageUrl, type ImageUrls } from './assets';
+import { BUNDLED_IMAGES, cardMapId, cardShowsUpgrade, imageReady, imageUrl, type ImageUrls } from './assets';
+import { renderCardMap } from './cardMap';
+import { mapDataReady } from './maps';
 
 export interface CardRenderContext {
   data: WorkshopData; features: Features;
@@ -31,18 +33,22 @@ export interface CardView extends CardHost { isOpen(): boolean; currentId(): Car
 export const LONG_VALUE_LIST = 11;
 
 /**
- * True when a card's upgrade assets (every non-optional tile image, or its map) are bundled and visually checked.
- * Task 15's image tiles and Image credits button read cardShowsUpgrade (src/assets.ts) directly. This stub still gates the
- * text that goes with a map (value lists, source line), and no map exists before the map renderer (Task 20), so it is false
- * for every card. Task 20 deletes it and makes upgradedFormShown delegate to cardShowsUpgrade (CONTRACT §8 R11).
+ * The upgraded (P2) form is on screen: Task 15's rule (flag on, every non-optional tile image ready, its map checked and its
+ * spec built). Otherwise the P1 text form. The map slot, the value bars, the text-form lines, the source line, the image tiles
+ * and the Image credits button all read this one rule, so they always agree.
  */
-export function upgradeReady(_card: Card): boolean {
-  return false;
+export function upgradedFormShown(
+  card: Card, features: Features, manifest: AssetManifest = ASSET_MANIFEST, urls: ImageUrls = BUNDLED_IMAGES,
+): boolean {
+  return cardShowsUpgrade(card, features, manifest, urls);
 }
 
-/** The upgraded (P2) form is on screen: the card's flag is on AND its assets are ready. Otherwise the P1 text form. */
-export function upgradedFormShown(card: Card, features: Features): boolean {
-  return cardUpgraded(card, features) && upgradeReady(card);
+/** upgradedFormShown for this render, and (map cards) the map's data present: A1 needs europe_pops (Task 23), so without it the
+ *  whole card, footer included, stays in the text form. The body and the footer both ask this, so they cannot disagree. */
+function upgradeOnScreen(card: Card, ctx: CardRenderContext): boolean {
+  const mapId = cardMapId(card);
+  return upgradedFormShown(card, ctx.features, ctx.manifest ?? ASSET_MANIFEST, ctx.imageUrls ?? BUNDLED_IMAGES)
+    && (mapId === undefined || mapDataReady(mapId, ctx.data));
 }
 
 /** Not the last card: Continue. Last "before" card: Show the plot. Last "after" card: See the plot (spec §3.5). */
@@ -54,7 +60,8 @@ export function continueLabel(index: number, count: number, placement: 'after' |
 /**
  * The source line as shown, templates filled, or undefined when the card shows none. A line whose {…} value is missing from
  * the data is left out, never printed half-filled: A1's "{n_pops} groups, {n_people} people" when the JSON has no europe_fit
- * (cardVars gives '' for both). Carry-forward from the Task 10 review; Task 20 shows A1's source with its map.
+ * (cardVars gives '' for both). Carry-forward from the Task 10 review: A1's source is shown only with its map (Task 23), and
+ * never without europe_fit.
  */
 export function cardSourceLine(card: Card, upgraded: boolean, vars: Readonly<Record<CardVar, string>>): string | undefined {
   const source = cardSource(card, upgraded);
@@ -142,7 +149,8 @@ function renderValues(doc: Document, gene: GeneId, data: WorkshopData): HTMLULis
 export function renderCardBody(doc: Document, card: Card, ctx: CardRenderContext): HTMLElement {
   const vars = cardVars(ctx.data);
   const fill = (s: string): string => fillCard(s, vars);
-  const upgraded = upgradedFormShown(card, ctx.features);
+  const mapId = cardMapId(card);
+  const upgraded = upgradeOnScreen(card, ctx);
   const body = make(doc, 'div', 'card-body');
 
   const title = make(doc, 'h2', 'card-title', fill(card.title));
@@ -156,6 +164,7 @@ export function renderCardBody(doc: Document, card: Card, ctx: CardRenderContext
   }
   const tiles = renderTiles(doc, card, ctx);
   if (tiles !== null) body.append(tiles);
+  if (upgraded && mapId !== undefined) body.append(renderCardMap(doc, card, ctx.data));
   if (card.diagram) {
     const slot = make(doc, 'div', 'card-diagram');
     slot.setAttribute('data-diagram', card.diagram.id);
@@ -219,7 +228,7 @@ function renderFooter(doc: Document, card: Card, ctx: CardRenderContext, handler
     back.setAttribute('aria-label', BACK_BUTTON_LABEL);
     footer.append(back);
   }
-  if (cardShowsUpgrade(card, ctx.features, ctx.manifest ?? ASSET_MANIFEST, ctx.imageUrls ?? BUNDLED_IMAGES)) {
+  if (upgradeOnScreen(card, ctx)) {
     footer.append(button('card-credits', CREDITS_LINK, () => handlers.onCredits()));
   }
   footer.append(button('card-continue', continueLabel(ctx.index, ctx.count, ctx.placement), () => handlers.onContinue()));

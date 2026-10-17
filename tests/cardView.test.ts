@@ -39,9 +39,11 @@ describe('renderCardBody: every card in its P1 text form', () => {
     expect(b.querySelector('.card-map')).toBeNull();
     expect(b.textContent).not.toMatch(/[{}]/);
   });
-  it.each(CARD_IDS)('%s still renders its text form with every flag on while nothing is checked or bundled (and no map exists before Task 20)', (id) => {
-    expect(upgradedFormShown(CARDS[id], ALL_ON)).toBe(false);
-    const b = body(id, { features: ALL_ON, manifest: uncheckedManifest(), imageUrls: {} });
+  it.each(CARD_IDS)('%s renders its text form with every flag on while no image or map is checked or bundled', (id) => {
+    // The premise ("nothing checked, nothing bundled") is set here, in memory: never read from the committed manifest.
+    const none = { manifest: uncheckedManifest(), imageUrls: {} };
+    expect(upgradedFormShown(CARDS[id], ALL_ON, none.manifest, none.imageUrls)).toBe(false);
+    const b = body(id, { features: ALL_ON, ...none });
     expect(b.querySelector('img')).toBeNull();
     expect(b.querySelector('.card-map')).toBeNull();
   });
