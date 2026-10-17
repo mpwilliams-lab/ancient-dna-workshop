@@ -10,9 +10,11 @@ import { allRenderableStrings, PERIOD_LABELS } from '../src/content';
 import { validateData } from '../src/data';
 import { advance, EXTRAS, hintCommand, SCRIPT } from '../src/hints';
 import { formatCommand } from '../src/parser';
+import { finaleTotalMs } from '../src/plots/pca';
 import {
   beats, buildRunSheet, DRY_RUN_CHECK, OPEN_CHECKS, outlinedAtReveal, SAY_LINES, TIMING_CUTS, TIMING_RULE,
 } from '../src/runsheet';
+import { staggerDelay } from '../src/terminal';
 import type { ConsumerShare, WorkshopData } from '../src/types';
 import { FIXTURE } from './helpers/shellEnv';
 
@@ -86,6 +88,17 @@ describe('say-lines: spec §3.6, verbatim, instructor only', () => {
       expect(cue, id).toBeGreaterThan(-1);
       expect(beat.say[cue + 1]).toBe(SAY_LINES.traitPuzzle![0]);
     }
+  });
+  it('the finale step carries a timing cue, not a say-line: the animation starts about 3 s after Enter, and a blank Enter skips to its end', () => {
+    const say = beats(FIXTURE).find((b) => b.id === 'finale')!.say;
+    const cue = '*The animation starts about 3 seconds after Enter, when the log has finished, and plays for about 5 seconds. A blank Enter skips to the end.*';
+    expect(say).toEqual(['Every period appears, oldest first; Britain today comes last.', cue]);
+    expect(allSay()).not.toContain(cue);   // the spec §3.6 say-lines stay exactly as they are
+    expect(md).toContain(`- ${cue}`);
+    // The numbers are the app's own: the staggered log (a line every staggerDelay ms) and the whole finale.
+    const log = execute({ name: 'run_pca', period: 'all' }, FIXTURE).lines;
+    expect(Math.round(((log.length - 1) * staggerDelay(log.length)) / 1000)).toBe(3);
+    expect(Math.round(finaleTotalMs() / 1000)).toBe(5);
   });
   it('never reaches the screen: not in allRenderableStrings(), no app module imports runsheet.ts, not in the built page', () => {
     const screen = allRenderableStrings();

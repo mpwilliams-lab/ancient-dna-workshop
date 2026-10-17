@@ -242,7 +242,12 @@ function sayFor(id: StepId | 'wrap', data: WorkshopData): string[] {
     case 'angloSaxon':
       return [...(SAY_LINES.angloSaxon ?? [])];
     case 'finale':
-      return ['Every period appears, oldest first; Britain today comes last.'];
+      return [
+        'Every period appears, oldest first; Britain today comes last.',
+        // A cue, not a say-line (those stay verbatim in SAY_LINES). The numbers are the app's own: the staggered log takes up to
+        // 2.8 s, then the finale plays 5.35 s (tests/runsheet-content.test.ts derives both).
+        '*The animation starts about 3 seconds after Enter, when the log has finished, and plays for about 5 seconds. A blank Enter skips to the end.*',
+      ];
     case 'lct':
       return traitLines(data, 'LCT', id, SAY_LINES.lct);
     case 'slc45a2':
