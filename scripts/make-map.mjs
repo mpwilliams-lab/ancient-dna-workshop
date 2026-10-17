@@ -5,7 +5,7 @@
 // 2. Clips every ring to the map frame (Sutherland–Hodgman), drops rings under 0.05 square degrees except Orkney, Shetland,
 //    the Isle of Man and Malta, simplifies (Douglas–Peucker: 0.05 degrees for Europe, 0.2 for the Old World), projects with
 //    the formula of src/plots/map.ts and writes one-decimal SVG paths plus the projection constants to
-//    src/generated/map-europe.ts and src/generated/map-oldworld.ts (committed).
+//    src/generated/map-europe.ts, src/generated/map-oldworld.ts and (P3, L3's inset) src/generated/map-europe-west.ts (committed).
 // Usage:  node scripts/make-map.mjs --record-sha   first time only: prints the two hashes to paste into NE_SHA256
 //         node scripts/make-map.mjs [--clean]      --clean empties assets/geo-raw/ first (it must start empty)
 import { createHash } from 'node:crypto';
@@ -42,6 +42,8 @@ export const KEEP_ISLANDS = [
 export const OUTPUTS = [
   { frame: 'europe', source: 'ne_50m_land.geojson', tolerance: 0.05, file: 'src/generated/map-europe.ts', landName: 'EUROPE_LAND', projName: 'EUROPE_PROJECTION', maxBytes: 80 * 1024 },
   { frame: 'oldWorld', source: 'ne_110m_land.geojson', tolerance: 0.2, file: 'src/generated/map-oldworld.ts', landName: 'OLDWORLD_LAND', projName: 'OLDWORLD_PROJECTION', maxBytes: 25 * 1024 },
+  // P3 (Task 27): the Europe-west inset for L3 (spec §6). Same pinned v5.1.2 file, NE_SHA256 entry and tolerance as Europe.
+  { frame: 'europeWest', source: 'ne_50m_land.geojson', tolerance: 0.05, file: 'src/generated/map-europe-west.ts', landName: 'EUROPE_WEST_LAND', projName: 'EUROPE_WEST_PROJECTION', maxBytes: 80 * 1024 },
 ];
 
 function fail(msg) {

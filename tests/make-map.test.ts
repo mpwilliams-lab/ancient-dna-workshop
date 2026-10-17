@@ -10,6 +10,7 @@ import {
 } from '../scripts/make-map.mjs';
 import { MAP_FRAMES, makeProjection, project, type MapProjectionConstants } from '../src/plots/map';
 import { EUROPE_LAND, EUROPE_PROJECTION } from '../src/generated/map-europe';
+import { EUROPE_WEST_LAND, EUROPE_WEST_PROJECTION } from '../src/generated/map-europe-west';
 import { OLDWORLD_LAND, OLDWORLD_PROJECTION } from '../src/generated/map-oldworld';
 
 type P = [number, number];
@@ -57,6 +58,7 @@ describe('make-map geometry helpers', () => {
     expect(OUTPUTS.map((o) => [o.frame, o.source, o.tolerance, o.file, o.maxBytes])).toEqual([
       ['europe', 'ne_50m_land.geojson', 0.05, 'src/generated/map-europe.ts', 80 * 1024],
       ['oldWorld', 'ne_110m_land.geojson', 0.2, 'src/generated/map-oldworld.ts', 25 * 1024],
+      ['europeWest', 'ne_50m_land.geojson', 0.05, 'src/generated/map-europe-west.ts', 80 * 1024],
     ]);
   });
   it('ringArea is the shoelace area in square degrees; openRing drops the closing point', () => {
@@ -120,23 +122,47 @@ describe('make-map geometry helpers', () => {
 });
 
 describe('generated outlines (src/generated, committed)', () => {
-  it('stay within their size budgets (Europe <= 80 KB, Old World <= 25 KB)', () => {
+  it('stay within their size budgets (Europe <= 80 KB, Old World <= 25 KB, Europe-west <= 80 KB)', () => {
     expect(statSync(resolve(ROOT, 'src/generated/map-europe.ts')).size).toBeLessThanOrEqual(80 * 1024);
     expect(statSync(resolve(ROOT, 'src/generated/map-oldworld.ts')).size).toBeLessThanOrEqual(25 * 1024);
+    expect(statSync(resolve(ROOT, 'src/generated/map-europe-west.ts')).size).toBeLessThanOrEqual(80 * 1024);
     expect(readFileSync(resolve(ROOT, 'src/generated/map-europe.ts'), 'utf8')).toContain('Do not edit by hand');
+    expect(readFileSync(resolve(ROOT, 'src/generated/map-europe-west.ts'), 'utf8')).toContain('Do not edit by hand');
   });
   it('carry the projection constants of makeProjection, within 1e-9', () => {
-    const pairs: [MapProjectionConstants, 'europe' | 'oldWorld'][] = [[EUROPE_PROJECTION, 'europe'], [OLDWORLD_PROJECTION, 'oldWorld']];
+    const pairs: [MapProjectionConstants, 'europe' | 'oldWorld' | 'europeWest'][] = [
+      [EUROPE_PROJECTION, 'europe'], [OLDWORLD_PROJECTION, 'oldWorld'], [EUROPE_WEST_PROJECTION, 'europeWest'],
+    ];
     for (const [c, f] of pairs) {
       const want = makeProjection(MAP_FRAMES[f]);
       expect(c.frame).toBe(f);
       for (const k of ['k', 'offX', 'offY', 'pxMin', 'latMax', 'lon0', 'cosLat0'] as const) expect(Math.abs(c[k] - want[k]), `${f}.${k}`).toBeLessThan(1e-9);
     }
   });
-  it('Britain (52.5, -1.5) lands on land in both frames; the North Sea (55, 3) does not', () => {
+  it('Britain (52.5, -1.5) lands on land in all three frames; the North Sea (55, 3) does not', () => {
     expect(onLand(EUROPE_LAND, project(EUROPE_PROJECTION, 52.5, -1.5))).toBe(true);
     expect(onLand(OLDWORLD_LAND, project(OLDWORLD_PROJECTION, 52.5, -1.5))).toBe(true);
+    expect(onLand(EUROPE_WEST_LAND, project(EUROPE_WEST_PROJECTION, 52.5, -1.5))).toBe(true);
     expect(onLand(EUROPE_LAND, project(EUROPE_PROJECTION, 55, 3))).toBe(false);
+    expect(onLand(EUROPE_WEST_LAND, project(EUROPE_WEST_PROJECTION, 55, 3))).toBe(false);
+  });
+  // Task 27: L3 draws its four places on the Europe-west outline; each must sit on land, or its dot would float in the sea.
+  it('the four L3 places (Spain, Tuscany, Britain, Finland) are on land of the Europe-west outline, and the Bay of Biscay, the North Sea and the Baltic are sea', () => {
+    for (const [name, lat, lon] of [['Spain', 40.4, -3.7], ['Tuscany', 43.5, 11], ['Britain', 52.5, -1.5], ['Finland', 61, 25]] as const) {
+      expect(onLand(EUROPE_WEST_LAND, project(EUROPE_WEST_PROJECTION, lat, lon)), name).toBe(true);
+    }
+    expect(onLand(EUROPE_WEST_LAND, project(EUROPE_WEST_PROJECTION, 45.5, -6)), 'the Bay of Biscay').toBe(false);
+    expect(onLand(EUROPE_WEST_LAND, project(EUROPE_WEST_PROJECTION, 58, 20)), 'the Baltic east of Gotland').toBe(false);
+  });
+  it('the Europe-west outline is the same Natural Earth file and tolerance as the Europe one, clipped to its own smaller frame', () => {
+    const [europe, , west] = OUTPUTS;
+    expect([west!.source, west!.tolerance]).toEqual([europe!.source, europe!.tolerance]);
+    expect(MAP_FRAMES.europeWest.lonMin).toBeGreaterThanOrEqual(MAP_FRAMES.europe.lonMin);
+    expect(MAP_FRAMES.europeWest.lonMax).toBeLessThan(MAP_FRAMES.europe.lonMax);
+    expect(MAP_FRAMES.europeWest.latMin).toBeGreaterThan(MAP_FRAMES.europe.latMin);
+    expect(MAP_FRAMES.europeWest.latMax).toBeLessThan(MAP_FRAMES.europe.latMax);
+    expect(EUROPE_WEST_LAND.length).toBeGreaterThan(20);
+    expect(EUROPE_WEST_LAND.length).toBeLessThanOrEqual(EUROPE_LAND.length);
   });
   // Task 19 review (asserted by Task 24): an inland sea is a hole in the land, drawn with the even-odd rule, so a point in it is sea.
   it('the Caspian Sea is a hole in the Old World land: its middle is sea, and the steppe east of it and the Iranian plateau south of it are land', () => {
@@ -159,8 +185,11 @@ describe('generated outlines (src/generated, committed)', () => {
   it('the Europe outline keeps Orkney, Shetland, the Isle of Man and Malta', () => {
     for (const box of KEEP_ISLANDS) expect(keptIsland(EUROPE_LAND, EUROPE_PROJECTION, box), box.name).toBe(true);
   });
+  it('the Europe-west outline keeps Orkney, Shetland and the Isle of Man (Malta lies south of its frame)', () => {
+    for (const box of KEEP_ISLANDS.filter((k) => k.name !== 'Malta')) expect(keptIsland(EUROPE_WEST_LAND, EUROPE_WEST_PROJECTION, box), box.name).toBe(true);
+  });
   it('every coordinate has at most one decimal and stays inside the viewBox (allowing for the frame box edge)', () => {
-    for (const d of [...EUROPE_LAND, ...OLDWORLD_LAND]) {
+    for (const d of [...EUROPE_LAND, ...OLDWORLD_LAND, ...EUROPE_WEST_LAND]) {
       expect(d).not.toMatch(/\d\.\d\d/);
       for (const r of rings(d)) for (const [x, y] of r) {
         expect(x).toBeGreaterThanOrEqual(-0.05);
