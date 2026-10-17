@@ -17,7 +17,7 @@ import { validateData } from '../src/data';
 import { ALL_OFF, ALL_ON, withFeatures, type Features } from '../src/features';
 import { CARD_IDS, GENE_IDS, type CardId, type WorkshopData } from '../src/types';
 import { ruleViolations } from './contentRules';
-import { FIXTURE } from './fixtures/fixture';
+import { cloneFixture, FIXTURE } from './fixtures/fixture';
 import { checkedManifest, fakeUrls, uncheckedManifest } from './helpers/assetEnv';
 import { loadIndexHtml } from './helpers/shellEnv';
 
@@ -375,10 +375,13 @@ describe('rendered text: the content scanner covers what is really on the card',
 });
 
 describe('cardSourceLine (carry-forward from the Task 10 review: a source line is never half-filled)', () => {
-  const noFit = cardVars(FIXTURE);                            // the fixture has no europe_fit, so {n_pops} and {n_people} are ''
+  const bare = cloneFixture();                                // the fixture carries europe_fit (Task 23): without it {n_pops} and {n_people} are ''
+  delete bare.europe_fit;
+  const noFit = cardVars(bare);
   const withFit = { ...noFit, n_pops: '26', n_people: '716' };
   it("A1's upgraded source needs the Europe fit: filled when europe_fit is there, left out (not half-filled) when it is not", () => {
     expect(noFit.n_pops).toBe('');
+    expect(cardVars(FIXTURE)).toMatchObject({ n_pops: '26', n_people: '716' });
     expect(cardSourceLine(CARDS.A1, true, withFit)).toBe(fillCard(CARDS.A1.source!, withFit));
     expect(cardSourceLine(CARDS.A1, true, withFit)).toContain('(26 groups, 716 people)');
     expect(cardSourceLine(CARDS.A1, true, noFit)).toBeUndefined();

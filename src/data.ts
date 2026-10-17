@@ -362,8 +362,12 @@ function validateSpreadCheck(v: unknown): SpreadCheck {
   return out;
 }
 
+/** The most groups the A1 map labels (spec §8: the build chooses 8 `map_label` groups). */
+export const EUROPE_MAP_LABELS_MAX = 8;
+
 function validateEurope(pops: unknown, fit: unknown): { pops: EuropePop[]; fit: EuropeFit } {
   if (pops === undefined || fit === undefined) throw new DataError('europe_pops', 'europe_pops and europe_fit come together');
+  const ids = new Set<string>();
   const list = arr(pops, 'europe_pops').map((p, i): EuropePop => {
     const path = `europe_pops[${i}]`;
     const o = obj(p, path);
@@ -373,10 +377,16 @@ function validateEurope(pops: unknown, fit: unknown): { pops: EuropePop[]; fit: 
       x: num(o.x, `${path}.x`), y: num(o.y, `${path}.y`), map_x: num(o.map_x, `${path}.map_x`), map_y: num(o.map_y, `${path}.map_y`),
       isolate: bool(o.isolate, `${path}.isolate`), map_label: bool(o.map_label, `${path}.map_label`),
     };
+    if (ids.has(pop.id)) throw new DataError(`${path}.id`, `${pop.id} appears twice`);
+    ids.add(pop.id);
     if (pop.n === 0) throw new DataError(`${path}.n`, 'must be greater than 0');
     if (pop.isolate && pop.map_label) throw new DataError(`${path}.map_label`, 'an isolate is never labelled');
     return pop;
   });
+  const labelled = list.filter((p) => p.map_label).length;
+  if (labelled > EUROPE_MAP_LABELS_MAX) {
+    throw new DataError('europe_pops', `${labelled} groups are labelled; the map has room for ${EUROPE_MAP_LABELS_MAX} at most`);
+  }
   const fo = obj(fit, 'europe_fit');
   const corr = (x: unknown, path: string): number => {
     const r = num(x, path);

@@ -35,8 +35,19 @@ describe('validateData on the fixture', () => {
     expect(FIXTURE.points.find((p) => p.period === 'IronAge')!.points.map((q) => q.region)).toEqual(['ENG_S', 'ENG_M', 'SCO', 'WAL']);
     for (const gene of GENE_IDS) expect(FIXTURE.trait_maps[gene].map((r) => r.label_key), gene).toEqual([...TRAIT_MAP_ORDER[gene]]);
     expect(FIXTURE.spread_check).toEqual({ ia_hicov_median_d: 0.00304, bb_hicov_median_d: 0.00301 });
-    expect(FIXTURE.europe_pops).toBeUndefined();
+    // v3 (Task 23): the fixture carries the real europe_pops rows and europe_fit of the synced JSON (copied; the id is never shown on screen).
+    expect(FIXTURE.europe_pops).toHaveLength(35);
+    expect(FIXTURE.europe_pops!.filter((p) => !p.isolate)).toHaveLength(26);
+    expect(FIXTURE.europe_fit).toEqual({ n_pops: 26, n_people: 716, r_lat: 0.8868, r_lon: 0.8298 });
     expect(FIXTURE.named).toBeUndefined();
+  });
+
+  it('the fixture labels the eight groups the data build chose (open check 14), in europe_pops order, none of them an isolate', () => {
+    const labelled = FIXTURE.europe_pops!.filter((p) => p.map_label);
+    expect(labelled.map((p) => p.label)).toEqual(
+      ['Estonian', 'Lithuanian', 'Czech', 'Hungarian', 'Romanian', 'Serbian', 'South Italian', 'Sicilian'],
+    );
+    expect(labelled.filter((p) => p.isolate)).toEqual([]);
   });
 });
 
@@ -109,7 +120,19 @@ const BREAKERS: Breaker[] = [
   ['a gene with no rows', (d) => { d.trait_maps['HLA-DQ2'] = []; }, /trait_maps\.HLA-DQ2: no rows/],
   ['spread_check missing', (d) => { delete d.spread_check; }, /spread_check: expected an object/],
   ['spread_check not positive', (d) => { d.spread_check.bb_hicov_median_d = 0; }, /spread_check\.bb_hicov_median_d: must be greater than 0/],
-  ['europe_fit without europe_pops', (d) => { d.europe_fit = { n_pops: 0, n_people: 0, r_lat: 0, r_lon: 0 }; }, /europe_pops and europe_fit come together/],
+  ['europe_fit without europe_pops', (d) => { delete d.europe_pops; }, /europe_pops and europe_fit come together/],
+  ['europe_pops without europe_fit', (d) => { delete d.europe_fit; }, /europe_pops and europe_fit come together/],
+  ['a Europe group with no people', (d) => { d.europe_pops[4].n = 0; }, /europe_pops\[4\]\.n: must be greater than 0/],
+  ['two Europe groups with one id', (d) => { d.europe_pops[1].id = d.europe_pops[0].id; }, /europe_pops\[1\]\.id: Saami appears twice/],
+  ['nine labelled Europe groups', (d) => { d.europe_pops[4].map_label = true; }, /europe_pops: 9 groups are labelled; the map has room for 8 at most/],
+  ['a labelled isolate', (d) => { d.europe_pops[0].map_label = true; }, /europe_pops\[0\]\.map_label: an isolate is never labelled/],
+  ['europe_fit r_lat above 1', (d) => { d.europe_fit.r_lat = 1.0001; }, /europe_fit\.r_lat: expected a correlation between -1 and 1, got 1\.0001/],
+  ['europe_fit r_lat below -1', (d) => { d.europe_fit.r_lat = -1.0001; }, /europe_fit\.r_lat: expected a correlation between -1 and 1, got -1\.0001/],
+  ['europe_fit r_lon above 1', (d) => { d.europe_fit.r_lon = 1.2; }, /europe_fit\.r_lon: expected a correlation between -1 and 1, got 1\.2/],
+  ['europe_fit r_lon below -1', (d) => { d.europe_fit.r_lon = -1.2; }, /europe_fit\.r_lon: expected a correlation between -1 and 1, got -1\.2/],
+  ['europe_fit r_lon not a number', (d) => { d.europe_fit.r_lon = 'NaN'; }, /europe_fit\.r_lon: expected a finite number, got "NaN"/],
+  ['europe_fit n_pops not the fitted count', (d) => { d.europe_fit.n_pops = 35; }, /europe_fit\.n_pops: expected 26 \(non-isolate populations\), got 35/],
+  ['europe_fit n_people not their sum', (d) => { d.europe_fit.n_people = 861; }, /europe_fit\.n_people: expected 716 \(people in the non-isolate populations\), got 861/],
   ['a named point with another key', (d) => { d.named = [{ key: 'I1234', period: 'Roman', x: 0, y: 0 }]; }, /named\[0\]\.key: expected one of york_traveller/],
 ];
 

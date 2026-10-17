@@ -397,14 +397,19 @@ describe('card budget (spec §3: body <= 80 words, <= 4 bullets, <= 30 words per
 });
 
 describe('templates (spec §3 {…} values)', () => {
-  it('cardVars reads the fixture: zoom equals zoomFactor, ratio = round(IronAge / BellBeaker), period counts, no A1 fit yet', () => {
+  it('cardVars reads the fixture: zoom equals zoomFactor, ratio = round(IronAge / BellBeaker), period counts, the Europe fit (Task 23)', () => {
     const n = (id: string) => FIXTURE.periods.find((p) => p.id === id)!.n_pca;
     expect(cardVars(FIXTURE)).toEqual({
       zoom: String(zoomFactor(FIXTURE)),
       ratio: String(Math.round(n('IronAge') / n('BellBeaker'))),
       n_IronAge: String(n('IronAge')), n_BellBeaker: String(n('BellBeaker')), n_Roman: String(n('Roman')),
-      n_pops: '', n_people: '',
+      n_pops: '26', n_people: '716',
     });
+  });
+  it('A1 source numbers are "" until the JSON has europe_fit (so the source line is left out, never half-filled)', () => {
+    const d = cloneFixture();
+    delete d.europe_fit;
+    expect(cardVars(d)).toMatchObject({ n_pops: '', n_people: '' });
   });
   it('A1 source numbers come from europe_fit when the JSON has it', () => {
     const d: WorkshopData = { ...cloneFixture(), europe_fit: { n_pops: 26, n_people: 1234, r_lat: 0.91, r_lon: 0.74 } };
