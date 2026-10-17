@@ -1,19 +1,23 @@
 // @vitest-environment jsdom
-// Spec §6 map specs (Task 20: D1, E1, G1; Task 23: A1). Tasks 24 and 27 append their own describe blocks to this file.
+// Spec §6 map specs (Task 20: D1, E1, G1; Task 23: A1; Task 24: H2, I2, J3). Task 27 appends its own describe blocks to this file.
 import { describe, expect, it } from 'vitest';
+import { DISTRIBUTION_SCALE_MAX, distributionRows } from '../src/cards';
 import { MAP_TEXT } from '../src/content';
 import {
-  A1_CONFIRMED_LABELS, A1_DOT_R, A1_LABEL_PX, BAND_MAX_ASPECT, BAND_PAD, bandView, drawingBox, frameBox, labelAt, labelBox,
-  MAP_LABEL_FONT_PX, MAP_SPECS_BUILT, mapDataReady, mapSpec, placeLabels, specA1, type LabelBox,
+  A1_CONFIRMED_LABELS, A1_DOT_R, A1_LABEL_PX, BAND_MAX_ASPECT, BAND_PAD, DISTRIBUTION_LABEL_PX, DISTRIBUTION_MAP_FRAME,
+  DISTRIBUTION_MAP_GENE, DOT_LABEL_WIDTH_FACTOR, bandView, distributionSpec, drawingBox, frameBox, labelAt, labelBox, MAP_LABEL_FONT_PX,
+  MAP_SPECS_BUILT, mapDataReady, mapSpec, placeDotLabels, placeLabels, specA1, type LabelBox,
 } from '../src/maps';
 import {
-  ARROW_WIDTH, MAP_FRAMES, MAP_VIEW, WIDE_ARROW_WIDTH, arrowReach, catmullRomSegments, makeProjection, project, projectUnits, renderMap,
-  type LatLon, type MapSpec, type MapView, type XY,
+  ARROW_WIDTH, MAP_FRAMES, MAP_VIEW, WIDE_ARROW_WIDTH, arrowReach, catmullRomSegments, dotRadius, makeProjection, project, projectUnits,
+  renderMap, type LatLon, type MapSpec, type MapView, type XY,
 } from '../src/plots/map';
 import { SVG_NS } from '../src/plots/svg';
 import type { EuropePop } from '../src/types';
-import { FIXTURE } from './fixtures/fixture';
+import { FIXTURE, cloneFixture } from './fixtures/fixture';
 import { ruleViolations } from './contentRules';
+import { labelLayoutViolations, layoutViolations, specDots } from './helpers/mapLayout';
+import { mulberry32 } from './helpers/rng';
 
 const ll = (lat: number, lon: number): LatLon => ({ lat, lon });
 
@@ -549,5 +553,309 @@ describe('mapSpec(A1): genes mirror geography (Task 23, spec §3.1, §6, §8)', 
       expect(mapSpec(id, FIXTURE).labelPx, id).toBeUndefined();
       for (const t of [...rendered(mapSpec(id, FIXTURE)).querySelectorAll('text.map-label')]) expect(Number(t.getAttribute('font-size')), id).toBe(MAP_LABEL_FONT_PX);
     }
+  });
+});
+
+// ---- Distribution maps H2, I2, J3 (Task 24, spec §3.4, §6): dots sized by copies in every 100, labelled "<place> <copies>" ----
+
+/** The slack the placer keeps for a font that draws wider than labelBox's estimate: every check below draws every word this much wider.
+ *  A literal, not DOT_LABEL_WIDTH_FACTOR, so that lowering the constant fails the checks instead of loosening them. */
+const WIDER = 1.08;
+
+describe('placeDotLabels (Task 24): a clear place for every label, or none', () => {
+  it('keeps at least 8% of slack for a font that draws wider than estimated (browsers measured so far: 0.9 to 1.0 of the estimate)', () => {
+    expect(DOT_LABEL_WIDTH_FACTOR).toBeGreaterThanOrEqual(WIDER);
+  });
+
+  const c = makeProjection(MAP_FRAMES.europe);
+  const at = (x: number, y: number): LatLon => ({ lat: c.latMax - (y - c.offY) / c.k, lon: c.lon0 + ((x - c.offX) / c.k + c.pxMin) / c.cosLat0 });
+  const ROOM: MapView = { x: 100, y: 100, width: 800, height: 450 };
+  type Item = { at: LatLon; text: string; r: number };
+  const dotsOf = (items: readonly Item[]) => items.map((it) => ({ ...project(c, it.at.lat, it.at.lon), r: it.r }));
+  const place = (items: readonly Item[], room: MapView = ROOM, fontPx = 20): ReturnType<typeof placeDotLabels> => placeDotLabels('europe', items, room, fontPx);
+  /** Clear even when every word draws 8% wider than the estimate (the slack the placer keeps for a font wider than measured; pinned below). */
+  const violations = (items: readonly Item[], texts: NonNullable<ReturnType<typeof placeDotLabels>>, room: MapView = ROOM, fontPx = 20): string[] =>
+    labelLayoutViolations(c, room, fontPx, dotsOf(items), texts, WIDER);
+  /** NW Europe on the Europe frame as H2 draws it: Ireland, the UK, the Netherlands, Germany and Poland, five dots in a row about 75 apart
+   *  whose labels are two to three times as wide as the gaps. */
+  const CHAIN: Item[] = [
+    { at: at(222, 344), text: 'Ireland 96', r: 13.7 }, { at: at(292, 346), text: 'United Kingdom 75', r: 12.1 },
+    { at: at(379, 361), text: 'Netherlands 68', r: 11.5 }, { at: at(454, 383), text: 'Germany 52', r: 10.1 }, { at: at(529, 370), text: 'Poland 37', r: 8.5 },
+  ];
+
+  it('two dots 40 apart: both labels are placed, in input order, clear of each other and of both dots', () => {
+    const items: Item[] = [{ at: at(400, 300), text: 'Alpha 50', r: 12 }, { at: at(440, 300), text: 'Beta 40', r: 12 }];
+    const texts = place(items)!;
+    expect(texts).not.toBeNull();
+    expect(texts.map((t) => t.text)).toEqual(['Alpha 50', 'Beta 40']);
+    expect(violations(items, texts)).toEqual([]);
+  });
+
+  it('a row of five dots with labels wider than the gaps between them (the NW corner of H2): all five clear, at 20 and at 24', () => {
+    const room: MapView = { x: 40, y: 150, width: 900, height: 400 };
+    for (const fontPx of [20, 24]) {
+      const texts = place(CHAIN, room, fontPx);
+      expect(texts, `font ${fontPx}`).not.toBeNull();
+      expect(violations(CHAIN, texts!, room, fontPx), `font ${fontPx}`).toEqual([]);
+    }
+  });
+
+  it('keeps the slack for a font that draws wider than estimated: a label that would just fit beside its dot does not take the place', () => {
+    // Beta is at the room's east edge, so its label can only go west; Alpha's cheapest place is east. At the estimate the two words fit in
+    // the 194 units between the dots with 5 to spare (Alpha's 92.8 wide from 314.6, Beta's 81.2 wide ending at 494); drawn 8% wider
+    // they would overlap. So the placer must give one of them another place (violations() draws every word that much wider).
+    const room: MapView = { x: 100, y: 150, width: 470, height: 300 };
+    const items: Item[] = [{ at: at(300, 300), text: 'Alpha 50', r: 12 }, { at: at(508, 300), text: 'Beta 40', r: 12 }];
+    const texts = place(items, room)!;
+    expect(texts).not.toBeNull();
+    expect(violations(items, texts, room)).toEqual([]);
+  });
+
+  it('a label beside its dot is anchored at the edge nearest the dot, so its gap does not depend on how wide the text really draws', () => {
+    const room: MapView = { x: 40, y: 150, width: 900, height: 400 };
+    const texts = place(CHAIN, room)!;
+    const dots = dotsOf(CHAIN);
+    texts.forEach((t, i) => {
+      const b = labelBox(c, t, 20);
+      if (t.anchor === 'start') expect(b.left, t.text).toBeGreaterThanOrEqual(dots[i]!.x);
+      else if (t.anchor === 'end') expect(b.right, t.text).toBeLessThanOrEqual(dots[i]!.x);
+      else expect([b.left < dots[i]!.x, b.right > dots[i]!.x], t.text).toEqual([true, true]);
+    });
+  });
+
+  it('keeps every label inside the room it is given, even when the room is tight to the dots', () => {
+    const items: Item[] = [{ at: at(130, 130), text: 'Corner 10', r: 6 }];
+    const texts = place(items)!;
+    expect(texts).not.toBeNull();
+    expect(violations(items, texts)).toEqual([]);
+  });
+
+  it('is deterministic, and does not change its input', () => {
+    const copy = structuredClone(CHAIN);
+    const room: MapView = { x: 40, y: 150, width: 900, height: 400 };
+    expect(place(CHAIN, room)).toEqual(place(CHAIN, room));
+    expect(CHAIN).toEqual(copy);
+  });
+
+  it('gives null, never a bad layout, when there is no clear one: a label wider than the room, or two dots on one spot', () => {
+    expect(place([{ at: at(400, 300), text: 'x'.repeat(100), r: 8 }])).toBeNull();
+    expect(place([{ at: at(400, 300), text: 'Alpha 50', r: 8 }, { at: at(400, 300), text: 'Beta 40', r: 8 }])).toBeNull();
+  });
+
+  it('places nothing for no items', () => {
+    expect(place([])).toEqual([]);
+  });
+
+  // The placer's own rules, on scenes nobody chose: a layout it returns is clear (with every word wider than the estimate by the slack it
+  // keeps), whatever the dots, and most of these scenes have one.
+  it('fixed-seed property: on 60 random scenes of 5 to 12 dots, every layout it returns is clear, and most scenes get one', () => {
+    const rand = mulberry32(2410);
+    const room: MapView = { x: 60, y: 120, width: 880, height: 480 };
+    const words = ['Ireland', 'Netherlands', 'Spain', 'United Kingdom', 'Pakistan', 'Bangladesh', 'Greece', 'Finland', 'Tuscany'];
+    let found = 0;
+    for (let n = 0; n < 60; n++) {
+      const items: Item[] = Array.from({ length: 5 + Math.floor(rand() * 8) }, () => ({
+        at: at(150 + rand() * 700, 200 + rand() * 300),
+        text: `${words[Math.floor(rand() * words.length)]!} ${Math.floor(rand() * 100)}`,
+        r: 4 + rand() * 11,
+      }));
+      const texts = place(items, room, 22);
+      if (texts === null) continue;
+      found++;
+      expect(violations(items, texts, room, 22), `scene ${n}`).toEqual([]);
+    }
+    expect(found).toBeGreaterThan(35);
+  });
+
+  // A big dot with a small one 22 to 42 units from it (a small dot's label may sit nearer its own dot than the big one while still lying
+  // over the big dot's edge, so "nearest to its own dot" alone does not keep it off): in a room only a little larger than the pair.
+  it('fixed-seed property: a small dot beside a big one, in 200 tight rooms: its label never covers the big dot', () => {
+    const rand = mulberry32(77);
+    let found = 0;
+    for (let n = 0; n < 200; n++) {
+      const th = rand() * 2 * Math.PI;
+      const gap = 22 + rand() * 20;
+      const room: MapView = { x: 300 + rand() * 60, y: 200 + rand() * 60, width: 160 + rand() * 120, height: 90 + rand() * 80 };
+      const [bx, by] = [room.x + room.width / 2, room.y + room.height / 2];
+      const items: Item[] = [
+        { at: at(bx, by), text: 'Big 90', r: 12 + rand() * 4 },
+        { at: at(bx + gap * Math.cos(th), by + gap * Math.sin(th)), text: 'Small 3', r: 4 + rand() * 2 },
+      ];
+      const texts = place(items, room);
+      if (texts === null) continue;
+      found++;
+      expect(violations(items, texts, room), `scene ${n}`).toEqual([]);
+    }
+    expect(found).toBeGreaterThan(100);
+  });
+});
+
+describe('distribution maps H2, I2, J3 (Task 24, spec §3.4, §6)', () => {
+  const IDS = ['H2', 'I2', 'J3'] as const;
+  const hasCoords = (r: { lat?: number; lon?: number }): boolean => r.lat !== undefined && r.lon !== undefined;
+
+  it('genes and frames: H2 LCT on the Europe frame, I2 SLC45A2 and J3 HERC2 on the Old World frame', () => {
+    expect(DISTRIBUTION_MAP_GENE).toEqual({ H2: 'LCT', I2: 'SLC45A2', J3: 'HERC2', K2: 'TYK2', L3: 'HLA-DQ2' });
+    expect(DISTRIBUTION_MAP_FRAME).toEqual({ H2: 'europe', I2: 'oldWorld', J3: 'oldWorld', K2: 'oldWorld', L3: 'europeWest' });
+  });
+
+  it('dot radius is area-true on the 0-100 scale (above the floor of 4: tests/map.test.ts)', () => {
+    expect(dotRadius(75, 100)).toBeCloseTo(14 * Math.sqrt(0.75), 9);
+    expect(dotRadius(100, 100)).toBeCloseTo(14, 9);
+  });
+
+  it('every map has its label size, no smaller than the arrow maps\' (a picture drawn small on its card asks for larger words)', () => {
+    expect(Object.keys(DISTRIBUTION_LABEL_PX).sort()).toEqual(['H2', 'I2', 'J3', 'K2', 'L3']);
+    for (const id of IDS) expect(DISTRIBUTION_LABEL_PX[id], id).toBeGreaterThanOrEqual(MAP_LABEL_FONT_PX);
+  });
+
+  for (const id of IDS) {
+    const gene = DISTRIBUTION_MAP_GENE[id];
+    const placed = (data = FIXTURE) => distributionRows(data, gene).filter(hasCoords);
+
+    it(`${id}: one dot per row with coordinates, value = copies in every 100 straight from trait_maps, scale 0-${DISTRIBUTION_SCALE_MAX[gene]}`, () => {
+      const s = mapSpec(id, FIXTURE);
+      expect(s.id).toBe(id);
+      expect(s.frame).toBe(DISTRIBUTION_MAP_FRAME[id]);
+      expect(s.scaleMax).toBe(DISTRIBUTION_SCALE_MAX[gene]);
+      expect(s.labelPx).toBe(DISTRIBUTION_LABEL_PX[id]);
+      const rows = placed();
+      expect(s.points).toHaveLength(rows.length);
+      expect(rows.length, 'the fixture has rows to draw').toBeGreaterThanOrEqual(10);
+      const raw = new Map(FIXTURE.trait_maps[gene].map((r) => [r.label_key, r.value]));
+      s.points!.forEach((p, i) => {
+        expect(p.lat).toBe(rows[i]!.lat);
+        expect(p.lon).toBe(rows[i]!.lon);
+        expect(p.value).toBeCloseTo(raw.get(rows[i]!.key)! * 100, 9);
+        expect(p.role).toBe('value');
+      });
+      expect(s.arrows ?? []).toHaveLength(0);
+    });
+
+    it(`${id}: the side list is the rows without coordinates, with the same labels and numbers as the value list`, () => {
+      const s = mapSpec(id, FIXTURE);
+      const side = distributionRows(FIXTURE, gene).filter((r) => !hasCoords(r));
+      expect(s.sideList ?? []).toEqual(side.map((r) => ({ label: r.label, display: r.display })));
+      expect((s.sideList ?? []).length === 0, 'H2 has none; I2 and J3 have the Middle East').toBe(id === 'H2');
+    });
+
+    it(`${id}: one label per dot, "<place> <copies>", the numbers the value list prints`, () => {
+      const s = mapSpec(id, FIXTURE);
+      expect((s.texts ?? []).map((t) => t.text)).toEqual(placed().map((r) => `${r.label} ${r.display}`));
+      for (const t of s.texts ?? []) expect(ruleViolations(t.text), t.text).toEqual([]);
+    });
+
+    it(`${id}: every label and dot lies in the window, no label overlaps another or covers a dot, and each is nearest its own dot, as estimated and with every word 8% wider`, () => {
+      expect(layoutViolations(mapSpec(id, FIXTURE))).toEqual([]);
+      expect(layoutViolations(mapSpec(id, FIXTURE), WIDER)).toEqual([]);
+    });
+
+    it(`${id}: the window is inside the frame's height and the map space, and no thinner than the card's slot wants`, () => {
+      const s = mapSpec(id, FIXTURE);
+      const v = s.view!;
+      const f = frameBox(s.frame);
+      expect(v).toBeDefined();
+      expect([v.y >= f.top, v.y + v.height <= f.bottom, v.x >= 0, v.x + v.width <= MAP_VIEW.width]).toEqual([true, true, true, true]);
+      expect(v.width / v.height).toBeLessThanOrEqual(BAND_MAX_ASPECT + 0.01);
+      // The window is a window onto the frame, cut to the drawing: it does not spend the card's height on the empty Arctic or the Southern Ocean.
+      expect(v.height).toBeLessThan(f.bottom - f.top);
+    });
+
+    it(`${id}: built, data ready, and renderMap draws every label and every dot`, () => {
+      expect(MAP_SPECS_BUILT.has(id)).toBe(true);
+      expect(mapDataReady(id, FIXTURE)).toBe(true);
+      const s = mapSpec(id, FIXTURE);
+      const svg = rendered(s);
+      for (const t of s.texts ?? []) expect(svg.textContent).toContain(t.text);
+      expect(svg.querySelectorAll('circle.map-dot--value, circle.map-dot--zero')).toHaveLength(placed().length);
+      for (const t of svg.querySelectorAll('text.map-label')) expect(Number(t.getAttribute('font-size'))).toBe(DISTRIBUTION_LABEL_PX[id]);
+      expect(svg.getAttribute('viewBox')).toBe(`${s.view!.x} ${s.view!.y} ${s.view!.width} ${s.view!.height}`);
+    });
+
+    it(`${id}: the dots follow the dot rule: a number that prints 0 is the hollow ring, any other number a filled dot of at least 4`, () => {
+      const svg = rendered(mapSpec(id, FIXTURE));
+      const rows = placed();
+      const zeros = rows.filter((r) => r.display === '0').length;
+      expect(svg.querySelectorAll('circle.map-dot--zero')).toHaveLength(zeros);
+      expect(svg.querySelectorAll('circle.map-dot--value')).toHaveLength(rows.length - zeros);
+      for (const dot of svg.querySelectorAll('circle.map-dot--value')) expect(Number(dot.getAttribute('r'))).toBeGreaterThanOrEqual(4);
+      for (const ring of svg.querySelectorAll('circle.map-dot--zero')) expect(ring.getAttribute('fill')).toBe('none');
+    });
+
+    it(`${id}: the spec follows the rows of the data, not their order in the JSON or their allele counts (rows are ordered by TRAIT_MAP_ORDER)`, () => {
+      const d = cloneFixture();
+      d.trait_maps[gene] = d.trait_maps[gene].map((r) => ({ ...r, allele_count: 99999 })).reverse();
+      expect(distributionSpec(id, d)).toEqual(distributionSpec(id, FIXTURE));
+    });
+
+    it(`${id}: draws only the rows that are present, and still lays them out clear`, () => {
+      const d = cloneFixture();
+      d.trait_maps[gene] = d.trait_maps[gene].filter((_, i) => i % 3 !== 1);
+      const s = distributionSpec(id, d);
+      const rows = placed(d);
+      expect(rows.length).toBeLessThan(placed().length);
+      expect((s.texts ?? []).map((t) => t.text)).toEqual(rows.map((r) => `${r.label} ${r.display}`));
+      expect(layoutViolations(s)).toEqual([]);
+    });
+  }
+
+  it('a thin drawing (a few rows side by side) gets more of the frame above and below it, equally, never past the frame: the picture is not a strip', () => {
+    const d = cloneFixture();
+    d.trait_maps.SLC45A2 = d.trait_maps.SLC45A2.filter((r) => r.label_key === '1kg:IBS' || r.label_key === '1kg:TSI');
+    const s = distributionSpec('I2', d);
+    const f = frameBox('oldWorld');
+    const box = drawingBox(s)!;
+    const v = s.view!;
+    expect(box.right - box.left, 'the drawing is wider than tall').toBeGreaterThan(2.2 * (box.bottom - box.top));
+    expect(v.width / v.height).toBeLessThanOrEqual(BAND_MAX_ASPECT + 0.01);
+    expect(v.width / v.height).toBeGreaterThan(BAND_MAX_ASPECT - 0.05);
+    expect(box.top - v.y).toBeCloseTo(v.y + v.height - box.bottom, 0);
+    expect([v.y >= f.top, v.y + v.height <= f.bottom]).toEqual([true, true]);
+    expect(layoutViolations(s)).toEqual([]);
+  });
+
+  it('dots at the north and south edges of the frame keep the window inside the frame, and their labels clear', () => {
+    const d = cloneFixture();
+    d.trait_maps.LCT = d.trait_maps.LCT.map((r) => (r.label_key === 'country:Norway' ? { ...r, lat: 70.9 } : r.label_key === 'country:Greece' ? { ...r, lat: 35.0 } : r));
+    const s = distributionSpec('H2', d);
+    const f = frameBox('europe');
+    expect(s.view!.y).toBeGreaterThanOrEqual(f.top);
+    expect(s.view!.y + s.view!.height).toBeLessThanOrEqual(f.bottom);
+    expect(layoutViolations(s)).toEqual([]);
+  });
+
+  it('a gene with no rows that have coordinates is not data-ready, and its spec is empty, not an error', () => {
+    const d = cloneFixture();
+    d.trait_maps.LCT = d.trait_maps.LCT.map(({ lat: _lat, lon: _lon, ...rest }) => rest);
+    expect(mapDataReady('H2', d)).toBe(false);
+    const none = distributionSpec('H2', d);
+    expect([none.points, none.texts]).toEqual([[], []]);
+    d.trait_maps.LCT = [];
+    expect(mapDataReady('H2', d)).toBe(false);
+    expect(distributionSpec('H2', d).points).toEqual([]);
+  });
+
+  it('K2 and L3 are not built yet (Task 27): their specs throw and they are not data-ready, whatever the data', () => {
+    for (const id of ['K2', 'L3'] as const) {
+      expect(MAP_SPECS_BUILT.has(id), id).toBe(false);
+      expect(() => mapSpec(id, FIXTURE), id).toThrow(/not built/);
+      expect(mapDataReady(id, FIXTURE), id).toBe(false);
+    }
+  });
+
+  it('drawingBox holds every value dot with its radius, as it holds arrows, links and labels', () => {
+    const s: MapSpec = { ...mapSpec('I2', FIXTURE), texts: [] };
+    const box = drawingBox(s)!;
+    const dots = specDots(s);
+    expect(dots.length).toBeGreaterThan(5);
+    for (const d of dots) {
+      expect(d.x - d.r).toBeGreaterThanOrEqual(box.left - 1e-6);
+      expect(d.x + d.r).toBeLessThanOrEqual(box.right + 1e-6);
+      expect(d.y - d.r).toBeGreaterThanOrEqual(box.top - 1e-6);
+      expect(d.y + d.r).toBeLessThanOrEqual(box.bottom + 1e-6);
+    }
+    // ... and it is tight: some dot touches each side.
+    expect(Math.min(...dots.map((d) => d.x - d.r))).toBeGreaterThan(box.left - 2);
+    expect(Math.max(...dots.map((d) => d.y + d.r))).toBeGreaterThan(box.bottom - 2);
   });
 });

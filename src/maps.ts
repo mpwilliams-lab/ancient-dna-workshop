@@ -1,12 +1,13 @@
 // Per-card map specs (spec §6). Every label string comes from content.ts (MAP_TEXT, TRAIT_MAP_LABELS) or from the
 // JSON (europe_pops[].label), so the content scan covers it. Coordinates are lat/lon; src/plots/map.ts projects them.
+import { DISTRIBUTION_SCALE_MAX, distributionRows } from './cards';
 import { MAP_TEXT } from './content';
 import {
-  MAP_FRAMES, MAP_LABEL_FONT_PX, MAP_VIEW, arrowReach, catmullRomSegments, makeProjection, project, projectUnits,
-  type CurveSegment, type LatLon, type MapFrameId, type MapLink, type MapProjectionConstants, type MapSpec, type MapText, type MapView,
-  type XY,
+  MAP_FRAMES, MAP_LABEL_FONT_PX, MAP_VIEW, arrowReach, catmullRomSegments, dotRadius, makeProjection, project, projectUnits,
+  type CurveSegment, type LatLon, type MapFrameId, type MapLink, type MapPoint, type MapProjectionConstants, type MapSpec, type MapText,
+  type MapView, type XY,
 } from './plots/map';
-import type { MapId, WorkshopData } from './types';
+import type { GeneId, MapId, WorkshopData } from './types';
 
 /** The font size renderMap gives a MapText (one constant, defined in src/plots/map.ts by Task 19; CONTRACT §8 R5) and the
  *  average character width in em: the estimate used to place labels and to test that they never overlap. */
@@ -14,8 +15,8 @@ export { MAP_LABEL_FONT_PX };
 export const MAP_LABEL_CHAR_EM = 0.58;
 
 /** Maps whose spec exists. A card is upgraded to its map only if its id is here (assets.ts cardShowsUpgrade), so an
- *  unbuilt map is never drawn, whatever the flags. Tasks 24, 27 and 29 add their ids. */
-export const MAP_SPECS_BUILT: ReadonlySet<MapId> = new Set<MapId>(['A1', 'D1', 'E1', 'G1']);
+ *  unbuilt map is never drawn, whatever the flags. Tasks 27 and 29 add their ids. */
+export const MAP_SPECS_BUILT: ReadonlySet<MapId> = new Set<MapId>(['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3']);
 
 type Anchor = 'start' | 'middle' | 'end';
 const ll = (lat: number, lon: number): LatLon => ({ lat, lon });
@@ -137,8 +138,9 @@ function curvePoints(pts: readonly XY[]): XY[] {
   return catmullRomSegments(pts).flatMap((s) => Array.from({ length: 17 }, (_, i) => bezierAt(s, i / 16)));
 }
 
-/** The smallest box that holds every arrow (curve, stroke and arrowhead), both ends of every link (a dot of radius A1_DOT_R) and
- *  every text label of a spec, in viewBox units; null when it draws none of them. Text is the estimate of labelBox. */
+/** The smallest box that holds every arrow (curve, stroke and arrowhead), both ends of every link (a dot of radius A1_DOT_R), every
+ *  value dot (its radius and the unit its stroke reaches beyond it) and every text label of a spec, in viewBox units; null when it draws
+ *  none of them. Text is the estimate of labelBox. */
 export function drawingBox(spec: MapSpec): LabelBox | null {
   const c = projectionOf(spec.frame);
   const boxes: LabelBox[] = [];
@@ -152,6 +154,12 @@ export function drawingBox(spec: MapSpec): LabelBox | null {
     for (const p of [project(c, l.from.lat, l.from.lon), projectUnits(c, l.to.ux, l.to.uy)]) {
       boxes.push({ left: p.x - A1_DOT_R, right: p.x + A1_DOT_R, top: p.y - A1_DOT_R, bottom: p.y + A1_DOT_R });
     }
+  }
+  for (const p of spec.points ?? []) {
+    if (p.value === undefined || (p.role ?? 'value') !== 'value') continue;
+    const q = project(c, p.lat, p.lon);
+    const r = dotRadius(p.value, spec.scaleMax ?? 100) + 1;
+    boxes.push({ left: q.x - r, right: q.x + r, top: q.y - r, bottom: q.y + r });
   }
   for (const t of spec.texts ?? []) boxes.push(labelBox(c, t, spec.labelPx));
   if (boxes.length === 0) return null;
@@ -323,6 +331,207 @@ function a1View(dots: MapSpec): MapView {
   return { ...band, x: left, width: r1(right - left) };
 }
 
+// ---- Dot labels (Task 24): a clear place for every label of a map of numbered dots, or none ----
+
+/** Air kept between a label and any dot or other label, in map units. */
+const DOT_LABEL_AIR = 2;
+/** A label is at least this much nearer to its own dot than to any other, so nobody can read it as another dot's number. */
+const OWN_DOT_MARGIN = 5;
+/** The search stops after this many tries and keeps the best clear layout it has found (null if it has found none). */
+const DOT_LABEL_SEARCH_LIMIT = 400_000;
+/** Where a label may sit round its dot, as a direction (x to the right, y down) and what it costs: beside the dot first, then slanting
+ *  above or below it, then straight above or below. */
+const DOT_LABEL_DIRECTIONS: readonly (readonly [ux: number, uy: number, cost: number])[] = [
+  [1, 0, 0], [-1, 0, 1], [0.9239, -0.3827, 1.5], [0.9239, 0.3827, 1.8], [-0.9239, -0.3827, 2.5], [-0.9239, 0.3827, 2.8],
+  [0.7071, -0.7071, 2], [0.7071, 0.7071, 2.5], [-0.7071, -0.7071, 3], [-0.7071, 0.7071, 3.5],
+  [0, -1, 3], [0, 1, 3.5], [0.3827, -0.9239, 3], [-0.3827, -0.9239, 3.5], [0.3827, 0.9239, 3.2], [-0.3827, 0.9239, 3.8],
+];
+/** How much farther than its nearest clear place a label may sit, in map units, each step costing more. */
+const DOT_LABEL_STEPS: readonly number[] = [0, 6, 14, 24];
+/** The placer keeps clear of a word this much wider than labelBox's estimate (0.58 em a character, measured at 0.9 to 1.0 of it in the
+ *  browsers the project has; Segoe UI on the lab machine is not measured), so a font that draws wider still leaves the words apart. */
+export const DOT_LABEL_WIDTH_FACTOR = 1.08;
+
+function distanceToBox(x: number, y: number, b: LabelBox): number {
+  return Math.hypot(Math.max(b.left - x, 0, x - b.right), Math.max(b.top - y, 0, y - b.bottom));
+}
+
+interface DotLabelPlace { text: MapText; box: LabelBox; cost: number }
+
+/**
+ * Every place the label of item i may take: round its dot in the 16 directions, at the nearest distance where the box clears the dot
+ * and at the next steps, inside the room, covering no dot (its own included), and with no other dot as near to it as its own is.
+ * Cheapest first. A label to the right of its dot's centre line is anchored at its left edge, one to the left at its right edge, so its
+ * gap to the dot does not change with how wide the text really draws; one above or below is centred.
+ */
+function dotLabelPlaces(
+  frame: MapFrameId, c: MapProjectionConstants, items: readonly LabelItem[], i: number, fontPx: number, room: MapView,
+): DotLabelPlace[] {
+  const it = items[i]!;
+  const centres = items.map((o) => project(c, o.at.lat, o.at.lon));
+  const p = centres[i]!;
+  const w = it.text.length * MAP_LABEL_CHAR_EM * fontPx * DOT_LABEL_WIDTH_FACTOR;
+  const h = 1.05 * fontPx;     // labelBox: 0.8 em above the baseline, 0.25 em below it
+  const out: DotLabelPlace[] = [];
+  for (const [ux, uy, direction] of DOT_LABEL_DIRECTIONS) {
+    const boxAt = (rho: number): LabelBox => {
+      const x = p.x + rho * ux;
+      const y = p.y + rho * uy;
+      return { left: x - w / 2, right: x + w / 2, top: y - h / 2, bottom: y + h / 2 };
+    };
+    let rho = 0;
+    while (rho < 1000 && distanceToBox(p.x, p.y, boxAt(rho)) < it.r + DOT_LABEL_AIR) rho += 1;
+    for (const extra of DOT_LABEL_STEPS) {
+      const box = boxAt(rho + extra);
+      if (box.left < room.x || box.right > room.x + room.width || box.top < room.y || box.bottom > room.y + room.height) continue;
+      if (centres.some((q, k) => distanceToBox(q.x, q.y, box) < items[k]!.r + DOT_LABEL_AIR)) continue;
+      const own = distanceToBox(p.x, p.y, box);
+      if (centres.some((q, k) => k !== i && distanceToBox(q.x, q.y, box) < own + OWN_DOT_MARGIN)) continue;
+      const anchor: Anchor = box.left >= p.x ? 'start' : box.right <= p.x ? 'end' : 'middle';
+      const x = anchor === 'start' ? box.left : anchor === 'end' ? box.right : (box.left + box.right) / 2;
+      out.push({
+        text: labelAt(frame, it.at, it.text, anchor, x - p.x, box.top + 0.8 * fontPx - p.y), box, cost: 2 * direction + extra / 2,
+      });
+    }
+  }
+  return out.sort((a, b) => a.cost - b.cost);
+}
+
+/**
+ * The labels of a map of numbered dots, in input order, laid out so that all of these hold: every label lies inside `room`; no label
+ * overlaps another or covers a dot; each label is nearer to its own dot than to any other. Null when no such layout exists (or none was
+ * found in DOT_LABEL_SEARCH_LIMIT tries): the caller decides what to draw then. Unlike placeLabels, which takes the first cheapest
+ * place for each dot in turn and may leave a label on another dot's number, this searches: dots with the fewest places first, each
+ * place tried cheapest first, backing out of a choice that leaves a later dot nowhere to go, and keeping the cheapest layout found.
+ * Deterministic. Item `r` is the dot's drawn radius, its stroke included.
+ */
+export function placeDotLabels(frame: MapFrameId, items: readonly LabelItem[], room: MapView, fontPx: number): MapText[] | null {
+  const c = projectionOf(frame);
+  const places = items.map((_, i) => dotLabelPlaces(frame, c, items, i, fontPx, room));
+  if (places.some((p) => p.length === 0)) return null;
+  const order = items.map((_, i) => i).sort((a, b) => places[a]!.length - places[b]!.length || items[b]!.r - items[a]!.r || a - b);
+  const chosen: DotLabelPlace[] = [];
+  const best: { cost: number; picks: DotLabelPlace[] } = { cost: Infinity, picks: [] };
+  let tries = 0;
+  const search = (depth: number, cost: number): void => {
+    if (depth === order.length) {
+      best.cost = cost;
+      best.picks = chosen.slice();
+      return;
+    }
+    const i = order[depth]!;
+    for (const place of places[i]!) {
+      if (++tries > DOT_LABEL_SEARCH_LIMIT) return;
+      if (cost + place.cost >= best.cost) break;    // the rest of this dot's places cost more still
+      const b = place.box;
+      let clash = false;
+      for (let q = 0; q < depth && !clash; q++) {
+        const o = chosen[q]!.box;
+        clash = Math.min(b.right, o.right) - Math.max(b.left, o.left) > -DOT_LABEL_AIR
+          && Math.min(b.bottom, o.bottom) - Math.max(b.top, o.top) > -DOT_LABEL_AIR;
+      }
+      if (clash) continue;
+      chosen[depth] = place;
+      search(depth + 1, cost + place.cost);
+    }
+  };
+  search(0, 0);
+  if (best.cost === Infinity) return null;
+  const texts: MapText[] = new Array<MapText>(items.length);
+  order.forEach((i, depth) => {
+    texts[i] = best.picks[depth]!.text;
+  });
+  return texts;
+}
+
+// ---- Distribution maps (spec §3.4, §6): dots sized by copies in every 100, labelled "<place> <copies>" ----
+export type DistributionMapId = 'H2' | 'I2' | 'J3' | 'K2' | 'L3';
+export const DISTRIBUTION_MAP_GENE: Readonly<Record<DistributionMapId, GeneId>> = {
+  H2: 'LCT', I2: 'SLC45A2', J3: 'HERC2', K2: 'TYK2', L3: 'HLA-DQ2',
+};
+export const DISTRIBUTION_MAP_FRAME: Readonly<Record<DistributionMapId, MapFrameId>> = {
+  H2: 'europe', I2: 'oldWorld', J3: 'oldWorld', K2: 'oldWorld', L3: 'europeWest',
+};
+/**
+ * The size of each distribution map's labels in map units (the arrow maps use MAP_LABEL_FONT_PX = 20; A1 uses A1_LABEL_PX). These
+ * pictures are drawn small on a card: the window is cut to the dots and their labels, and at 1366 x 768 the card leaves it about 300 px,
+ * so 20 units would be 11 px (H2, whose window is the tallest) to 13 px. H2's 26 and the others' 24 give 14.4 to 16 px there, the least
+ * that e2e/maps.spec.ts accepts (14); 26 is about the most the twenty labels of H2 can have and still all lie clear of each other and of
+ * the dots (28 cannot be laid out). Task 27 sets K2 and L3 when it builds them.
+ */
+export const DISTRIBUTION_LABEL_PX: Readonly<Record<DistributionMapId, number>> = { H2: 26, I2: 24, J3: 24, K2: 24, L3: 24 };
+const isDistributionMap = (id: MapId): id is DistributionMapId => id in DISTRIBUTION_MAP_GENE;
+const hasCoordinates = (r: { lat?: number; lon?: number }): boolean => r.lat !== undefined && r.lon !== undefined;
+
+/** How far a label may hang out of the frame's box to the west or east: Ireland and Portugal (H2) and Spain (I2, J3) sit near the
+ *  frame's west edge, and a label placed beside them runs off it. The window is cut round the labels, so nothing is cut off. */
+const LABEL_OVERHANG = 150;
+/** Room above and below the outermost dots, in em of the label size, in which a label may sit. */
+const LABEL_HEADROOM_EM = 2.5;
+
+/** The window a distribution map shows: its drawing (dots and labels) plus BAND_PAD, inside the frame vertically, and no thinner than
+ *  BAND_MAX_ASPECT (a thinner drawing gets more of the frame above and below it, as bandView does). */
+function dotMapView(frame: MapFrameId, box: LabelBox): MapView {
+  const f = frameBox(frame);
+  const left = Math.max(0, Math.floor((box.left - BAND_PAD) * 10) / 10);
+  const right = Math.min(MAP_VIEW.width, Math.ceil((box.right + BAND_PAD) * 10) / 10);
+  let top = Math.max(f.top, box.top - BAND_PAD);
+  let bottom = Math.min(f.bottom, box.bottom + BAND_PAD);
+  const more = (right - left) / BAND_MAX_ASPECT - (bottom - top);
+  if (more > 0) {
+    top -= more / 2;
+    bottom += more / 2;
+    if (top < f.top) [top, bottom] = [f.top, bottom + (f.top - top)];
+    if (bottom > f.bottom) [top, bottom] = [Math.max(f.top, top - (bottom - f.bottom)), f.bottom];
+  }
+  top = Math.ceil(top * 10) / 10;
+  bottom = Math.floor(bottom * 10) / 10;
+  return { x: left, y: top, width: Math.round((right - left) * 10) / 10, height: Math.round((bottom - top) * 10) / 10 };
+}
+
+/**
+ * H2, I2, J3 (and K2, L3 once Task 27 builds them): one dot for every row of trait_maps[gene] that has coordinates, drawn from the rows
+ * distributionRows gives, in its order (biggest first, so a small dot is never hidden under a big one), so the spec never depends on the
+ * order of the rows in the JSON. A dot's value is the row's `value` x 100, copies in every 100 (not rounded, and never taken from
+ * allele_count), on the gene's scale (DISTRIBUTION_SCALE_MAX). Its label is "<place> <number>", the number the value list prints. Rows
+ * without coordinates (the gnomAD groups) are not drawn: they are the side list the card shows beside the picture.
+ *
+ * The labels are placed by placeDotLabels (no label over another label or a dot, each nearest its own dot); the window is cut to what
+ * is drawn. If no clear layout exists the greedy placeLabels' is drawn instead: never no map, and the tests on the shipped data say
+ * that case does not occur there.
+ */
+export function distributionSpec(id: DistributionMapId, data: WorkshopData): MapSpec {
+  const gene = DISTRIBUTION_MAP_GENE[id];
+  const frame = DISTRIBUTION_MAP_FRAME[id];
+  const scaleMax = DISTRIBUTION_SCALE_MAX[gene];
+  const labelPx = DISTRIBUTION_LABEL_PX[id];
+  const freq = new Map((data.trait_maps?.[gene] ?? []).map((r) => [r.label_key, r.value]));
+  const rows = distributionRows(data, gene);
+  const placed = rows.filter(hasCoordinates);
+  const points: MapPoint[] = placed.map((r) => ({
+    lat: r.lat as number, lon: r.lon as number, value: (freq.get(r.key) ?? 0) * 100, role: 'value',
+  }));
+  const sideList = rows.filter((r) => !hasCoordinates(r)).map((r) => ({ label: r.label, display: r.display }));
+  const base: MapSpec = { id, frame, points, texts: [], scaleMax, labelPx, ...(sideList.length > 0 ? { sideList } : {}) };
+  if (placed.length === 0) return base;
+
+  const c = projectionOf(frame);
+  const f = frameBox(frame);
+  const items: LabelItem[] = placed.map((r, i) => ({
+    at: { lat: r.lat as number, lon: r.lon as number }, text: `${r.label} ${r.display}`, r: dotRadius(points[i]!.value as number, scaleMax) + 1,
+  }));
+  const ys = items.map((it) => project(c, it.at.lat, it.at.lon).y);
+  const headroom = LABEL_HEADROOM_EM * labelPx;
+  const top = Math.max(f.top, Math.min(...ys) - headroom);
+  const bottom = Math.min(f.bottom, Math.max(...ys) + headroom);
+  const left = Math.max(0, f.left - LABEL_OVERHANG);
+  const right = Math.min(MAP_VIEW.width, f.right + LABEL_OVERHANG);
+  const room: MapView = { x: left, y: top, width: right - left, height: bottom - top };
+  const texts = placeDotLabels(frame, items, room, labelPx) ?? placeLabels(frame, items, [], { within: room, fontPx: labelPx });
+  const spec: MapSpec = { ...base, texts };
+  return { ...spec, view: dotMapView(frame, drawingBox(spec) as LabelBox) };
+}
+
 /** The map for a card (CONTRACT §4.13). Throws for a map whose spec is not built yet (see MAP_SPECS_BUILT). */
 export function mapSpec(id: MapId, data: WorkshopData): MapSpec {
   switch (id) {
@@ -334,15 +543,20 @@ export function mapSpec(id: MapId, data: WorkshopData): MapSpec {
       return specE1();
     case 'G1':
       return specG1();
+    case 'H2':
+    case 'I2':
+    case 'J3':
+      return distributionSpec(id, data);
     default:
       throw new Error(`mapSpec: map ${id} is not built yet`);
   }
 }
 
 /** True when the map's spec is built and the data it needs is present (A1 needs europe_pops and europe_fit: its source line is
- *  never drawn without the fit). */
+ *  never drawn without the fit; a distribution map needs at least one row with coordinates). */
 export function mapDataReady(id: MapId, data: WorkshopData): boolean {
   if (!MAP_SPECS_BUILT.has(id)) return false;
   if (id === 'A1') return (data.europe_pops?.length ?? 0) > 0 && data.europe_fit !== undefined;
+  if (isDistributionMap(id)) return distributionRows(data, DISTRIBUTION_MAP_GENE[id]).some(hasCoordinates);
   return true;
 }

@@ -1,7 +1,7 @@
 // Build-time feature flags (spec v3 §10.3, CONTRACT §1). Each flag task (16-30) adds its false-path test here.
 import { describe, expect, it } from 'vitest';
 import { BUNDLED_IMAGES } from '../src/assets';
-import { CARDS } from '../src/cards';
+import { CARDS, distributionRows } from '../src/cards';
 import { renderCardBody } from '../src/cardView';
 import { execute } from '../src/commands';
 import { ALL_OFF, ALL_ON, FEATURE_FLAGS, FEATURES, withFeatures, type FeatureFlag } from '../src/features';
@@ -264,4 +264,27 @@ describe('map.A1 (Task 23, spec §10.3)', () => {
     const only = flagSet('map.D1', true, ALL_OFF);
     expect(renderCardBody(document, CARDS.A1, cardCtx(FIXTURE, only, checkedManifest())).querySelector('.card-map')).toBeNull();
   });
+});
+
+// Task 24. Both flag states are proved with in-memory manifests (checkedManifest), never the committed assets/manifest.json, whose
+// visual_check only the instructor fills: this passes before and after his check of the three maps.
+describe('map.H2 / map.I2 / map.J3 (Task 24, spec §10.3)', () => {
+  const MAPS = [['H2', 'map.H2', 'LCT'], ['I2', 'map.I2', 'SLC45A2'], ['J3', 'map.J3', 'HERC2']] as const;
+  for (const [id, flag, gene] of MAPS) {
+    it(`${flag} false: ${id} shows its P1 value bars even with its map checked, and no credits button`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, false), checkedManifest(), { placement: 'before' }));
+      expect(el.querySelector('.card-map')).toBeNull();
+      expect(el.querySelector('svg.map-svg')).toBeNull();
+      expect(el.querySelectorAll(`.card-values[data-gene="${gene}"] .value-row`)).toHaveLength(distributionRows(FIXTURE, gene).length);
+      expect(el.querySelector('.card-source')?.textContent ?? '').not.toContain('Natural Earth');
+      expect(openOnCard(id, FIXTURE, flagSet(flag, false), checkedManifest()).querySelector('.card-credits')).toBeNull();
+    });
+    it(`${flag} true with its map checked: ${id} draws the map instead of the bars, with the full source line and the Image credits button`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest(), { placement: 'before' }));
+      expect(el.querySelector(`.card-map[data-map="${id}"] svg.map-svg`)).not.toBeNull();
+      expect(el.querySelector('.card-values')).toBeNull();
+      expect(el.querySelector('.card-source')?.textContent ?? '').toContain('Map outline: Made with Natural Earth.');
+      expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest()).querySelector('.card-credits')).not.toBeNull();
+    });
+  }
 });

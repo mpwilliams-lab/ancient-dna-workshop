@@ -6,9 +6,9 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { cardShowsUpgrade } from '../src/assets';
 import { renderCardMap } from '../src/cardMap';
-import { CARDS, cardSource, cardVars, fillCard } from '../src/cards';
+import { CARDS, cardSource, cardVars, distributionRows, fillCard } from '../src/cards';
 import { renderCardBody, upgradedFormShown } from '../src/cardView';
-import { MAP_SOURCE_SUFFIX, MAP_TEXT } from '../src/content';
+import { IRELAND_FOOTNOTE, MAP_SOURCE_SUFFIX, MAP_TEXT } from '../src/content';
 import { ALL_OFF, ALL_ON } from '../src/features';
 import { A1_CONFIRMED_LABELS, mapSpec } from '../src/maps';
 import { cloneFixture, FIXTURE } from './fixtures/fixture';
@@ -29,8 +29,8 @@ describe('the upgrade rule for D1, E1, G1', () => {
     });
   }
   it('a map card whose spec is not built is never upgraded, whatever the flags and checks', () => {
-    for (const id of ['H2', 'I2', 'J3', 'K2', 'L3'] as const) {
-      // (Tasks 24/27 build these; each of them moves its id out of this list. A1 is built: Task 23.)
+    for (const id of ['K2', 'L3'] as const) {
+      // (Task 27 builds these and moves its ids out of this list. A1 is built: Task 23; H2, I2 and J3: Task 24.)
       expect(cardShowsUpgrade(CARDS[id], ALL_ON, checkedManifest(), fakeUrls()), id).toBe(false);
     }
   });
@@ -191,5 +191,95 @@ describe('A1 card (Task 23, spec §3.1)', () => {
       expect(el.textContent, name).not.toContain('Natural Earth');
       expect(openOnCard('A1', ctx.data, ctx.features, ctx.manifest!).querySelector('.card-credits'), name).toBeNull();
     }
+  });
+});
+
+describe('distribution cards with their maps (Task 24, spec §3.4)', () => {
+  const CASES = [['H2', 'map.H2', 'LCT'], ['I2', 'map.I2', 'SLC45A2'], ['J3', 'map.J3', 'HERC2']] as const;
+  const BEFORE = /selection|advantage|rose|spread|once more common|over the last 4,000 years/i;   // the "before" rule (tests/cards.test.ts)
+  const placed = (gene: (typeof CASES)[number][2]) => distributionRows(FIXTURE, gene).filter((r) => r.lat !== undefined && r.lon !== undefined);
+  const side = (gene: (typeof CASES)[number][2]) => distributionRows(FIXTURE, gene).filter((r) => r.lat === undefined || r.lon === undefined);
+
+  for (const [id, flag, gene] of CASES) {
+    it(`${id} upgraded: the map instead of the value bars; title, lines, puzzle, side note and source stay, in the order of the P1 form`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest(), { placement: 'before' }));
+      const slot = el.querySelector<HTMLElement>(`.card-map[data-map="${id}"]`);
+      expect(slot).not.toBeNull();
+      expect(slot!.querySelector('svg.map-svg')).not.toBeNull();
+      expect(el.querySelector('.card-values')).toBeNull();
+      expect(el.querySelector('.card-title')!.textContent).toBe(CARDS[id].title);
+      expect(el.querySelector('.card-puzzle')!.textContent).toBe(CARDS[id].puzzle);
+      expect([...el.querySelectorAll('.card-lines li')].map((li) => li.textContent)).toEqual(CARDS[id].lines);
+      expect(el.querySelector('.card-source')!.textContent).toBe(CARDS[id].source);
+      expect(el.querySelector('.card-source')!.textContent).toContain(MAP_SOURCE_SUFFIX);
+      // The map sits where the value bars were: after the title and before the lines.
+      expect(el.querySelector('.card-title')!.compareDocumentPosition(slot!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(slot!.compareDocumentPosition(el.querySelector('.card-lines')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(placed(gene).length).toBeGreaterThanOrEqual(10);
+      expect(slot!.querySelectorAll('svg.map-svg circle.map-dot')).toHaveLength(placed(gene).length);
+      expect([...slot!.querySelectorAll('svg.map-svg text.map-label')].map((t) => t.textContent)).toEqual(placed(gene).map((r) => `${r.label} ${r.display}`));
+    });
+
+    it(`${id} upgraded: the side list holds the rows without coordinates, with the labels and numbers of the value list`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest(), { placement: 'before' }));
+      const items = [...el.querySelectorAll('.card-map-side li')].map((li) => li.textContent);
+      expect(items).toEqual(side(gene).map((r) => `${r.label} ${r.display}`));
+      expect(items.length === 0, 'only H2 has none').toBe(id === 'H2');
+    });
+
+    it(`${id} upgraded: a "before" card still gives nothing away: nothing on it but its puzzle matches the ban, and the map says place names and numbers only`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest(), { placement: 'before' }));
+      for (const node of el.querySelectorAll('.card-puzzle')) node.remove();
+      expect(el.textContent).not.toMatch(BEFORE);
+      expect(el.textContent).not.toMatch(/paternity|illegitim|affair|mismatch/i);
+      for (const t of el.querySelectorAll('svg text')) expect(t.textContent, 'a map label is a place and a number').toMatch(/^[A-Za-z ()]+ \d+$/);
+    });
+
+    it(`${id} not upgraded (map unchecked): the P1 value bars, no map, no Natural Earth in the source`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest([id]), { placement: 'before' }));
+      expect(el.querySelector('.card-map')).toBeNull();
+      expect(el.querySelector('svg')).toBeNull();
+      expect(el.querySelectorAll(`.card-values[data-gene="${gene}"] .value-row`)).toHaveLength(distributionRows(FIXTURE, gene).length);
+      expect(el.querySelector('.card-source')!.textContent).not.toContain('Natural Earth');
+    });
+
+    it(`${id}: the footer has Image credits exactly when the map shows`, () => {
+      expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest()).querySelector('.card-credits')).not.toBeNull();
+      expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest([id])).querySelector('.card-credits')).toBeNull();
+      expect(openOnCard(id, FIXTURE, flagSet(flag, false, ALL_OFF), checkedManifest()).querySelector('.card-credits')).toBeNull();
+    });
+
+    it(`${id}: a card whose data has no row with coordinates stays in its value-bar form, footer included (the map needs data)`, () => {
+      const d = cloneFixture();
+      d.trait_maps[gene] = d.trait_maps[gene].map(({ lat: _lat, lon: _lon, ...rest }) => rest);
+      const el = renderCardBody(document, CARDS[id], cardCtx(d, flagSet(flag, true, ALL_OFF), checkedManifest(), { placement: 'before' }));
+      expect(el.querySelector('.card-map')).toBeNull();
+      expect(el.querySelectorAll('.card-values .value-row').length).toBeGreaterThan(0);
+      expect(openOnCard(id, d, flagSet(flag, true, ALL_OFF), checkedManifest()).querySelector('.card-credits')).toBeNull();
+    });
+
+    it(`${id}: each distribution map has its own flag: with only another map's flag on, ${id} keeps its value bars`, () => {
+      const other = id === 'H2' ? 'map.I2' : 'map.H2';
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(other, true, ALL_OFF), checkedManifest(), { placement: 'before' }));
+      expect(el.querySelector('.card-map')).toBeNull();
+      expect(el.querySelector('.card-values')).not.toBeNull();
+    });
+  }
+
+  it('H2 keeps the Ireland side note under the map', () => {
+    const el = renderCardBody(document, CARDS.H2, cardCtx(FIXTURE, flagSet('map.H2', true, ALL_OFF), checkedManifest(), { placement: 'before' }));
+    expect(el.querySelector('.card-side-note')!.textContent).toBe(IRELAND_FOOTNOTE);
+    expect(el.querySelector('.card-map')!.compareDocumentPosition(el.querySelector('.card-side-note')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The note is about a dot on the map, so the map shows Ireland (the note would point at nothing without it).
+    expect([...el.querySelectorAll('svg text.map-label')].map((t) => t.textContent).some((t) => t!.startsWith('Ireland '))).toBe(true);
+  });
+
+  it('the map slot is the picture with the side list beside it, as one block (renderCardMap)', () => {
+    const el = renderCardMap(document, CARDS.I2, FIXTURE);
+    expect(el.className).toBe('card-map');
+    expect(el.dataset.map).toBe('I2');
+    expect([...el.children].map((c) => c.tagName.toLowerCase() + (c.className ? `.${c.getAttribute('class')}` : ''))).toEqual(['svg.map-svg', 'ul.card-map-side']);
+    expect(el.querySelector('.card-map-side .value-label')!.textContent).toBe('Middle East');
+    expect(el.querySelector('.card-map-side .value-num')!.textContent).toBe('47');
   });
 });
