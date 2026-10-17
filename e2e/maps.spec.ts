@@ -1,11 +1,12 @@
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { CARDS, distributionRows } from '../src/cards';
 import { IRELAND_FOOTNOTE, MAP_TEXT } from '../src/content';
 import { FEATURES } from '../src/features';
 import { A1_CONFIRMED_LABELS, DISTRIBUTION_MAP_GENE } from '../src/maps';
 import type { CardId } from '../src/types';
 import { a1LabelCandidates, buildMapApp, MAP_CARD_IDS, type MapApp } from './mapBuild';
-import { DATA, idle, intersects, prompt, screenViolations, watch, type Rect } from './helpers';
+import { DATA, idle, intersects, prompt, screenViolations, settle, watch, type Rect } from './helpers';
+import { ALLOWED_FITS, CASES as cases, withPage } from './viewports';
 
 /**
  * The map cards A1 (Task 23), D1, E1 and G1 (Task 20), and the distribution cards H2, I2 and J3 (Task 24), in their MAP form. The shipped
@@ -21,31 +22,8 @@ import { DATA, idle, intersects, prompt, screenViolations, watch, type Rect } fr
  * where the number prints 0, a dot of at least 4 map units otherwise), no word over any dot or over another word, every word whole
  * inside the picture, the side list for the rows without coordinates in view beside it, and H2's Ireland footnote under the map.
  *
- * The viewport matrix is the one e2e/layout.spec.ts uses (26 cases plus LAB_VIEWPORTS); keep the two in step.
+ * The viewport matrix is e2e/viewports.ts's, the one e2e/layout.spec.ts runs too (26 cases plus LAB_VIEWPORTS).
  */
-type Fit = 'normal' | 'no-scroll' | 'any';
-interface Case { name: string; width: number; height: number; dsf: number; fit: Fit }
-
-const SCREENS: [number, number][] = [[1024, 768], [1280, 720], [1280, 1024], [1366, 768], [1920, 1080]];
-const SCALES = [1, 1.25, 1.5];
-const LAB_STANDARD = new Set(['1366x768', '1920x1080']);
-const cases: Case[] = [];
-for (const [w, h] of SCREENS) {
-  const standard = LAB_STANDARD.has(`${w}x${h}`);
-  for (const s of SCALES) {
-    const fit: Fit = !standard ? 'any' : s === 1 ? 'normal' : s === 1.25 ? 'no-scroll' : 'any';
-    cases.push({ name: `${w}x${h} dsf ${s}`, width: w, height: h, dsf: s, fit });
-    if (s !== 1) cases.push({ name: `${w}x${h} @${s * 100}% (CSS ${Math.floor(w / s)}x${Math.floor(h / s)})`, width: Math.floor(w / s), height: Math.floor(h / s), dsf: s, fit });
-  }
-}
-cases.push({ name: 'floor 640x360', width: 640, height: 360, dsf: 1.5, fit: 'any' });
-if (cases.length !== 26) throw new Error(`layout matrix: expected the 26 viewport cases, built ${cases.length}`);
-for (const spec of (process.env.LAB_VIEWPORTS ?? '').split(',').filter(Boolean)) {
-  const m = /^(\d+)x(\d+)@([\d.]+)$/.exec(spec.trim());
-  if (!m) throw new Error(`bad LAB_VIEWPORTS entry: ${spec}`);
-  const [w, h, s] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  cases.push({ name: `lab ${w}x${h} @${s * 100}%`, width: Math.floor(w / s), height: Math.floor(h / s), dsf: s, fit: 'no-scroll' });
-}
 
 /** The map cards built so far, in card order (Task 27 adds its own for K2 and L3). */
 const IDS = ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3'] as const satisfies readonly CardId[];
@@ -69,20 +47,6 @@ const MIN_MAP_PX = 150;
 /** A1 is 26 pairs of dots: at the lab-standard screens at 100% its picture must be drawn at no less than this many CSS px to a map unit,
  *  so a grey dot (4 units) is at least 4.8 px across and a DNA dot (5 units) at least 6 px (Task 23: legible at 1366 x 768). */
 const MIN_A1_SCALE = 0.6;
-
-async function withPage(browser: Browser, c: Case, body: (page: Page) => Promise<void>): Promise<void> {
-  const ctx = await browser.newContext({ viewport: { width: c.width, height: c.height }, deviceScaleFactor: c.dsf });
-  try {
-    await body(await ctx.newPage());
-  } finally {
-    await ctx.close();
-  }
-}
-
-/** Two animation frames: layout, the card view's ResizeObserver refit and the style recalculation have all run. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
-}
 
 interface Box { left: number; right: number; top: number; bottom: number }
 interface MapGeometry {
@@ -219,7 +183,7 @@ test.describe('map cards in their map form', () => {
         await page.goto(`${app.url}?test&reset`);
         await expect(prompt(page)).toBeVisible();
         await idle(page);
-        const allowed = c.fit === 'normal' ? ['normal'] : c.fit === 'no-scroll' ? ['normal', 'dense', 'compact'] : ['normal', 'dense', 'compact', 'scroll'];
+        const allowed = ALLOWED_FITS[c.fit];
 
         for (const id of IDS) {
           await page.evaluate((cid: CardId) => window.__adw!.openCard!(cid), id);

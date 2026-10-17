@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { expect, type Page } from '@playwright/test';
-import type { WorkshopData } from '../src/types';
+import { expect, type Locator, type Page } from '@playwright/test';
+import type { CardId, WorkshopData } from '../src/types';
 import { ruleViolations } from '../tests/contentRules';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -199,3 +199,70 @@ export const covers = (b: Boxes): { hint: boolean; prompt: boolean } => ({
   hint: b.card !== null && intersects(b.card, b.hint),
   prompt: b.card !== null && intersects(b.card, b.prompt),
 });
+
+// ---- Layout matrix helpers (Task 26, spec §5.4) ----
+
+/** The test URL of a build (the shipped dist/index.html, or a scratch build): a fresh session and the ?test hook (window.__adw.openCard). */
+export const testUrl = (base: string): string => `${base}?reset&test`;
+
+/** The shipped page with the ?test hook (window.__adw.openCard) and a fresh session. */
+export const TEST_URL = testUrl(APP_URL);
+
+/** The first body line of any card, in DOM order: a bullet, a column item (F1), a tile name (B1) or a distribution line. */
+export const CARD_FIRST_BODY = '.card-bullets > li, .card-column > :not(h3), .card-tile .tile-name, .card-lines > li';
+
+/** Two animation frames: layout, the card view's ResizeObserver refit and the style recalculation have all run. */
+export async function settle(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+}
+
+/**
+ * Opens a card through the ?test hook and waits until its images are decoded and its fit level has settled. The two frames matter:
+ * CardView.open() places the card and fits it at once, and the ResizeObserver refit (the hint line changed height) and a picture's
+ * load refit both come later, so data-fit and the card's bottom edge are read only after them.
+ */
+export async function openTestCard(page: Page, id: CardId): Promise<void> {
+  await page.evaluate((cid) => window.__adw!.openCard!(cid), id);
+  const card = page.locator('#card');
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute('data-card-id', id);
+  await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('#card img')].every((i) => i.complete));
+  await settle(page);
+  await expect(card).toHaveAttribute('data-fit', /^(normal|dense|compact|scroll)$/);
+}
+
+/** The element's box lies inside the viewport (CSS px). */
+export async function expectInViewport(page: Page, label: string, loc: Locator): Promise<void> {
+  const vp = page.viewportSize()!;
+  const box = await loc.boundingBox({ timeout: 10_000 });
+  expect(box, `${label} box`).not.toBeNull();
+  expect(box!.height, `${label} height`).toBeGreaterThan(0);
+  expect(box!.x, `${label} left`).toBeGreaterThanOrEqual(-0.5);
+  expect(box!.y, `${label} top`).toBeGreaterThanOrEqual(-0.5);
+  expect(box!.x + box!.width, `${label} right`).toBeLessThanOrEqual(vp.width + 0.5);
+  expect(box!.y + box!.height, `${label} bottom`).toBeLessThanOrEqual(vp.height + 0.5);
+}
+
+/** Nothing covers the element: the topmost element at its centre is it, inside it, or an ancestor outside #card. */
+export async function expectOnTop(page: Page, label: string, loc: Locator): Promise<void> {
+  await expectInViewport(page, label, loc);
+  const box = (await loc.boundingBox())!;
+  const hit = await loc.evaluate((el, [x, y]) => {
+    const top = document.elementFromPoint(x, y);
+    return top !== null && (el === top || el.contains(top) || (top.contains(el) && top.closest('#card') === null));
+  }, [box.x + box.width / 2, box.y + box.height / 2] as const);
+  expect(hit, `${label} is covered by another element`).toBe(true);
+}
+
+/** The page does not scroll, in either direction: neither the root nor the body is bigger than the window. */
+export async function expectNoPageScroll(page: Page): Promise<void> {
+  const m = await page.evaluate(() => ({
+    sh: document.documentElement.scrollHeight, sw: document.documentElement.scrollWidth,
+    bh: document.body.scrollHeight, bw: document.body.scrollWidth,
+    ih: window.innerHeight, iw: window.innerWidth,
+  }));
+  expect(m.sh, 'page height').toBeLessThanOrEqual(m.ih);
+  expect(m.bh, 'body height').toBeLessThanOrEqual(m.ih);
+  expect(m.sw, 'page width').toBeLessThanOrEqual(m.iw);
+  expect(m.bw, 'body width').toBeLessThanOrEqual(m.iw);
+}

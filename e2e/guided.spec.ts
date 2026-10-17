@@ -1,3 +1,5 @@
+import { readFileSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { NEXT_PREFIX, SCRIPT, SCRIPT_STEPS } from '../src/hints';
 import { formatCommand, PARSE_TEXT } from '../src/parser';
@@ -8,10 +10,10 @@ import {
   HLA_TEXT_CARD, ME_RESULT, PERIOD_LABELS, PREDICT_HINT, REVEAL_CALLOUT, REVEAL_HINT, ROMAN_LOG_LINE, TODAY_PLACED,
 } from '../src/content';
 import { consumerRows } from '../src/plots/consumer';
-import { PERIOD_IDS, type PeriodId } from '../src/types';
+import { CARD_IDS, PERIOD_IDS, type CardId, type PeriodId } from '../src/types';
 import {
-  cardOpen, centreOf, closeCardWithEnter, consumerBarsShown, DATA, focusLayer, freshStart, hintIndex, idle, layersShown, plotSettled,
-  prompt, run, screenViolations, terminalBars, watch,
+  APP_URL, cardOpen, centreOf, closeCardWithEnter, consumerBarsShown, DATA, focusLayer, freshStart, hintIndex, idle, layersShown, openTestCard,
+  plotSettled, prompt, run, screenViolations, TEST_URL, terminalBars, watch,
 } from './helpers';
 
 const REVEAL_PCA = SCRIPT_STEPS.findIndex((s) => s.id === 'revealPca');
@@ -410,6 +412,69 @@ test('finale: no period is listed in the legend or named by a tooltip before it 
   await expectFinaleOver(page, 'after the second jump');
   await page.mouse.move(probe!.x, probe!.y);
   await expect(tip).toHaveText(PERIOD_LABELS.Today);
+  expect(w.requests).toEqual([]);
+  expect(w.errors).toEqual([]);
+});
+
+// ---- The page and every card as shipped (spec §5.4, §7.2; Task 26) ----
+
+/** Task 15's PAGE_MAX_BYTES (src/release.ts), copied: specs do not import modules that import JSON. */
+const PAGE_MAX_BYTES = Math.round(3.5 * 1024 * 1024);
+const MANIFEST = JSON.parse(readFileSync(fileURLToPath(new URL('../assets/manifest.json', import.meta.url)), 'utf8')) as {
+  images: { id: string; visual_check: unknown }[];
+  maps: Record<string, { visual_check: unknown }>;
+};
+
+/** The upgraded form ships exactly when the card's flag is on and every non-optional image (or its map) is checked in the manifest (RF5: nothing unchecked ships, nothing checked and enabled silently falls back). */
+function shipsUpgraded(id: CardId): boolean {
+  const card = CARDS[id];
+  if (card.feature === undefined || !FEATURES[card.feature]) return false;
+  if (card.map !== undefined) return (MANIFEST.maps[card.map]?.visual_check ?? null) !== null;
+  const tiles = card.tiles ?? [];
+  return tiles.length > 0 && tiles.every((t) => t.optional === true
+    || (MANIFEST.images.find((e) => e.id === t.image)?.visual_check ?? null) !== null);
+}
+
+test('the built page is at most 3.5 MB, has no image that is not an inlined data: URL, and makes no request (spec §7.2)', async ({ page }) => {
+  const file = fileURLToPath(APP_URL);
+  const bytes = statSync(file).size;
+  console.log(`index.html: ${bytes} bytes (limit ${PAGE_MAX_BYTES})`);
+  expect(bytes).toBeLessThanOrEqual(PAGE_MAX_BYTES);
+  const html = readFileSync(file, 'utf8');
+  for (const m of html.matchAll(/<img\b[^>]*\bsrc="([^"]*)"/g)) expect(m[1]!.startsWith('data:'), m[1]!.slice(0, 40)).toBe(true);
+  const w = watch(page);
+  await freshStart(page);
+  expect(w.requests).toEqual([]);
+});
+
+test('every card in its shipped form passes the content rules, inlines its images, and so does its credits panel', async ({ page }) => {
+  const w = watch(page);
+  await page.goto(TEST_URL);
+  await idle(page);
+  for (const id of CARD_IDS) {
+    await openTestCard(page, id);
+    const card = page.locator('#card');
+    expect(await screenViolations(page), `card ${id}`).toEqual([]);
+    const imgs = await card.locator('img').evaluateAll((els) => els.map((e) => e.getAttribute('src') ?? ''));
+    for (const s of imgs) expect(s.startsWith('data:image/'), `${id} image source`).toBe(true);
+    const upgradedOnScreen = imgs.length > 0 || (await card.locator('.card-map').count()) > 0;
+    expect(upgradedOnScreen, `${id}: upgraded form on screen exactly when its flag is on and its assets are checked`).toBe(shipsUpgraded(id));
+    await expect(page.locator('#card a[href], #credits a[href]')).toHaveCount(0);
+    const credits = card.locator('.card-credits');
+    expect(await credits.count(), `${id}: Image credits only in the upgraded form`).toBe(shipsUpgraded(id) ? 1 : 0);
+    if (shipsUpgraded(id)) {
+      await credits.click();
+      await expect(page.locator('#credits')).toBeVisible();
+      await expect(page.locator('#credits-close')).toBeFocused();
+      expect(await screenViolations(page), `credits opened from ${id}`).toEqual([]);
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#credits')).toBeHidden();
+      await expect(card, 'Esc closed the credits panel, not the card').toBeVisible();
+      await expect(card).toHaveAttribute('data-card-id', id);
+    }
+    await card.locator('.card-continue').click();
+    await expect(card).toBeHidden();
+  }
   expect(w.requests).toEqual([]);
   expect(w.errors).toEqual([]);
 });
