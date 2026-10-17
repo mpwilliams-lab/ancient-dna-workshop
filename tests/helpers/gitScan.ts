@@ -5,8 +5,12 @@ import { execFileSync } from 'node:child_process';
 
 /** One file of the HEAD tree: its text, decoded as latin1 when it is a binary file and as UTF-8 otherwise. */
 export interface Blob { path: string; binary: boolean; text: string }
-/** The added lines of one file in one commit (`text` has no "+" prefix), with the file's `path` as git prints it. */
-export interface AddedChunk { commit: string; path: string; text: string }
+/**
+ * The added lines of one file in one commit (`text` has no "+" prefix), with the file's `path` as git prints it. `binary` is true
+ * for a file that the HEAD-blob scan reads as bytes (by its extension): the machine-specific needles that are long enough, and no
+ * pattern rule, apply to it, the same as there.
+ */
+export interface AddedChunk { commit: string; path: string; text: string; binary: boolean }
 
 /** Files read as bytes, not text. */
 export const BINARY = /\.(jpe?g|png|gif|webp|ico|woff2?|ttf|otf|pdf)$/i;
@@ -62,11 +66,12 @@ export function unpushedRange(cwd: string, remote = 'origin/main'): string | nul
 }
 
 /**
- * The lines every commit in `range` adds, file by file (`git log -p -U0`). A line that a later commit removes again is still
- * here, because the push publishes every commit. Binary files carry no text; HEAD's own blobs cover their final content.
+ * The lines every commit in `range` adds, file by file (`git log -p -U0 --text`). A line that a later commit removes again is still
+ * here, because the push publishes every commit. --text makes git print a binary file's added bytes as lines too (otherwise it
+ * only says "Binary files differ"), so a binary added by one commit and deleted by the next is scanned as well.
  */
 export function addedChunks(cwd: string, range: string): AddedChunk[] {
-  const log = git(cwd, ['log', '-p', '-U0', '--no-color', '--no-ext-diff', '--format=%x01%H', range]).toString('utf8');
+  const log = git(cwd, ['log', '-p', '-U0', '--text', '--no-color', '--no-ext-diff', '--format=%x01%H', range]).toString('utf8');
   const chunks: AddedChunk[] = [];
   let commit = '';
   let current: AddedChunk | null = null;
@@ -79,7 +84,8 @@ export function addedChunks(cwd: string, range: string): AddedChunk[] {
     } else if (line.startsWith('diff --git ')) {
       // "diff --git a/<path> b/<path>": the path as the new side names it (the same text for a file that is not renamed).
       const named = /^diff --git a\/.* b\/(.*)$/.exec(line);
-      current = { commit, path: named ? named[1]! : line.slice('diff --git '.length), text: '' };
+      const path = named ? named[1]! : line.slice('diff --git '.length);
+      current = { commit, path, text: '', binary: BINARY.test(path) };
       chunks.push(current);
       inHunk = false;
     } else if (line.startsWith('@@')) {

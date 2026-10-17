@@ -194,11 +194,27 @@ describe.skipIf(ON_CI)('public-repo privacy: this machine\'s own strings (skippe
     expect(hits, 'remove the personal string from each file listed, in a new commit (never weaken this test)').toEqual([]);
   }, 30_000);
 
+  it('finds this machine\'s home directory inside the bytes of a binary file an unpushed commit adds, then deletes (long needles only, as in the HEAD scan)', () => {
+    const { dir, run, write } = tempRepo();
+    write('a.txt', 'a\n');
+    run('add', 'a.txt');
+    run('commit', '-q', '-m', 'first');
+    run('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    write('img/photo.jpg', `\u0000\u00ff\u00d8\u00ff\u0000${slashes(homedir())}\u0000`);
+    run('add', 'img/photo.jpg');
+    run('commit', '-q', '-m', 'adds a photo with the path in its metadata');
+    run('rm', '-q', 'img/photo.jpg');
+    run('commit', '-q', '-m', 'removes it');
+    const chunk = addedChunks(dir, 'origin/main..HEAD').find((c) => c.path === 'img/photo.jpg' && c.text !== '')!;
+    expect(chunk.binary).toBe(true);
+    expect(hitsIn(chunk.text, chunk.binary)).toContain('home directory');
+  });
+
   it('no line added by an unpushed commit contains any of them, even one a later commit removes again', () => {
     const range = unpushedRange(ROOT);
     const hits: string[] = [];
     for (const c of range === null ? [] : addedChunks(ROOT, range)) {
-      for (const label of [...hitsIn(c.path), ...hitsIn(c.text)]) hits.push(`${c.commit} ${c.path}: ${label}`);
+      for (const label of [...hitsIn(c.path), ...hitsIn(c.text, c.binary)]) hits.push(`${c.commit} ${c.path}: ${label}`);
     }
     expect(hits, 'the commit is not pushed yet: fix it (amend, or rebase -i) before any push').toEqual([]);
   }, 30_000);
@@ -281,6 +297,29 @@ describe('public-repo privacy: rules that need no knowledge of this machine (run
     expect(byPath.get('t.txt')!.binary).toBe(false);
   });
 
+  it('reads the added bytes of a committed binary file too (git log -p --text), even one that a later commit deletes', () => {
+    const { dir, run, write } = tempRepo();
+    write('a.txt', 'a\n');
+    run('add', 'a.txt');
+    run('commit', '-q', '-m', 'first');
+    run('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    write('img/blob.png', `\u0000\u0089PNG\r\n\u001a\n\u0000${SAMPLE_HOME}/x\u0000${SAMPLE_MAIL}\u0000`);
+    run('add', 'img/blob.png');
+    run('commit', '-q', '-m', 'adds a binary');
+    run('rm', '-q', 'img/blob.png');
+    run('commit', '-q', '-m', 'deletes it');
+    const [chunk] = addedChunks(dir, 'origin/main..HEAD').filter((c) => c.path === 'img/blob.png' && c.text !== '');
+    expect(chunk, 'git says "Binary files differ" unless --text is given').toBeDefined();
+    expect(chunk!.binary).toBe(true);
+    expect(chunk!.text).toContain(`${SAMPLE_HOME}/x`);
+    expect(chunk!.text).toContain(SAMPLE_MAIL);
+    expect(addedChunks(dir, 'origin/main..HEAD').find((c) => c.path === 'a.txt'), 'a text file is not a binary chunk').toBeUndefined();
+    write('t.txt', 'text\n');
+    run('add', 't.txt');
+    run('commit', '-q', '-m', 'text');
+    expect(addedChunks(dir, 'origin/main..HEAD').find((c) => c.path === 't.txt')!.binary).toBe(false);
+  });
+
   it('no file of the HEAD commit holds a user directory other than the lab account\'s, or an e-mail address', () => {
     const hits: string[] = [];
     for (const f of headBlobs(ROOT)) if (!f.binary) for (const s of stray(f.text)) hits.push(`${f.path}: ${s}`);
@@ -290,7 +329,7 @@ describe('public-repo privacy: rules that need no knowledge of this machine (run
   it('no line added by an unpushed commit does', () => {
     const range = unpushedRange(ROOT);
     const hits: string[] = [];
-    for (const c of range === null ? [] : addedChunks(ROOT, range)) for (const s of stray(c.text)) hits.push(`${c.commit} ${c.path}: ${s}`);
+    for (const c of range === null ? [] : addedChunks(ROOT, range)) if (!c.binary) for (const s of stray(c.text)) hits.push(`${c.commit} ${c.path}: ${s}`);
     expect(hits, 'the commit is not pushed yet: fix it (amend, or rebase -i) before any push').toEqual([]);
   }, 30_000);
 
