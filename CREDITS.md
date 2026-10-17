@@ -14,6 +14,12 @@ Photos are shown whole in the app. A credit that says "cropped and resized" name
   - Licence: drawn for this workshop
   - Changes: none
 
+### Card J1
+
+- Drawn for this workshop
+  - Licence: drawn for this workshop
+  - Changes: none
+
 ## Data and maps
 
 Map outlines: Made with Natural Earth (public domain). Allele frequencies: 1000 Genomes Project; gnomAD; Akbari et al. 2026 (AGES). Lactase data: Liebert et al. 2017, Human Genetics (CC BY 4.0). The app's code licence does not cover these images; each keeps its own licence.
