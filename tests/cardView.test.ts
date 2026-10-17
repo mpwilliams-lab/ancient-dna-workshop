@@ -4,19 +4,20 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
-  barFraction, cardSourceLine, continueLabel, fitCard, LONG_VALUE_LIST, mountCardView, renderCardBody, upgradedFormShown,
+  barFraction, cardSourceLine, continueLabel, fitCard, LONG_VALUE_LIST, mountCardView, renderCardBody, renderTiles, upgradedFormShown,
   type CardRenderContext,
 } from '../src/cardView';
 import { CARDS, cardSource, cardStrings, cardVars, distributionRows, DISTRIBUTION_SCALE_MAX, fillCard } from '../src/cards';
 import {
-  BACK_BUTTON, BACK_BUTTON_LABEL, CARD_CONTINUE, CARD_CONTINUE_DONE, CARD_CONTINUE_TO_PLOT, CHIP_TEXT, cardCounter, IRELAND_FOOTNOTE,
-  MAP_SOURCE_SUFFIX,
+  BACK_BUTTON, BACK_BUTTON_LABEL, CARD_CONTINUE, CARD_CONTINUE_DONE, CARD_CONTINUE_TO_PLOT, CHIP_TEXT, cardCounter, CREDITS_LINK,
+  IRELAND_FOOTNOTE, MAP_SOURCE_SUFFIX,
 } from '../src/content';
 import { validateData } from '../src/data';
 import { ALL_OFF, ALL_ON, withFeatures, type Features } from '../src/features';
 import { CARD_IDS, GENE_IDS, type CardId, type WorkshopData } from '../src/types';
 import { ruleViolations } from './contentRules';
 import { FIXTURE } from './fixtures/fixture';
+import { checkedManifest, fakeUrls } from './helpers/assetEnv';
 import { loadIndexHtml } from './helpers/shellEnv';
 
 const ctx = (over: Partial<CardRenderContext> = {}): CardRenderContext => ({
@@ -501,6 +502,159 @@ describe('mountCardView: isolation and geometry', () => {
     expect(watching.has(second)).toBe(true);
     expect(observed).toHaveLength(2);
     expect(root().style.getPropertyValue('--card-bottom')).toBe('118px');
+  });
+});
+
+// ---- Task 15: image tiles (spec §5.2, §7.2) and the Image credits button ----
+
+describe('card image tiles (Task 15, spec §5.2 and §7.2)', () => {
+  const tctx = (features = ALL_OFF, manifest = checkedManifest(), imageUrls = fakeUrls()): CardRenderContext => ({
+    data: FIXTURE, features, index: 0, count: 1, placement: 'after', showBack: false, manifest, imageUrls,
+  });
+  const B1_ON = withFeatures({ 'images.B1': true }, ALL_OFF);
+  const C1_ON = withFeatures({ 'images.C1': true }, ALL_OFF);
+  const figures = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('figure.card-tile')];
+
+  it('flag off: text tiles only (names and lines as text, no img), whatever the manifest says', () => {
+    const el = renderTiles(document, CARDS.B1, tctx(ALL_OFF))!;
+    expect(el.dataset.form).toBe('text');
+    expect(el.querySelectorAll('img')).toHaveLength(0);
+    expect(figures(el).map((f) => f.querySelector('.tile-name')?.textContent)).toEqual(CARDS.B1.tiles!.map((t) => t.name));
+    expect(figures(el).map((f) => f.classList.contains('is-optional'))).toEqual(CARDS.B1.tiles!.map((t) => t.optional === true));
+  });
+  it('flag on, every tile checked and bundled: one image per tile; cover only where cropping is allowed', () => {
+    const el = renderTiles(document, CARDS.B1, tctx(B1_ON))!;
+    expect(el.dataset.form).toBe('images');
+    expect(el.dataset.count).toBe('5');
+    const imgs = [...el.querySelectorAll('img')];
+    expect(imgs.map((i) => i.closest('figure')!.getAttribute('data-image'))).toEqual(['stonehenge', 'avebury', 'ring-of-brodgar', 'thornborough-plan', 'castlerigg']);
+    expect(imgs.every((i) => i.getAttribute('alt') === '')).toBe(true);
+    expect(imgs.map((i) => i.getAttribute('src'))).toEqual(['stonehenge', 'avebury', 'ring-of-brodgar', 'thornborough-plan', 'castlerigg'].map((id) => `data:image/jpeg;base64,${id}`));
+    expect(el.querySelector('[data-image="stonehenge"] img')!.className).toBe('tile-img tile-img--cover');
+    expect(el.querySelector('[data-image="castlerigg"] img')!.className).toBe('tile-img tile-img--contain');
+    expect(el.querySelector('[data-image="thornborough-plan"] .tile-image-caption')!.textContent).toBe(CARDS.B1.tiles![3]!.imageCaption);
+  });
+  it('flag on: each tile keeps its name and line under the image, and only the Thornborough tile has an image caption', () => {
+    const el = renderTiles(document, CARDS.B1, tctx(B1_ON))!;
+    expect(figures(el).map((f) => f.querySelector('.tile-name')?.textContent)).toEqual(CARDS.B1.tiles!.map((t) => t.name));
+    expect(figures(el).map((f) => f.querySelector('.tile-caption')?.textContent)).toEqual(CARDS.B1.tiles!.map((t) => t.caption));
+    expect(el.querySelectorAll('.tile-image-caption')).toHaveLength(1);
+    expect(figures(el).every((f) => f.querySelector('img') === f.firstElementChild)).toBe(true);   // the image first, the caption after it
+  });
+  it('flag on, an optional tile unchecked: that tile is left out and the others show their images', () => {
+    const el = renderTiles(document, CARDS.B1, tctx(B1_ON, checkedManifest(['castlerigg'])))!;
+    expect(figures(el).map((f) => f.dataset.image)).toEqual(['stonehenge', 'avebury', 'ring-of-brodgar', 'thornborough-plan']);
+    expect(el.dataset.count).toBe('4');
+  });
+  it('flag on, a required tile unchecked or not bundled: the whole card stays in its text form', () => {
+    for (const el of [
+      renderTiles(document, CARDS.B1, tctx(B1_ON, checkedManifest(['stonehenge'])))!,
+      renderTiles(document, CARDS.B1, tctx(B1_ON, checkedManifest(), fakeUrls(['avebury'])))!,
+    ]) {
+      expect(el.dataset.form).toBe('text');
+      expect(el.querySelectorAll('img')).toHaveLength(0);
+      expect(el.querySelector('.tile-image-caption')).toBeNull();
+      expect(el.dataset.count).toBe('5');
+    }
+  });
+  it('C1: the Shrewton burial tile never shows beside the Archer photo; in text form it stays a text tile', () => {
+    expect(figures(renderTiles(document, CARDS.C1, tctx(C1_ON))!).map((f) => f.dataset.image)).toEqual(['amesbury-archer', 'round-barrow']);
+    expect(figures(renderTiles(document, CARDS.C1, tctx(ALL_OFF))!).map((f) => f.dataset.image)).toEqual(['amesbury-archer', 'round-barrow', 'shrewton-beaker']);
+  });
+  it('C1: if the Archer photo is not checked, the card is in text form and the Shrewton tile is back as text', () => {
+    const el = renderTiles(document, CARDS.C1, tctx(C1_ON, checkedManifest(['amesbury-archer'])))!;
+    expect(el.dataset.form).toBe('text');
+    expect(figures(el).map((f) => f.dataset.image)).toEqual(['amesbury-archer', 'round-barrow', 'shrewton-beaker']);
+  });
+  it('a card without tiles has no tile row', () => {
+    expect(renderTiles(document, CARDS.D2, tctx(B1_ON))).toBeNull();
+  });
+  it('renderCardBody builds its tile row through renderTiles, in the §5.2 place (after the chips, before the bullets)', () => {
+    const b = renderCardBody(document, CARDS.C1, tctx(C1_ON));
+    const classes = [...b.children].map((c) => c.className);
+    expect(classes.indexOf('card-tiles')).toBeGreaterThan(classes.indexOf('card-chips'));
+    expect(classes.indexOf('card-tiles')).toBeLessThan(classes.indexOf('card-bullets'));
+    expect(b.querySelectorAll('.card-tiles')).toHaveLength(1);
+    expect(b.querySelectorAll('img')).toHaveLength(2);
+  });
+  it('every string a card shows in its image form passes the spec §6 rules (names, captions, image captions, buttons)', () => {
+    const rootEl = document.createElement('div');
+    document.body.append(rootEl);
+    const view = mountCardView(rootEl, FIXTURE, NOOP_HANDLERS, ALL_ON, { manifest: checkedManifest(), urls: fakeUrls() });
+    for (const id of CARD_IDS) {
+      view.open(id, 0, 1, 'after');
+      expect(renderedStrings(rootEl).filter((t) => ruleViolations(t).length > 0), id).toEqual([]);
+    }
+    rootEl.remove();
+  });
+  it('the image form never shows alt text or an attribute that could carry a link', () => {
+    const el = renderTiles(document, CARDS.B1, tctx(B1_ON))!;
+    expect(el.querySelectorAll('a, [href]')).toHaveLength(0);
+    for (const img of el.querySelectorAll('img')) expect(img.getAttributeNames().sort()).toEqual(['alt', 'class', 'src']);
+  });
+});
+
+describe('card credits button (Task 15)', () => {
+  const handlers = () => ({ onContinue: vi.fn(), onBack: vi.fn(), onCredits: vi.fn() });
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+  it('appears only when the upgraded form is on screen, between Back and Continue, and calls onCredits', () => {
+    loadIndexHtml();
+    const root = document.getElementById('card')!;
+    const h = handlers();
+    const view = mountCardView(root, FIXTURE, h, withFeatures({ 'images.B1': true, back: true }, ALL_OFF), { manifest: checkedManifest(), urls: fakeUrls() });
+    view.open('B1', 0, 1, 'after');
+    expect([...root.querySelector('footer')!.children].map((c) => c.className)).toEqual(['card-counter', 'card-back', 'card-credits', 'card-continue']);
+    const btn = root.querySelector<HTMLButtonElement>('.card-credits')!;
+    expect(btn.textContent).toBe(CREDITS_LINK);
+    expect(btn.getAttribute('type')).toBe('button');
+    btn.click();
+    expect(h.onCredits).toHaveBeenCalledTimes(1);
+    expect(h.onContinue).not.toHaveBeenCalled();
+  });
+  it('is absent in the text form', () => {
+    loadIndexHtml();
+    const root = document.getElementById('card')!;
+    const view = mountCardView(root, FIXTURE, handlers(), withFeatures({ 'images.B1': true }, ALL_OFF), { manifest: checkedManifest(['stonehenge']), urls: fakeUrls() });
+    view.open('B1', 0, 1, 'after');
+    expect(root.querySelector('.card-credits')).toBeNull();
+  });
+  it('is absent on a card with no upgrade, and with the shipped manifest and files (nothing is checked or bundled yet)', () => {
+    loadIndexHtml();
+    const root = document.getElementById('card')!;
+    const view = mountCardView(root, FIXTURE, handlers(), ALL_ON);
+    for (const id of CARD_IDS) {
+      view.open(id, 0, 1, 'after');
+      expect(root.querySelector('.card-credits'), id).toBeNull();
+    }
+    const checked = mountCardView(root, FIXTURE, handlers(), ALL_ON, { manifest: checkedManifest(), urls: fakeUrls() });
+    checked.open('D2', 0, 1, 'after');
+    expect(root.querySelector('.card-credits'), 'D2 has no upgrade').toBeNull();
+  });
+  it('refits the card when one of its images finishes loading, because a picture changes the height of the body after the first fit', () => {
+    loadIndexHtml();
+    const root = document.getElementById('card')!;
+    const view = mountCardView(root, FIXTURE, handlers(), withFeatures({ 'images.B1': true }, ALL_OFF), { manifest: checkedManifest(), urls: fakeUrls() });
+    view.open('B1', 0, 1, 'after');
+    const refit = vi.spyOn(view, 'refit');
+    const imgs = [...root.querySelectorAll('img')];
+    expect(imgs).toHaveLength(5);
+    imgs[0]!.dispatchEvent(new Event('load'));
+    expect(refit).toHaveBeenCalledTimes(1);
+    imgs[3]!.dispatchEvent(new Event('load'));
+    expect(refit).toHaveBeenCalledTimes(2);
+    view.close();
+    imgs[1]!.dispatchEvent(new Event('load'));    // the card is closed: refit() does nothing then
+    expect(view.isOpen()).toBe(false);
+    expect(root.hasAttribute('data-fit')).toBe(false);
+  });
+  it('a card in its text form has no images to wait for', () => {
+    loadIndexHtml();
+    const root = document.getElementById('card')!;
+    const view = mountCardView(root, FIXTURE, handlers(), ALL_OFF);
+    view.open('B1', 0, 1, 'after');
+    expect(root.querySelectorAll('img')).toHaveLength(0);
   });
 });
 

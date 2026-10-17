@@ -1,9 +1,9 @@
 // Card overlay (spec §5.2-§5.3, CONTRACT §4.11). A card covers the plot column (>= 1100 px), both panes down to the hint
 // line (below 1100 px) or the plot pane (stacked layout). It never changes plot state and never takes focus: the prompt
 // keeps the keyboard, and the shell returns focus to it after a button click (Task 12).
-// Every card renders its P1 text form until its upgrade is ready (images: Task 15; maps: Task 20).
+// Every card renders its P1 text form until its upgrade is ready (image tiles: renderTiles, Task 15; maps: Task 20).
 import type { CardHost } from './controller';
-import type { CardId, GeneId, WorkshopData } from './types';
+import type { CardId, GeneId, ImageId, WorkshopData } from './types';
 import { FEATURES, type Features } from './features';
 import {
   CARDS, cardSource, cardUpgraded, cardVars, distributionRows, DISTRIBUTION_SCALE_MAX, fillCard, type Card, type CardVar,
@@ -13,11 +13,15 @@ import {
 } from './content';
 import { chipElement } from './icons';
 import { renderDiagram } from './diagrams';
+import { ASSET_MANIFEST, HIDDEN_WHEN_SHOWN, cropAllowed, type AssetManifest } from './assetManifest';
+import { BUNDLED_IMAGES, cardShowsUpgrade, imageReady, imageUrl, type ImageUrls } from './assets';
 
 export interface CardRenderContext {
   data: WorkshopData; features: Features;
   index: number; count: number; placement: 'after' | 'before';
   showBack: boolean;            // = features.back (a card is never open at the start, so Back is always possible from a card)
+  manifest?: AssetManifest;     // Task 15: default ASSET_MANIFEST (tests pass a checked copy)
+  imageUrls?: ImageUrls;        // Task 15: default BUNDLED_IMAGES (tests pass stand-ins)
 }
 export type FitLevel = 'normal' | 'dense' | 'compact' | 'scroll';
 export interface CardViewHandlers { onContinue(): void; onBack(): void; onCredits(): void }
@@ -28,8 +32,9 @@ export const LONG_VALUE_LIST = 11;
 
 /**
  * True when a card's upgrade assets (every non-optional tile image, or its map) are bundled and visually checked.
- * No image or map exists before the asset pipeline (Task 15) and the map renderer (Task 20), so this is false for every
- * card in Task 11. Task 20 deletes this stub and makes upgradedFormShown delegate to cardShowsUpgrade (CONTRACT §8 R11).
+ * Task 15's image tiles and Image credits button read cardShowsUpgrade (src/assets.ts) directly. This stub still gates the
+ * text that goes with a map (value lists, source line), and no map exists before the map renderer (Task 20), so it is false
+ * for every card. Task 20 deletes it and makes upgradedFormShown delegate to cardShowsUpgrade (CONTRACT §8 R11).
  */
 export function upgradeReady(_card: Card): boolean {
   return false;
@@ -71,22 +76,47 @@ function make<K extends keyof HTMLElementTagNameMap>(doc: Document, tag: K, cls?
   return e;
 }
 
-function renderTiles(doc: Document, card: Card, fill: (s: string) => string): HTMLElement {
+/**
+ * The tile row (spec §5.2, §7.2). Photo form only when the card is upgraded on screen (flag on, every non-optional tile
+ * checked and bundled). There, an optional tile without a ready image is left out, and C1's Shrewton tile is never shown
+ * beside the Archer photo. Otherwise every tile is text: name and line, or the caption alone, with no picture and no image
+ * caption (that describes a picture that is not shown). object-fit: cover only where the manifest allows cropping.
+ */
+export function renderTiles(doc: Document, card: Card, ctx: CardRenderContext): HTMLDivElement | null {
   const tiles = card.tiles ?? [];
-  const grid = make(doc, 'div', 'card-tiles');
-  grid.setAttribute('data-count', String(tiles.length));
+  if (tiles.length === 0) return null;
+  const vars = cardVars(ctx.data);
+  const fill = (text: string): string => fillCard(text, vars);
+  const manifest = ctx.manifest ?? ASSET_MANIFEST;
+  const urls = ctx.imageUrls ?? BUNDLED_IMAGES;
+  const upgraded = cardShowsUpgrade(card, ctx.features, manifest, urls);
+  const shows = (id: ImageId): boolean => upgraded && imageReady(id, manifest, urls);
+  const row = make(doc, 'div', 'card-tiles');
   for (const t of tiles) {
-    const fig = make(doc, 'figure', 'card-tile');
+    const withImage = shows(t.image);
+    const hider = HIDDEN_WHEN_SHOWN[t.image];
+    if (upgraded && hider !== undefined && shows(hider)) continue;
+    if (upgraded && t.optional === true && !withImage) continue;
+    const fig = make(doc, 'figure', t.optional === true ? 'card-tile is-optional' : 'card-tile');
     fig.setAttribute('data-image', t.image);
-    if (t.optional) fig.classList.add('is-optional');
+    if (withImage) {
+      const img = make(doc, 'img');
+      img.alt = '';
+      img.src = imageUrl(t.image, urls)!;
+      const entry = manifest.images.find((e) => e.id === t.image);
+      img.className = entry !== undefined && cropAllowed(entry) ? 'tile-img tile-img--cover' : 'tile-img tile-img--contain';
+      fig.append(img);
+    }
     const cap = make(doc, 'figcaption');
     if (t.name !== undefined) cap.append(make(doc, 'span', 'tile-name', fill(t.name)));
     cap.append(make(doc, 'span', 'tile-caption', fill(t.caption)));
-    // Text form: no <img> and no imageCaption (it describes a picture that is not shown). Task 15 adds the image form.
+    if (withImage && t.imageCaption !== undefined) cap.append(make(doc, 'span', 'tile-image-caption', fill(t.imageCaption)));
     fig.append(cap);
-    grid.append(fig);
+    row.append(fig);
   }
-  return grid;
+  row.setAttribute('data-form', upgraded ? 'images' : 'text');
+  row.setAttribute('data-count', String(row.children.length));
+  return row;
 }
 
 function renderValues(doc: Document, gene: GeneId, data: WorkshopData): HTMLUListElement {
@@ -124,7 +154,8 @@ export function renderCardBody(doc: Document, card: Card, ctx: CardRenderContext
     for (const key of card.chips) chips.append(chipElement(doc, key));
     body.append(chips);
   }
-  if (card.tiles && card.tiles.length > 0) body.append(renderTiles(doc, card, fill));
+  const tiles = renderTiles(doc, card, ctx);
+  if (tiles !== null) body.append(tiles);
   if (card.diagram) {
     const slot = make(doc, 'div', 'card-diagram');
     slot.setAttribute('data-diagram', card.diagram.id);
@@ -188,7 +219,9 @@ function renderFooter(doc: Document, card: Card, ctx: CardRenderContext, handler
     back.setAttribute('aria-label', BACK_BUTTON_LABEL);
     footer.append(back);
   }
-  if (upgradedFormShown(card, ctx.features)) footer.append(button('card-credits', CREDITS_LINK, () => handlers.onCredits()));
+  if (cardShowsUpgrade(card, ctx.features, ctx.manifest ?? ASSET_MANIFEST, ctx.imageUrls ?? BUNDLED_IMAGES)) {
+    footer.append(button('card-credits', CREDITS_LINK, () => handlers.onCredits()));
+  }
   footer.append(button('card-continue', continueLabel(ctx.index, ctx.count, ctx.placement), () => handlers.onContinue()));
   return footer;
 }
@@ -210,7 +243,10 @@ export function fitCard(cardEl: HTMLElement): FitLevel {
   return level;
 }
 
-export function mountCardView(root: HTMLElement, data: WorkshopData, handlers: CardViewHandlers, features: Features = FEATURES): CardView {
+export function mountCardView(
+  root: HTMLElement, data: WorkshopData, handlers: CardViewHandlers, features: Features = FEATURES,
+  assets: { manifest?: AssetManifest; urls?: ImageUrls } = {},
+): CardView {
   const doc = root.ownerDocument;
   root.classList.add('card');
   root.setAttribute('role', 'region');
@@ -248,7 +284,10 @@ export function mountCardView(root: HTMLElement, data: WorkshopData, handlers: C
     open(id, index, count, placement) {
       const card = CARDS[id];
       if (!card) return;
-      const ctx: CardRenderContext = { data, features, index, count, placement, showBack: features.back };
+      const ctx: CardRenderContext = {
+        data, features, index, count, placement, showBack: features.back,
+        manifest: assets.manifest ?? ASSET_MANIFEST, imageUrls: assets.urls ?? BUNDLED_IMAGES,
+      };
       root.replaceChildren(renderCardBody(doc, card, ctx), renderFooter(doc, card, ctx, handlers));
       root.setAttribute('data-card-id', id);
       current = id;
@@ -256,6 +295,8 @@ export function mountCardView(root: HTMLElement, data: WorkshopData, handlers: C
       observeHint();
       place();
       fitCard(root);
+      // A picture has no height until it has loaded, so the fit just made may be wrong: refit when each one arrives.
+      for (const img of root.querySelectorAll('img')) img.addEventListener('load', () => view.refit(), { once: true });
     },
     close() {
       root.hidden = true;

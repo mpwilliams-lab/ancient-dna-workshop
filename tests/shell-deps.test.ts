@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const seen = vi.hoisted(() => [] as { deps: Record<string, unknown>; restored: unknown }[]);
 const handlersSeen = vi.hoisted(() => [] as { onContinue(): void; onBack(): void; onCredits(): void }[]);
+const terminalSeen = vi.hoisted(() => [] as { onEnter(line: string, key?: unknown): void; onEsc(key?: unknown): void }[]);
+const escapes = vi.hoisted(() => [] as unknown[]);
 vi.mock('../src/cardView', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../src/cardView')>();
   return {
@@ -15,9 +17,23 @@ vi.mock('../src/cardView', async (importOriginal) => {
     },
   };
 });
+vi.mock('../src/terminal', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../src/terminal')>();
+  return {
+    ...mod,
+    mountTerminal: (...args: Parameters<typeof mod.mountTerminal>) => {
+      terminalSeen.push(args[1]);
+      return mod.mountTerminal(...args);
+    },
+  };
+});
 vi.mock('../src/controller', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../src/controller')>();
   class Spy extends mod.Controller {
+    override escape(key?: Parameters<InstanceType<typeof mod.Controller>['escape']>[0]): void {
+      escapes.push(key);
+      super.escape(key);
+    }
     constructor(deps: ConstructorParameters<typeof mod.Controller>[0], restored: ConstructorParameters<typeof mod.Controller>[1]) {
       seen.push({ deps: deps as unknown as Record<string, unknown>, restored });
       super(deps, restored);
@@ -38,12 +54,14 @@ const env = (extra: object = {}) => ({
 beforeEach(() => {
   seen.length = 0;
   handlersSeen.length = 0;
+  terminalSeen.length = 0;
+  escapes.length = 0;
   loadIndexHtml();
 });
 
-describe('what boot passes to the card view: every button handler gives the keyboard back to the prompt (spec §5.2)', () => {
+describe('what boot passes to the card view: the Continue and Back handlers give the keyboard back to the prompt (spec §5.2)', () => {
   const prompt = (): HTMLInputElement => document.querySelector<HTMLInputElement>('#terminal input')!;
-  it.each(['onContinue', 'onBack', 'onCredits'] as const)('%s', (name) => {
+  it.each(['onContinue', 'onBack'] as const)('%s', (name) => {
     boot(env());
     expect(handlersSeen).toHaveLength(1);
     const elsewhere = document.getElementById('wrap-open')!;
@@ -52,12 +70,50 @@ describe('what boot passes to the card view: every button handler gives the keyb
     handlersSeen[0]![name]();
     expect(document.activeElement).toBe(prompt());
   });
+  it('onCredits (Task 15) opens the credits panel and gives the keyboard to its Close button; closing it gives the prompt the keyboard back', () => {
+    boot(env());
+    const elsewhere = document.getElementById('wrap-open')!;
+    elsewhere.focus();
+    handlersSeen[0]!.onCredits();
+    expect(document.getElementById('credits')!.hidden).toBe(false);
+    expect(document.activeElement).toBe(document.getElementById('credits-close'));
+    document.getElementById('credits-close')!.click();
+    expect(document.getElementById('credits')!.hidden).toBe(true);
+    expect(document.activeElement).toBe(prompt());
+  });
   it('onContinue also lets the controller close the open card', () => {
     const b = boot(env({ href: `${FILE_URL}?test` }));
     b.controller.openCardForTest('A1');
     expect(b.cards.isOpen()).toBe(true);
     handlersSeen[0]!.onContinue();
     expect(b.cards.isOpen()).toBe(false);
+  });
+});
+
+describe('the terminal Esc handler boot passes (Task 15, spec §5.2: the credits panel and the wrap screen take Esc first)', () => {
+  const KEY = { repeat: false };
+  it('hands Esc to the controller while no dialog is open', () => {
+    boot(env());
+    terminalSeen[0]!.onEsc(KEY);
+    expect(escapes).toEqual([KEY]);
+  });
+  it('does not, while the credits panel is open: that test must hold even if the key somehow reaches the terminal', () => {
+    boot(env());
+    handlersSeen[0]!.onCredits();
+    terminalSeen[0]!.onEsc(KEY);
+    expect(escapes).toEqual([]);
+    document.getElementById('credits-close')!.click();
+    terminalSeen[0]!.onEsc(KEY);
+    expect(escapes).toEqual([KEY]);
+  });
+  it('does not, while the wrap screen is open (Shift+Tab can put focus on the prompt behind it)', () => {
+    boot(env());
+    document.getElementById('wrap-open')!.click();
+    terminalSeen[0]!.onEsc(KEY);
+    expect(escapes).toEqual([]);
+    document.getElementById('wrap-close')!.click();
+    terminalSeen[0]!.onEsc(KEY);
+    expect(escapes).toEqual([KEY]);
   });
 });
 

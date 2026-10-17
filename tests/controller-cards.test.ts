@@ -2,7 +2,7 @@
 // Spec §4.4 (Enter/Esc/auto-fill table), §5.2 focus, §5.3 repeat guard, §5.4 keys test, CONTRACT §4.8-§4.9, §4.15.
 // Drives the REAL shell (boot) through keydown events: terminal -> controller -> CardView, as on a lab machine.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { boot, hasTestFlag, makeTestHook, type Booted } from '../src/shell';
+import { boot, hasTestFlag, makeTestHook, type BootEnv, type Booted } from '../src/shell';
 import { AUTOFILL_NOTE, CARD_REPEAT_GUARD_MS } from '../src/controller';
 import { CARDS } from '../src/cards';
 import { CARD_HINT, cardCounter } from '../src/content';
@@ -11,18 +11,20 @@ import { SCRIPT, SCRIPT_STEPS, hintText } from '../src/hints';
 import { formatCommand } from '../src/parser';
 import { INITIAL_DERIVED } from '../src/replay';
 import { CARD_IDS } from '../src/types';
+import { checkedManifest, fakeUrls } from './helpers/assetEnv';
 import { FIXTURE, MemStore, loadIndexHtml } from './helpers/shellEnv';
 
 const FILE_URL = 'file:///C:/Users/lab/Desktop/ancient-dna-workshop.html';
 const IRON_AGE = SCRIPT_STEPS.findIndex((s) => s.id === 'ironAge');   // after: E1, E2, E3
+const ANGLO_SAXON = SCRIPT_STEPS.findIndex((s) => s.id === 'angloSaxon'); // after: G1, G2 (G2 has photos)
 
 let clock = 10_000;
 let store: MemStore;
 
-function start(href = FILE_URL, s: MemStore = store, features: Features = ALL_OFF): Booted {
+function start(href = FILE_URL, s: MemStore = store, features: Features = ALL_OFF, assets?: BootEnv['assets']): Booted {
   return boot({
     doc: document, href, getStorage: () => s as unknown as Storage, replaceUrl: () => {}, data: FIXTURE,
-    features, now: () => clock,
+    features, now: () => clock, ...(assets ? { assets } : {}),
   });
 }
 const input = (): HTMLInputElement => document.querySelector<HTMLInputElement>('#terminal input')!;
@@ -291,6 +293,109 @@ describe('Enter, Esc and three tries with a card open (spec §4.4 table)', () =>
     expect(document.activeElement).toBe(input());
     keydown('Escape');
     expect(cardId()).toBe('E2');
+  });
+});
+
+describe('the credits panel and the wrap screen take Esc before the card (spec §5.2; RF4; Task 15)', () => {
+  const byId = (id: string): HTMLElement => document.getElementById(id)!;
+  const counter = (): string => card().querySelector('.card-counter')!.textContent ?? '';
+  const escOn = (el: Element): void => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  };
+
+  it('Esc on the credits panel (opened from the wrap screen over a card) closes only the panel; the card stays on the same index; the wrap closes on the next Esc and the card still stays', async () => {
+    await toIronAgeCards();
+    continueButton().click();                                  // E2, 2 of 3: a card that is not the first
+    expect(counter()).toBe(cardCounter(2, 3));
+    clock += 500;
+    byId('wrap-open').click();
+    byId('wrap-credits').click();
+    expect(byId('credits').hidden).toBe(false);
+    expect(document.activeElement).toBe(byId('credits-close'));
+    escOn(document.activeElement!);
+    expect(byId('credits').hidden).toBe(true);
+    expect(byId('wrap').hidden).toBe(false);
+    expect([cardId(), counter()]).toEqual(['E2', cardCounter(2, 3)]);
+    expect(document.activeElement).toBe(byId('wrap-close'));
+    escOn(document.activeElement!);
+    expect(byId('wrap').hidden).toBe(true);
+    expect([cardId(), counter()]).toEqual(['E2', cardCounter(2, 3)]);
+    expect(document.activeElement).toBe(input());
+    clock += 500;
+    keydown('Escape');                                         // now the card takes it
+    expect(cardId()).toBe('E3');
+  });
+  it('Esc on the credits panel opened from the card\'s own Image credits button closes only the panel and leaves the card on its index (G2, 2 of 2)', async () => {
+    start(FILE_URL, store, withFeatures({ 'images.G2': true }, ALL_OFF), { manifest: checkedManifest(), urls: fakeUrls() });
+    await runSteps(ANGLO_SAXON);
+    typeLine(formatCommand(SCRIPT[ANGLO_SAXON]!));
+    await settle();
+    expect(cardId()).toBe('G1');
+    expect(card().querySelector('.card-credits'), 'G1 is a map card in its text form').toBeNull();
+    continueButton().click();
+    expect([cardId(), counter()]).toEqual(['G2', cardCounter(2, 2)]);
+    card().querySelector<HTMLButtonElement>('.card-credits')!.click();
+    expect(byId('credits').hidden).toBe(false);
+    expect(document.activeElement).toBe(byId('credits-close'));
+    clock += 500;
+    escOn(document.activeElement!);
+    expect(byId('credits').hidden).toBe(true);
+    expect([cardId(), counter()]).toEqual(['G2', cardCounter(2, 2)]);
+    expect(document.activeElement).toBe(input());
+    keydown('Escape');                                         // the card, not the panel, takes this one: G2 is the last card
+    expect(cardId()).toBeNull();
+  });
+  it('Shift+Tab can take focus out of the wrap screen. An Esc typed in the prompt then closes the wrap and does not move the card or fill the prompt', async () => {
+    await toIronAgeCards();
+    clock += 500;
+    byId('wrap-open').click();
+    expect(document.activeElement).toBe(byId('wrap-close'));
+    input().focus();                                           // what Shift+Tab does: focus leaves the dialog for the prompt
+    keydown('Escape');
+    expect(byId('wrap').hidden).toBe(true);
+    expect([cardId(), counter()]).toEqual(['E1', cardCounter(1, 3)]);
+    clock += 500;
+    keydown('Escape');
+    expect(cardId()).toBe('E2');
+  });
+  it('the same with no card open: Esc in the prompt closes the wrap and does not fill the prompt with the hinted command', () => {
+    start();
+    expect(cardId()).toBeNull();
+    byId('wrap-open').click();
+    input().focus();
+    keydown('Escape');
+    expect(byId('wrap').hidden).toBe(true);
+    expect(input().value).toBe('');
+    keydown('Escape');                                         // with the wrap closed, Esc fills the hinted command as before
+    expect(input().value).not.toBe('');
+  });
+  it('Shift+Tab out of the credits panel: an Esc typed in the prompt closes the panel only, whether the wrap screen is open under it or not', async () => {
+    await toIronAgeCards();
+    clock += 500;
+    byId('wrap-open').click();
+    byId('wrap-credits').click();
+    input().focus();
+    keydown('Escape');
+    expect(byId('credits').hidden).toBe(true);
+    expect(byId('wrap').hidden).toBe(false);
+    expect([cardId(), counter()]).toEqual(['E1', cardCounter(1, 3)]);
+    byId('wrap-close').click();
+    byId('wrap-credits').click();                              // the panel opened with no wrap screen under it
+    expect(byId('wrap').hidden).toBe(true);
+    input().focus();
+    keydown('Escape');
+    expect(byId('credits').hidden).toBe(true);
+    expect([cardId(), counter()]).toEqual(['E1', cardCounter(1, 3)]);
+    expect(input().value).toBe('');
+  });
+  it('a held Esc (auto-repeat) that closes the panel does not advance the card either', async () => {
+    await toIronAgeCards();
+    clock += 500;
+    byId('wrap-credits').click();
+    escOn(document.activeElement!);                            // closes the panel
+    keydown('Escape', true);                                   // the repeats that follow reach the prompt
+    keydown('Escape', true);
+    expect([cardId(), counter()]).toEqual(['E1', cardCounter(1, 3)]);
   });
 });
 

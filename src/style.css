@@ -345,8 +345,10 @@ body {
 #card .card-tile img {
   display: block;
   width: 100%;
+  height: auto;
   max-height: min(26vh, 230px);
   object-fit: contain;
+  border-radius: 4px;
 }
 
 #card .card-tile figcaption {
@@ -555,4 +557,96 @@ body {
     border-left: 0;
     border-top: 1px solid var(--border);
   }
+}
+
+/* ---- Card images (Task 15, spec §5.2): cover only where the manifest allows cropping; CC BY-SA images are never cropped ---- */
+#card .card-tile img.tile-img--cover {
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+#card .card-tile img.tile-img--contain {
+  object-fit: contain;
+  background: #f2f2f2;
+}
+
+#card .tile-image-caption {
+  display: block;
+  font-size: 0.8em;
+  color: var(--card-muted);
+}
+
+/* ---- Credits panel (Task 15, spec §5.2): a dialog like #wrap, above it; the list scrolls, the footer and Close stay in view ---- */
+#credits {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);   /* a definite track, so the card's max-height: 100% really caps it */
+  place-items: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+#credits[hidden] {
+  display: none;
+}
+
+.credits-card {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(4px, 1.2vh, 10px);
+  width: min(820px, 100%);
+  max-height: 100%;
+  padding: clamp(10px, 3vh, 28px);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111111;
+  font-size: clamp(12px, 1.9vh, 16px);
+}
+
+.credits-card h2 {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 1.25em;
+}
+
+#credits-list {
+  flex: 1 1 auto;
+  min-height: 3em;
+  overflow-y: auto;
+}
+
+.credits-group h3 {
+  margin: 0.4em 0 0.2em;
+  font-size: 1em;
+}
+
+.credits-line,
+.credits-url,
+#credits-footer {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+#credits-footer {
+  flex: 0 0 auto;
+}
+
+.credits-url {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  color: #333333;
+}
+
+#credits-close {
+  flex: 0 0 auto;
+  align-self: center;
+  font: inherit;
+  padding: 2px 12px;
+  border-radius: 6px;
+  border: 1px solid #8a4b00;
+  background: transparent;
+  color: #8a4b00;
+  cursor: pointer;
 }

@@ -116,6 +116,20 @@ for (const c of cases) {
       // Wrap screen: the whole QR is on screen.
       await page.locator('#wrap-open').click();
       inView('QR', await page.locator('#wrap-qr svg').boundingBox());
+      inView('wrap Image credits button', await page.locator('#wrap-credits').boundingBox());
+      inView('wrap Close', await page.locator('#wrap-close').boundingBox());
+      // Credits panel (Task 15, spec §5.2): opens over the wrap screen with focus on its Close button, which is on screen (the
+      // list inside scrolls, the page does not); Esc closes the panel only, and the wrap screen is still there.
+      await page.locator('#wrap-credits').click();
+      await expect(page.locator('#credits')).toBeVisible();
+      await expect(page.locator('#credits-close')).toBeFocused();
+      inView('credits Close', await page.locator('#credits-close').boundingBox());
+      const open = await page.evaluate(() => ({ sh: document.documentElement.scrollHeight, sw: document.documentElement.scrollWidth, ih: window.innerHeight, iw: window.innerWidth }));
+      expect(open.sh, 'page height with the credits panel open').toBeLessThanOrEqual(open.ih);
+      expect(open.sw, 'page width with the credits panel open').toBeLessThanOrEqual(open.iw);
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#credits')).toBeHidden();
+      await expect(page.locator('#wrap')).toBeVisible();
       await page.locator('#wrap-close').click();
       await expect(page.locator('#wrap')).toBeHidden();
     });

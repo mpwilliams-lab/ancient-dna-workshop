@@ -1,15 +1,18 @@
-// App shell: storage probe, ?reset, ?test, card view, guarded session restore + notice, wrap screen with QR, prompt focus.
+// App shell: storage probe, ?reset, ?test, card view, guarded session restore + notice, wrap screen with QR, credits panel, prompt focus.
 // The shell prints RESTORED_NOTICE exactly once, after the Controller is built on a restored session,
 // and only when that restore actually took effect. The Controller (Task 10) never prints it.
 import type { CardId, WorkshopData } from './types';
 import { Controller } from './controller';
 import { mountTerminal, type TerminalView } from './terminal';
 import { mountCardView, type CardView } from './cardView';
+import { mountCredits, type CreditsView } from './credits';
+import type { AssetManifest } from './assetManifest';
+import type { ImageUrls } from './assets';
 import { FEATURES, type Features } from './features';
 import { renderPlot } from './plots/index';
 import { clearSession, loadSession, type SessionStorageLike, type SessionV2 } from './session';
 import {
-  APP_TITLE, RESTORED_NOTICE, WRAP_BUTTON, WRAP_CLOSE, WRAP_CREDIT, WRAP_LINE, WRAP_QR_CAPTION,
+  APP_TITLE, CREDITS_LINK, RESTORED_NOTICE, WRAP_BUTTON, WRAP_CLOSE, WRAP_CREDIT, WRAP_LINE, WRAP_QR_CAPTION,
 } from './content';
 import { QR_SVG, QR_URL } from './generated/qr';
 
@@ -21,6 +24,7 @@ export interface BootEnv {
   data: WorkshopData;
   features?: Features;                           // default FEATURES (the shipped set); tests pass ALL_OFF / ALL_ON
   now?: () => number;                            // default performance.now(); jsdom tests drive the card repeat guard with it
+  assets?: { manifest?: AssetManifest; urls?: ImageUrls };   // default: the committed manifest and the bundled files; tests pass checked stand-ins
 }
 
 export interface Booted {
@@ -105,9 +109,16 @@ export function boot(env: BootEnv): Booted {
   const termRoot = el(doc, 'terminal');
   const plotHost = el(doc, 'plot');
   let controller: Controller | null = null;
+  let credits: CreditsView | null = null;
+  const wrapScreen = el(doc, 'wrap');
   const terminal = mountTerminal(termRoot, {
     onEnter: (line, key) => controller?.submit(line, key),
-    onEsc: (key) => controller?.escape(key),
+    onEsc: (key) => {
+      // The credits panel and the wrap screen take Esc before a card does (spec §5.2). Shift+Tab can move focus out of either
+      // dialog to the prompt, and an Esc typed there must close the dialog only: not move a card, not fill the hinted command.
+      if (credits?.isOpen() || !wrapScreen.hidden) return;
+      controller?.escape(key);
+    },
     onTab: (partial) => (controller ? controller.tab(partial) : partial),
   });
   // The card overlay (Task 11) is the controller's CardHost. It is mounted after the terminal, so it finds the hint line at
@@ -119,8 +130,8 @@ export function boot(env: BootEnv): Booted {
       focusPrompt(termRoot);
     },
     onBack: () => focusPrompt(termRoot),       // the Back action is wired in Task 17
-    onCredits: () => focusPrompt(termRoot),    // the credits panel is wired in Task 15
-  }, features);
+    onCredits: () => credits?.open(),          // the panel takes the keyboard (focus on its Close button) until it closes
+  }, features, env.assets);
   const deps = {
     data, terminal, store,
     renderPlot: (p: Parameters<typeof renderPlot>[2], opts?: { animate?: boolean }) => renderPlot(plotHost, data, p, opts),
@@ -151,6 +162,7 @@ export function boot(env: BootEnv): Booted {
   if (restoredSession) terminal.notice(RESTORED_NOTICE);
 
   setupWrap(doc, termRoot);
+  credits = setupCredits(doc, termRoot, env.assets);
   keepPromptFocused(doc, termRoot);
   focusPrompt(termRoot);
   return { controller, terminal, store, restored: restoredSession !== null, reset, cards: cardView, features, test };
@@ -178,10 +190,11 @@ const TAKES_OWN_CLICK = 'a[href], button, input, select, textarea';
  */
 function keepPromptFocused(doc: Document, termRoot: HTMLElement): void {
   const wrap = el(doc, 'wrap');
+  const credits = el(doc, 'credits');
   doc.addEventListener(
     'mouseup',
     (e) => {
-      if (!wrap.hidden) return;
+      if (!wrap.hidden || !credits.hidden) return;
       const target = e.target as Element | null;
       if (target && typeof target.closest === 'function' && target.closest(TAKES_OWN_CLICK)) return;
       if (doc.getSelection()?.toString()) return;
@@ -218,6 +231,24 @@ function setupWrap(doc: Document, termRoot: HTMLElement): void {
       hide();
     }
   });
+}
+
+/**
+ * Spec §5.2: the credits panel, opened from a card's "Image credits" button and from the wrap screen. Closing it gives focus back
+ * to the wrap screen's Close button when that screen is open underneath, and to the prompt otherwise.
+ */
+function setupCredits(doc: Document, termRoot: HTMLElement, assets: BootEnv['assets']): CreditsView {
+  const wrap = el(doc, 'wrap');
+  const view = mountCredits(doc, {
+    onClose: () => {
+      if (!wrap.hidden) el<HTMLButtonElement>(doc, 'wrap-close').focus();
+      else focusPrompt(termRoot);
+    },
+  }, assets?.manifest, assets?.urls);
+  const fromWrap = el<HTMLButtonElement>(doc, 'wrap-credits');
+  fromWrap.textContent = CREDITS_LINK;
+  fromWrap.addEventListener('click', () => view.open());
+  return view;
 }
 
 /** window.__adw (CONTRACT §4.15). Read-only, except openCard, which exists only with ?test and changes no session state. */
