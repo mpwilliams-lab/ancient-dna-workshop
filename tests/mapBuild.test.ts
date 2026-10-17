@@ -185,7 +185,11 @@ describe('forceImages: the flags (src/features.ts)', () => {
     const changed = out.split('\n').filter((line, i) => line !== before[i]);
     expect(changed.length).toBeLessThanOrEqual(1);
     for (const line of changed) expect(line).toMatch(/'images\.H1': true,/);
-    expect(imagesOf()(featuresTs, FEATURES_ID)!.code).not.toMatch(/'map\.[A-Z0-9]+': true,/);
+    // No map flag is touched: its lines are the committed ones, whichever of them the release step has switched on (this used to say
+    // "none is true", which holds only until the first map ships: the flip of map.K2 and map.L3 would have failed it).
+    const mapFlagLines = (source: string): string[] => source.split('\n').filter((line) => /'map\.[A-Z0-9]+'\s*:/.test(line));
+    expect(mapFlagLines(featuresTs).length, 'the nine map flags').toBe(9);
+    expect(mapFlagLines(imagesOf()(featuresTs, FEATURES_ID)!.code)).toEqual(mapFlagLines(featuresTs));
   });
 
   it('fails the build when a module no longer has the entry, so the proof can never test the text form by accident', () => {
