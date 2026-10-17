@@ -11,6 +11,7 @@ import {
 import { loadSession, visibleTranscript } from '../src/session';
 import { data, flushMicrotasks, rig, runSteps, type Rig, type ShownLine } from './helpers/controllerRig';
 import { mulberry32 } from './helpers/rng';
+import { screensOf, standingOn } from './helpers/script';
 
 const pca = (period: Extract<Command, { name: 'run_pca' }>['period']): Command => ({ name: 'run_pca', period });
 const fold = (cmds: Command[]): Derived => cmds.reduce((d, c) => applyCommand(d, c, data).derived, INITIAL_DERIVED);
@@ -288,22 +289,6 @@ describe('spec §4.5 test 7: restore(serialize(session)) equals the live control
 
 // ---- spec §4.5 test 7 with Back actions (Task 17) ----
 
-/** Every screen of a session, in the order a student meets them: the start, then per step its cards and its bare plot. */
-function screensOf(cardsFor: readonly (readonly CardId[])[]): { step: number; card: number }[] {
-  const all = [{ step: 0, card: 0 }];
-  cardsFor.forEach((cards, k) => {
-    for (let j = 0; j <= cards.length; j += 1) if (cards.length === 0 && j === 1) break; else all.push({ step: k + 1, card: j });
-  });
-  return all;
-}
-
-/** The screen a student is on: the open card, else the step's bare plot (a step whose after-cards wait for their log is on its bare plot). */
-function onScreen(r: Rig): { step: number; card: number } {
-  const { step, card } = r.c.screen;
-  if (r.c.cardOpen !== null) return { step, card };
-  return { step, card: r.c.derived.cardsFor[step - 1]?.length ?? 0 };
-}
-
 /**
  * One random action, or a Back (about one in five). A Back is checked against a model that shares no code with back.ts: the
  * session's screens as a list, and Back moves one place down it. Everything it rolls back is then compared with a refreshed
@@ -312,7 +297,7 @@ function onScreen(r: Rig): { step: number; card: number } {
 async function actOrBack(r: Rig, rng: () => number, clock: { t: number }): Promise<string> {
   if (rng() >= 0.2) return act(r, rng, clock);
   clock.t += rng() < 0.2 ? 100 : 500;
-  const here = onScreen(r);
+  const here = standingOn(r.c);
   const list = screensOf(r.c.derived.cardsFor);
   const at = list.findIndex((p) => p.step === here.step && p.card === here.card);
   expect(at, `the screen ${JSON.stringify(here)} is one of the session's screens`).toBeGreaterThanOrEqual(0);

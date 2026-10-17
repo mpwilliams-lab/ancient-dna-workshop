@@ -6,12 +6,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CARD_HINT, RESTORED_NOTICE } from '../src/content';
 import { ALL_OFF, withFeatures } from '../src/features';
-import { EXTRAS, SCRIPT, SCRIPT_STEPS, hintCommand } from '../src/hints';
+import { EXTRAS, SCRIPT, hintCommand } from '../src/hints';
 import { formatCommand } from '../src/parser';
 import { boot, type BootEnv, type Booted } from '../src/shell';
 import { checkedManifest, fakeUrls } from './helpers/assetEnv';
 import { FIXTURE, MemStore, loadIndexHtml } from './helpers/shellEnv';
 import { mulberry32 } from './helpers/rng';
+import { cardCount, forwardRun, screenKeys, screensOf, standingOn, type ScriptDriver } from './helpers/script';
 
 const FILE_URL = 'file:///C:/Users/lab/Desktop/ancient-dna-workshop.html';
 const FEATS = withFeatures({ back: true }, ALL_OFF);
@@ -74,38 +75,22 @@ function shot(app: Booted, withPrompt = true) {
 }
 type Shot = ReturnType<typeof shot>;
 
-const cardCount = (i: number): number => SCRIPT_STEPS[i]?.cards?.ids.length ?? 0;
-
-/** The screens of a full guided run in the order a student meets them: "step.card", the bare plot of a step last. */
-function screenKeys(): string[] {
-  const keys = ['0.0'];
-  SCRIPT_STEPS.forEach((_, i) => {
-    for (let j = 0; j <= cardCount(i); j++) if (!(cardCount(i) === 0 && j === 1)) keys.push(`${i + 1}.${j}`);
-  });
-  return keys;
-}
-
-/** Types the whole guided script and clicks through every card, calling `at` with the page as it looks at every screen. */
-async function forwardRun(app: Booted, at: (key: string, s: Shot) => void): Promise<void> {
-  at('0.0', shot(app));
-  for (let i = 0; i < SCRIPT.length; i++) {
+/** The real page as the shared walk drives it: a typed command (the clock moved on, its staggered log waited for), Continue is the card's button. */
+const dom = (app: Booted): ScriptDriver<Shot> => ({
+  run: async (line) => {
     clock.t += 1000;
-    typeLine(formatCommand(SCRIPT[i]!));
+    typeLine(line);
     await settle();
-    const n = cardCount(i);
-    for (let j = 0; j < n; j++) {
-      at(`${i + 1}.${j}`, shot(app));
-      cardButton('card-continue').click();
-    }
-    at(`${i + 1}.${n}`, shot(app));
-  }
-}
+  },
+  continueCard: () => cardButton('card-continue').click(),
+  snap: () => shot(app),
+});
 
 /** The page after the whole guided script, and the page at every screen on the way (the same live run, once per test). */
 async function liveRun(): Promise<{ app: Booted; live: Map<string, Shot>; keys: string[] }> {
   const app = start();
   const live = new Map<string, Shot>();
-  await forwardRun(app, (key, s) => live.set(key, s));
+  await forwardRun(dom(app), (key, s) => live.set(key, s));
   const keys = screenKeys();
   expect([...live.keys()]).toEqual(keys);
   return { app, live, keys };
@@ -142,7 +127,7 @@ describe('Back on the real page: spec §4.5 test 1, at every screen', () => {
     const { app, live, keys } = await liveRun();
     for (let at = keys.length - 2; at >= 0; at--) (shot(app).cardOpen !== null ? cardButton('card-back') : backButton()).click();
     const again: string[] = [];
-    await forwardRun(app, (key, s) => {
+    await forwardRun(dom(app), (key, s) => {
       again.push(key);
       expect(s, `forward again to ${key}`).toEqual(live.get(key));
     });
@@ -153,20 +138,10 @@ describe('Back on the real page: spec §4.5 test 1, at every screen', () => {
     const { app, live, keys } = await liveRun();
     const from = 9;                                       // a card screen, deep in the script
     for (let at = keys.length - 1; at > from; at--) backButton().click();
-    // Back from a card screen with the header button too: it is the same action
     expect(shot(app)).toEqual(live.get(keys[from]!));
     const [step, cardIndex] = keys[from]!.split('.').map(Number) as [number, number];
-    for (let j = cardIndex; j < cardCount(step - 1); j++) cardButton('card-continue').click();
-    for (let i = step; i < SCRIPT.length; i++) {
-      clock.t += 1000;
-      typeLine(formatCommand(SCRIPT[i]!));
-      await settle();
-      for (let j = 0; j < cardCount(i); j++) {
-        expect(shot(app), `forward ${i + 1}.${j}`).toEqual(live.get(`${i + 1}.${j}`));
-        cardButton('card-continue').click();
-      }
-      expect(shot(app), `forward ${i + 1}.${cardCount(i)}`).toEqual(live.get(`${i + 1}.${cardCount(i)}`));
-    }
+    for (let j = cardIndex; j < cardCount(step - 1); j++) cardButton('card-continue').click();   // the cards of this step still ahead
+    await forwardRun(dom(app), (key, s) => expect(s, `forward ${key}`).toEqual(live.get(key)), step);
   });
 });
 
@@ -274,22 +249,6 @@ const HINT_BAD = ['nope', 'run_pca(period = "Jurassic")', 'run_pcaa(period = "Ir
 const TABS = ['run_', 'allele_freq(gene = "H', 'run_p'];
 const POOL = [...SCRIPT, ...EXTRAS].map(formatCommand);
 
-/** The screens of a session in the order a student meets them (the model Back must follow, sharing no code with back.ts). */
-function modelScreens(app: Booted): { step: number; card: number }[] {
-  const cardsFor = app.controller.derived.cardsFor;
-  const all = [{ step: 0, card: 0 }];
-  cardsFor.forEach((cards, k) => {
-    for (let j = 0; j <= cards.length; j++) if (!(cards.length === 0 && j === 1)) all.push({ step: k + 1, card: j });
-  });
-  return all;
-}
-
-/** What the student is on: the open card, else the step's bare plot (a step whose after-cards still wait for the log is on its plot). */
-function standingOn(app: Booted): { step: number; card: number } {
-  const { step, card } = app.controller.screen;
-  return app.controller.cardOpen !== null ? { step, card } : { step, card: app.controller.derived.cardsFor[step - 1]?.length ?? 0 };
-}
-
 /** Facts that hold on every screen of every session, whatever was pressed. */
 function expectPageInvariants(app: Booted, label: string): void {
   const open = app.controller.cardOpen;
@@ -350,8 +309,8 @@ describe('random sessions on the real page: refresh and Back at any point (fixed
           if (!card().hidden) cardButton('card-continue').click();
         } else if (x < 0.92) {
           // Back: the header button, or the card's own when a card is open (the same action)
-          const where = standingOn(app);
-          const list = modelScreens(app);
+          const where = standingOn(app.controller);
+          const list = screensOf(app.controller.derived.cardsFor);
           const at = list.findIndex((p) => p.step === where.step && p.card === where.card);
           expect(at, `${trail.join(' | ')}: ${JSON.stringify(where)} is one of the session's screens`).toBeGreaterThanOrEqual(0);
           if (!card().hidden && rng() < 0.5) cardButton('card-back').click();

@@ -15,6 +15,7 @@ import { boot } from '../src/shell';
 import type { TerminalView } from '../src/terminal';
 import type { CardId } from '../src/types';
 import { FIXTURE, MemStore, loadIndexHtml } from './helpers/shellEnv';
+import { cardCount, forwardRun, screenKeys, type ScriptDriver } from './helpers/script';
 
 const FEATS = withFeatures({ back: true });
 type Line = { kind: 'input' | 'output' | 'notice'; text: string };
@@ -111,7 +112,6 @@ async function guided(h: Harness, steps: number): Promise<void> {
     closeCards(h);
   }
 }
-const cardCount = (i: number): number => SCRIPT_STEPS[i]?.cards?.ids.length ?? 0;
 function backTo(h: Harness, step: number, card: number): number {
   let presses = 0;
   while (!(h.c.screen.step === step && h.c.screen.card === card) && presses < 50) {
@@ -665,29 +665,8 @@ function snap(h: Harness): Snap {
   };
 }
 
-/** The screens of a full guided run in the order a student meets them: "step.card", the bare plot of a step last. */
-function screenKeys(): string[] {
-  const keys = ['0.0'];
-  SCRIPT_STEPS.forEach((st, i) => {
-    const n = st.cards?.ids.length ?? 0;
-    for (let j = 0; j <= n; j++) if (!(n === 0 && j === 1)) keys.push(`${i + 1}.${j}`);
-  });
-  return keys;
-}
-
-/** Runs the whole guided script, and calls `at` with the snapshot of every screen on the way (step.card). */
-async function forwardRun(h: Harness, at: (key: string, s: Snap) => void): Promise<void> {
-  at('0.0', snap(h));
-  for (let i = 0; i < SCRIPT.length; i++) {
-    await run(h, formatCommand(SCRIPT[i]!));
-    const n = cardCount(i);
-    for (let j = 0; j < n; j++) {
-      at(`${i + 1}.${j}`, snap(h));                      // card j is open
-      h.c.continueCard();
-    }
-    at(`${i + 1}.${n}`, snap(h));                        // the bare plot
-  }
-}
+/** The headless station as the shared walk drives it: a typed command lets its log end on its own, Continue is the card's button. */
+const headless = (h: Harness): ScriptDriver<Snap> => ({ run: (line) => run(h, line), continueCard: () => h.c.continueCard(), snap: () => snap(h) });
 
 describe('Back at every screen of the guided script (headless; the real-terminal version is in back-dom.test.ts)', () => {
   it('the screen order has one screen per card plus one per step, and Back leaves nothing out', () => {
@@ -700,7 +679,7 @@ describe('Back at every screen of the guided script (headless; the real-terminal
   it('Back from the end shows, at every screen, exactly the station the live run had there; running forward again reproduces them all', async () => {
     const h = make();
     const live = new Map<string, Snap>();
-    await forwardRun(h, (key, s) => live.set(key, s));
+    await forwardRun(headless(h), (key, s) => live.set(key, s));
     const keys = screenKeys();
     expect([...live.keys()]).toEqual(keys);
     expect(h.c.screen).toEqual({ step: SCRIPT.length, card: cardCount(SCRIPT.length - 1) });
@@ -712,7 +691,7 @@ describe('Back at every screen of the guided script (headless; the real-terminal
     expect(h.c.canGoBack).toBe(false);
 
     const again: string[] = [];
-    await forwardRun(h, (key, s) => {
+    await forwardRun(headless(h), (key, s) => {
       again.push(key);
       expect(s, `forward again to ${key}`).toEqual(live.get(key));
     });
@@ -724,22 +703,13 @@ describe('Back at every screen of the guided script (headless; the real-terminal
     for (const from of [8, 14, 22, 31, keys.length - 1]) {   // a spread of screens, card screens and bare plots among them
       const h = make();
       const live = new Map<string, Snap>();
-      await forwardRun(h, (key, s) => live.set(key, s));
+      await forwardRun(headless(h), (key, s) => live.set(key, s));
       for (let at = keys.length - 1; at > from; at--) h.c.back();   // the station the run was in at screen `from`
       expect(snap(h), `Back to ${keys[from]}`).toEqual(live.get(keys[from]!));
       // run on from there as a student does and compare with the live run at every screen after it
       const [step, card] = keys[from]!.split('.').map(Number) as [number, number];
-      const n = step > 0 ? cardCount(step - 1) : 0;
-      for (let j = card; j < n; j++) h.c.continueCard();           // close the cards of this step that are still ahead
-      for (let i = step; i < SCRIPT.length; i++) {
-        await run(h, formatCommand(SCRIPT[i]!));
-        const m = cardCount(i);
-        for (let j = 0; j < m; j++) {
-          expect(snap(h), `from ${keys[from]} forward: ${i + 1}.${j}`).toEqual(live.get(`${i + 1}.${j}`));
-          h.c.continueCard();
-        }
-        expect(snap(h), `from ${keys[from]} forward: ${i + 1}.${m}`).toEqual(live.get(`${i + 1}.${m}`));
-      }
+      for (let j = card; j < (step > 0 ? cardCount(step - 1) : 0); j++) h.c.continueCard();   // the cards of this step that are still ahead
+      await forwardRun(headless(h), (key, s) => expect(s, `from ${keys[from]} forward: ${key}`).toEqual(live.get(key)), step);
     }
   });
 });

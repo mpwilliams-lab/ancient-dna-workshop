@@ -3,7 +3,9 @@ import { SCRIPT } from '../src/hints';
 import { formatCommand } from '../src/parser';
 import { HLA_REVEAL_LINE, HLA_TEXT_CARD } from '../src/content';
 import { CARD_IDS } from '../src/types';
-import { APP_URL, centreOf, DATA, focusLayer, idle, layersShown, plotSettled, prompt, run, watch } from './helpers';
+import {
+  APP_URL, boxes, centreOf, covers, DATA, focusLayer, idle, installBoxes, intersects, layersShown, plotSettled, prompt, run, watch, type Rect,
+} from './helpers';
 
 /**
  * Spec §5.4 fit rule of a case. 'normal': no card may need dense. 'no-scroll': no card body may overflow (dense and compact are
@@ -143,7 +145,6 @@ for (const c of cases) {
 // so the card is placed correctly at once; e2e/back.spec.ts reads the geometry with no settle at all, after a Back through two
 // bare plots and onto a card inside one task, which is where a card opened first and a hint changed after used to go wrong.
 
-interface Rect { top: number; bottom: number; left: number; right: number }
 interface CardGeometry {
   vw: number; vh: number; sh: number; sw: number;
   fit: string | null;
@@ -151,9 +152,6 @@ interface CardGeometry {
   hint: Rect | null; prompt: Rect | null;
   hintHit: boolean; promptHit: boolean;
 }
-
-const intersects = (a: Rect, b: Rect): boolean =>
-  Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
 
 /** Everything the card checks need, read in one evaluate so the numbers belong to one moment. */
 async function cardGeometry(page: Page): Promise<CardGeometry> {
@@ -288,35 +286,27 @@ for (const c of cases.filter((k) => k.name.includes('CSS 682x512') || k.name.sta
   test(`a card opened in the task that closed the one before it sits above the hint line and the prompt at once, and stays: ${c.name}`, async ({ browser }) => {
     await withPage(browser, c, async (page) => {
       const w = watch(page);
+      await installBoxes(page);
       await page.goto(`${APP_URL}?test&reset`);
       await expect(prompt(page)).toBeVisible();
       await idle(page);
       await page.evaluate(() => window.__adw!.openCard!('E1'));
       await expect(page.locator('#card[data-card-id="E1"]')).toBeVisible();
       await settle(page);   // the observer has now reported the hint's size with a card open
-      const covered = (): Promise<{ hint: boolean; prompt: boolean; hintH: number }> => page.evaluate(() => {
-        const rect = (q: string): DOMRect => document.querySelector(q)!.getBoundingClientRect();
-        const card = rect('#card');
-        const over = (b: DOMRect): boolean => Math.min(card.right, b.right) - Math.max(card.left, b.left) > 0.5 && Math.min(card.bottom, b.bottom) - Math.max(card.top, b.top) > 0.5;
-        return { hint: over(rect('#terminal .term-hint')), prompt: over(rect('#terminal .term-prompt')), hintH: rect('#terminal .term-hint').height };
-      });
-      const withCard = (await covered()).hintH;
+      const withCard = (await boxes(page)).hintH;
       for (const id of CARD_IDS.filter((x) => x !== 'E1')) {
         const same = await page.evaluate((next) => {
           (document.querySelector('#card .card-continue') as HTMLButtonElement).click();   // closes the card: the step hint, one line
-          const rect = (q: string): DOMRect => document.querySelector(q)!.getBoundingClientRect();
-          const stepHintH = rect('#terminal .term-hint').height;
+          const stepHintH = window.__boxes!().hintH;
           window.__adw!.openCard!(next);                                                    // and opens the next one in the same task
-          const card = rect('#card');
-          const over = (b: DOMRect): boolean => Math.min(card.right, b.right) - Math.max(card.left, b.left) > 0.5 && Math.min(card.bottom, b.bottom) - Math.max(card.top, b.top) > 0.5;
-          return { hint: over(rect('#terminal .term-hint')), prompt: over(rect('#terminal .term-prompt')), stepHintH };
+          return { boxes: window.__boxes!(), stepHintH };
         }, id);
         expect(same.stepHintH, `${id}: the premise, the step hint is shorter than CARD_HINT here`).toBeLessThan(withCard);
-        expect(same.hint, `${id}: the card covers the hint line in the task that opened it`).toBe(false);
-        expect(same.prompt, `${id}: the card covers the prompt row in the task that opened it`).toBe(false);
+        expect(covers(same.boxes).hint, `${id}: the card covers the hint line in the task that opened it`).toBe(false);
+        expect(covers(same.boxes).prompt, `${id}: the card covers the prompt row in the task that opened it`).toBe(false);
         await settle(page);
         await page.waitForTimeout(150);
-        const later = await covered();
+        const later = covers(await boxes(page));
         expect(later.hint, `${id}: the card covers the hint line after the page settled`).toBe(false);
         expect(later.prompt, `${id}: the card covers the prompt row after the page settled`).toBe(false);
       }

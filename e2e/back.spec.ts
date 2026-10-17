@@ -5,7 +5,7 @@ import { FEATURES } from '../src/features';
 import { NEXT_PREFIX, SCRIPT, SCRIPT_STEPS, hintText } from '../src/hints';
 import { formatCommand } from '../src/parser';
 import { derive, sessionBuildHash } from '../src/replay';
-import { APP_URL, CARD_KEY_GAP_MS, DATA, cardOpen, freshStart, idle, run, screen, watch } from './helpers';
+import { APP_URL, CARD_KEY_GAP_MS, DATA, boxes, cardOpen, covers, freshStart, idle, installBoxes, run, screen, watch } from './helpers';
 
 // e2e asserts only the shipped flag set (spec §10.3).
 test.skip(!FEATURES.back, 'the back flag is off in the shipped set');
@@ -189,36 +189,26 @@ for (const c of [NARROW, FLOOR]) {
     try {
       const page = await ctx.newPage();
       const w = watch(page);
+      await installBoxes(page);
       await loadSeeded(page, 8, 2);                         // after a refresh: E3 of Iron Age's E1-E3 is open
       await expect(page.locator('#card[data-card-id="E3"]')).toBeVisible();
       await page.waitForTimeout(300);                       // the page's ResizeObserver has reported the hint with a card open (two lines)
+      const withCard = (await boxes(page)).hintH;
       // E2, E1, Bronze Age's plot, admix1's plot, D2: the card closes at the third click and opens again at the fifth, in one task.
-      const covered = (): Promise<{ id: string | null; hint: boolean; prompt: boolean; hintH: number }> => page.evaluate(() => {
-        const rect = (q: string): DOMRect => document.querySelector(q)!.getBoundingClientRect();
-        const cardEl = document.getElementById('card')!;
-        const card = rect('#card');
-        const over = (b: DOMRect): boolean => !cardEl.hidden && Math.min(card.right, b.right) - Math.max(card.left, b.left) > 0.5 && Math.min(card.bottom, b.bottom) - Math.max(card.top, b.top) > 0.5;
-        return { id: cardEl.hidden ? null : cardEl.getAttribute('data-card-id'), hint: over(rect('#terminal .term-hint')), prompt: over(rect('#terminal .term-prompt')), hintH: rect('#terminal .term-hint').height };
-      });
-      const withCard = (await covered()).hintH;
       const now = await page.evaluate(() => {
         const back = document.getElementById('back') as HTMLButtonElement;
-        const rect = (q: string): DOMRect => document.querySelector(q)!.getBoundingClientRect();
         for (let i = 0; i < 3; i++) back.click();                    // E2, E1, Bronze Age's plot: no card is open now
-        const stepHintH = rect('#terminal .term-hint').height;
+        const stepHintH = window.__boxes!().hintH;
         for (let i = 0; i < 2; i++) back.click();                    // admix1's plot, then D2 opens
-        const cardEl = document.getElementById('card')!;
-        const card = rect('#card');
-        const over = (b: DOMRect): boolean => !cardEl.hidden && Math.min(card.right, b.right) - Math.max(card.left, b.left) > 0.5 && Math.min(card.bottom, b.bottom) - Math.max(card.top, b.top) > 0.5;
-        return { id: cardEl.hidden ? null : cardEl.getAttribute('data-card-id'), hint: over(rect('#terminal .term-hint')), prompt: over(rect('#terminal .term-prompt')), stepHintH };
+        return { id: window.__adw!.cardOpen(), boxes: window.__boxes!(), stepHintH };
       });
       expect(now.stepHintH, 'the premise: the step hint is shorter than CARD_HINT at this size').toBeLessThan(withCard);
       expect(now.id).toBe('D2');
-      expect(now.hint, 'the card covers the hint line in the task that opened it').toBe(false);
-      expect(now.prompt, 'the card covers the prompt row in the task that opened it').toBe(false);
+      expect(covers(now.boxes).hint, 'the card covers the hint line in the task that opened it').toBe(false);
+      expect(covers(now.boxes).prompt, 'the card covers the prompt row in the task that opened it').toBe(false);
       await page.waitForTimeout(300);
-      const later = await covered();
-      expect(later).toMatchObject({ id: 'D2', hint: false, prompt: false });
+      expect(await cardOpen(page)).toBe('D2');
+      expect(covers(await boxes(page)), 'the card covers the hint line or the prompt row after the page settled').toEqual({ hint: false, prompt: false });
       expect(await screen(page)).toEqual({ step: 6, card: 1 });
       expect(w.errors).toEqual([]);
     } finally {
@@ -290,6 +280,7 @@ for (const c of HEADER_VIEWPORTS) {
 test('Back walks every screen of the whole script, from a session saved at its end: the right card, hint, plot and terminal at each', async ({ page }) => {
   test.setTimeout(240_000);
   const w = watch(page);
+  await installBoxes(page);
   await loadSeeded(page, SCRIPT.length);                    // as after a refresh at the end of step 19
   const steps = SCRIPT.map((c) => ({ cmd: formatCommand(c) }));
   const screens = [{ step: 0, card: 0 }];                   // in the order a student meets them
@@ -333,20 +324,13 @@ test('Back walks every screen of the whole script, from a session saved at its e
     expect(await shownScreen(page), `${label}: terminal lines`).toEqual(await savedScreen(page));
     expect((await shownScreen(page)).length, `${label}: one saved line per step so far`).toBe(step);
     // and the page is whole
-    const geo = await page.evaluate(() => {
-      const rect = (q: string): DOMRect => document.querySelector(q)!.getBoundingClientRect();
-      const cardEl = document.getElementById('card')!;
-      const c = rect('#card');
-      const over = (b: DOMRect): boolean => !cardEl.hidden && Math.min(c.right, b.right) - Math.max(c.left, b.left) > 0.5 && Math.min(c.bottom, b.bottom) - Math.max(c.top, b.top) > 0.5;
-      return {
-        sh: document.documentElement.scrollHeight, ih: window.innerHeight, sw: document.documentElement.scrollWidth, iw: window.innerWidth,
-        hint: over(rect('#terminal .term-hint')), prompt: over(rect('#terminal .term-prompt')),
-        back: (document.getElementById('back') as HTMLButtonElement).disabled,
-      };
-    });
+    const geo = await page.evaluate(() => ({
+      sh: document.documentElement.scrollHeight, ih: window.innerHeight, sw: document.documentElement.scrollWidth, iw: window.innerWidth,
+      boxes: window.__boxes!(), back: (document.getElementById('back') as HTMLButtonElement).disabled,
+    }));
     expect(geo.sh, `${label}: page height`).toBeLessThanOrEqual(geo.ih);
     expect(geo.sw, `${label}: page width`).toBeLessThanOrEqual(geo.iw);
-    expect([geo.hint, geo.prompt], `${label}: the card covers the hint line or the prompt`).toEqual([false, false]);
+    expect(covers(geo.boxes), `${label}: the card covers the hint line or the prompt`).toEqual({ hint: false, prompt: false });
     expect(geo.back, `${label}: Back is disabled on the first screen only`).toBe(step === 0);
     await expect(page.locator('#terminal input'), label).toBeFocused();
   }

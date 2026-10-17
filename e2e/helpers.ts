@@ -140,3 +140,47 @@ export async function layersShown(page: Page): Promise<string[]> {
 export async function focusLayer(page: Page): Promise<string | null> {
   return page.locator('#plot g.layer.period[data-focus="true"]').evaluateAll((els) => (els.length === 1 ? els[0]!.getAttribute('data-layer') : els.length === 0 ? null : 'MORE THAN ONE'));
 }
+
+/** A box in CSS px, as getBoundingClientRect reports it. */
+export interface Rect { top: number; bottom: number; left: number; right: number }
+
+/** Two boxes overlap by more than half a pixel in both directions: what "the card covers the hint line (or the prompt row)" means. */
+export const intersects = (a: Rect, b: Rect): boolean =>
+  Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
+
+/** What the card checks compare: the card (null while none is shown), the hint line, the prompt row, and the hint line's height. */
+export interface Boxes { card: Rect | null; hint: Rect; prompt: Rect; hintH: number }
+
+declare global {
+  interface Window {
+    __boxes?: () => Boxes;
+  }
+}
+
+/**
+ * Puts window.__boxes() in every page the test opens from now on (call it before the first goto). A check that has to read the layout
+ * in the very task that did something, with no frame in between, must run inside one page.evaluate, and an evaluate cannot call a Node
+ * function, so the page-side reader is defined once here and called from those evaluates.
+ */
+export async function installBoxes(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const rect = (q: string): Rect => {
+      const r = document.querySelector(q)!.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+    };
+    window.__boxes = () => {
+      const card = document.getElementById('card');
+      const hint = rect('#terminal .term-hint');
+      return { card: card !== null && !card.hidden ? rect('#card') : null, hint, prompt: rect('#terminal .term-prompt'), hintH: hint.bottom - hint.top };
+    };
+  });
+}
+
+/** The boxes now (needs installBoxes). */
+export const boxes = (page: Page): Promise<Boxes> => page.evaluate(() => window.__boxes!());
+
+/** Whether the open card covers the hint line or the prompt row: both false while no card is shown. */
+export const covers = (b: Boxes): { hint: boolean; prompt: boolean } => ({
+  hint: b.card !== null && intersects(b.card, b.hint),
+  prompt: b.card !== null && intersects(b.card, b.prompt),
+});
