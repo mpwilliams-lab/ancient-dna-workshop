@@ -1,8 +1,10 @@
 // Build-time feature flags (spec v3 §10.3, CONTRACT §1). Each flag task (16-30) adds its false-path test here.
 import { describe, expect, it } from 'vitest';
+import { execute } from '../src/commands';
 import { ALL_OFF, ALL_ON, FEATURE_FLAGS, FEATURES, withFeatures, type FeatureFlag } from '../src/features';
-import { HELP_LINES, helpLines } from '../src/content';
+import { CONSUMER_BARS_LOG, HELP_LINES, helpLines } from '../src/content';
 import { ruleViolations } from './contentRules';
+import { FIXTURE } from './fixtures/fixture';
 
 // The flags switched on so far, in landing order (spec §10.3). Each P2/P3 task appends its own flag(s) in its last commit;
 // the release task (31) removes any that are cut at the merge cutoff.
@@ -103,5 +105,28 @@ describe('back (Task 17) false path', () => {
   it('the help text has no Back line without the flag, and has it with the flag', () => {
     expect(helpLines(withFeatures({ back: false })).join('\n')).not.toContain('Back button');
     expect(helpLines(withFeatures({ back: true }))).toContain('      Back button: step back one screen.');
+  });
+});
+
+describe('consumerBars (Task 18) false path', () => {
+  it('ancestry_test stays terminal-only and help has no " (bars)"', () => {
+    const off = { todayShown: false, features: withFeatures({ consumerBars: false }) };
+    for (const person of ['me', 'IronAge', 'Today'] as const) {
+      const r = execute({ name: 'ancestry_test', person }, FIXTURE, off);
+      expect(r.plot, person).toEqual({ kind: 'none' });
+      expect(r.lines, person).not.toContain(CONSUMER_BARS_LOG);
+    }
+    expect(helpLines(withFeatures({ consumerBars: false })).join('\n')).not.toContain(' (bars)');
+    expect(helpLines(withFeatures({ consumerBars: true })).join('\n')).toContain('      a consumer-style test: "me" or any period (bars)');
+  });
+  it('with the flag on, ancestry_test draws bars and no other command changes', () => {
+    const on = { todayShown: false, features: withFeatures({ consumerBars: true }, ALL_OFF) };
+    const off = { todayShown: false, features: ALL_OFF };
+    const r = execute({ name: 'ancestry_test', person: 'IronAge' }, FIXTURE, on);
+    expect(r.plot).toEqual({ kind: 'consumer', person: 'IronAge' });
+    expect(r.lines.at(-1)).toBe(CONSUMER_BARS_LOG);
+    for (const c of [{ name: 'load_genomes' }, { name: 'run_pca', period: 'IronAge' }, { name: 'run_admixture', K: 3 }, { name: 'allele_freq', gene: 'LCT' }] as const) {
+      expect(execute(c, FIXTURE, on), c.name).toEqual(execute(c, FIXTURE, off));
+    }
   });
 });

@@ -4,6 +4,7 @@ import { pcaCaptions, type PlotState } from '../plotState';
 import { PLOT_EMPTY } from '../content';
 import { renderPca, renderPcaCaptions } from './pca';
 import { renderAdmixture } from './admixture';
+import { renderConsumer } from './consumer';
 import { renderTrajectory } from './trajectory';
 import { SVG_NS } from './svg';
 import './plots.css';
@@ -18,7 +19,7 @@ function renderEmpty(host: HTMLElement): void {
   host.replaceChildren(p);
 }
 
-/** The one SVG reused across PCA/ADMIXTURE renders, so PCA frame changes can animate. */
+/** The one SVG reused across the PCA, ADMIXTURE and consumer renders, so PCA frame changes can animate. */
 function plotSvg(host: HTMLElement): SVGSVGElement {
   const existing = Array.from(host.children).find(
     (c): c is SVGSVGElement => c instanceof SVGSVGElement && c.classList.contains('plot-svg'),
@@ -51,6 +52,10 @@ export function renderPlot(host: HTMLElement, data: WorkshopData, p: PlotState, 
       const svg = plotSvg(host);
       renderAdmixture(svg, data, p);
       keepSvg(host, svg);
+    } else if (p.view === 'consumer' && p.person !== undefined) {
+      const svg = plotSvg(host);
+      renderConsumer(svg, data, p.person);
+      keepSvg(host, svg);                                      // the PCA caption strip belongs to the PCA view only
     } else {
       renderEmpty(host);
     }

@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import fixtureRaw from './fixtures/data.fixture.json';
 import type { WorkshopData, PeriodId, GeneId, ConsumerShare } from '../src/types';
 import type { Command } from '../src/parser';
-import { execute, formatCount, round10, roundPercents, asciiBar, DEFAULT_EXEC_CONTEXT, type ExecContext } from '../src/commands';
+import { execute, formatCount, round10, roundPercents, shownPercents, asciiBar, DEFAULT_EXEC_CONTEXT, type ExecContext } from '../src/commands';
 import {
   PERIOD_LABELS, MAP_GROUP_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION, HOOK_NOTE, CONSUMER_NOTE, CONSUMER_TAKEAWAY,
   ROMAN_LOG_LINE, K_REFUSAL, traitSourceLabel, EUROPE_HELD_BACK, EUROPE_ALREADY_SHOWN, TODAY_PLACED, ALL_PROJECTING,
-  ALL_TODAY_LAST, ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN, mapAxesLine, axesLine,
+  ALL_TODAY_LAST, ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN, mapAxesLine, axesLine, CONSUMER_BARS_LOG,
 } from '../src/content';
-import { FEATURES } from '../src/features';
+import { FEATURES, withFeatures } from '../src/features';
 
 const fixture = fixtureRaw as unknown as WorkshopData;
 const PERIODS: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
@@ -418,5 +418,88 @@ describe('axes lines read logs.pca_people_unique (Task 7, spec §3.5)', () => {
 
   it('round10 is exported so the run sheet shares the rule: nearest 10, a half goes up', () => {
     expect([0, 4, 5, 944, 947, 949, 950, 954, 955].map(round10)).toEqual([0, 0, 10, 940, 950, 950, 950, 950, 960]);
+  });
+});
+
+describe('shownPercents: the one place a consumer result is ordered and rounded (Task 18)', () => {
+  const s = (label: ConsumerShare['label'], share: number): ConsumerShare => ({ label, share });
+  it('highest share first, whole percents by largest remainder, labels kept', () => {
+    expect(shownPercents([s('French', 0.2022), s('British', 0.717), s('Italian', 0.0054), s('Scandinavian', 0.0755)])).toEqual([
+      { label: 'British', pct: 72 }, { label: 'French', pct: 20 }, { label: 'Scandinavian', pct: 8 }, { label: 'Italian', pct: 0 },
+    ]);
+    expect(shownPercents(ME_RESULT)).toEqual([{ label: 'British', pct: 92 }, { label: 'Scandinavian', pct: 8 }]);
+  });
+  it('equal shares keep the order they have in the data (a stable sort), and the extra percent goes to the earlier one', () => {
+    expect(shownPercents([s('Scandinavian', 0.333), s('British', 0.334), s('French', 0.333)])).toEqual([
+      { label: 'British', pct: 34 }, { label: 'Scandinavian', pct: 33 }, { label: 'French', pct: 33 },
+    ]);
+    expect(shownPercents([s('Italian', 0.125), s('Iberian', 0.125), s('British', 0.75)]).map((r) => `${r.label} ${r.pct}`))
+      .toEqual(['British 75', 'Italian 13', 'Iberian 12']);
+  });
+  it('is the order and the numbers of the terminal lines, for every period', () => {
+    for (const p of PERIODS) {
+      const lines = execute({ name: 'ancestry_test', person: p }, fixture).lines;
+      const bars = lines.filter((l) => /\[[#.]{20}\]/.test(l));
+      expect(bars, p).toEqual(
+        shownPercents(fixture.consumer[p]!).map(({ label, pct }) => `  ${label.padEnd(12)} ${asciiBar(pct)} ${String(pct).padStart(3)}%`),
+      );
+    }
+  });
+  it('an empty result gives no rows, and the input is never changed', () => {
+    expect(shownPercents([])).toEqual([]);
+    const input = [s('French', 0.25), s('British', 0.75)];
+    shownPercents(input);
+    expect(input.map((r) => r.label)).toEqual(['French', 'British']);
+  });
+});
+
+describe('ancestry_test consumer bars (Task 18, spec §3.3, §3.5)', () => {
+  const on: ExecContext = { todayShown: false, features: withFeatures({ consumerBars: true }) };
+  const off: ExecContext = { todayShown: false, features: withFeatures({ consumerBars: false }) };
+  const PEOPLE = ['me', ...PERIODS] as const;
+  it.each(PEOPLE)('%s: with the flag, bars on the plot and the log line last; terminal values unchanged', (person) => {
+    const r = execute({ name: 'ancestry_test', person }, fixture, on);
+    const r0 = execute({ name: 'ancestry_test', person }, fixture, off);
+    expect(r.plot).toEqual({ kind: 'consumer', person });
+    expect(r.lines.at(-1)).toBe(CONSUMER_BARS_LOG);
+    expect(r.lines.slice(0, -1)).toEqual(r0.lines);
+    expect(r.refused).toBe(false);
+    expect(r0.plot).toEqual({ kind: 'none' });
+    expect(r0.lines).not.toContain(CONSUMER_BARS_LOG);
+  });
+  it('the terminal lines do not depend on whether Britain today is on the map, and the log line is the only difference the flag makes', () => {
+    for (const todayShown of [false, true]) {
+      const r = execute({ name: 'ancestry_test', person: 'IronAge' }, fixture, { todayShown, features: on.features });
+      expect(r.lines.slice(0, -1)).toEqual(execute({ name: 'ancestry_test', person: 'IronAge' }, fixture, off).lines);
+    }
+  });
+  it('the other commands do not change with the flag', () => {
+    for (const c of ALL_COMMANDS.filter((x) => x.name !== 'ancestry_test')) {
+      expect(execute(c, fixture, on), formatCommandish(c)).toEqual(execute(c, fixture, off));
+    }
+  });
+  it('a refused ancestry_test draws nothing, even with the flag', () => {
+    for (const person of ['IronAge', 'Today'] as const) {
+      for (const d of [withConsumer(fixture, person, undefined), withConsumer(fixture, person, [])]) {
+        const r = execute({ name: 'ancestry_test', person }, d, on);
+        expect(r.refused, person).toBe(true);
+        expect(r.plot, person).toEqual({ kind: 'none' });
+        expect(r.lines, person).toEqual([`No consumer-test result for ${PERIOD_LABELS[person]} in this build.`]);
+      }
+    }
+  });
+  it('the shipped flags are the default context, so an execute call with no context follows them', () => {
+    expect(DEFAULT_EXEC_CONTEXT.features).toBe(FEATURES);
+    const r = execute({ name: 'ancestry_test', person: 'IronAge' }, fixture);
+    expect(r.plot).toEqual(FEATURES.consumerBars ? { kind: 'consumer', person: 'IronAge' } : { kind: 'none' });
+    expect(r.lines.includes(CONSUMER_BARS_LOG)).toBe(FEATURES.consumerBars);
+  });
+  it('every log line, the new one too, breaks no content rule', () => {
+    for (const person of PEOPLE) {
+      for (const line of execute({ name: 'ancestry_test', person }, fixture, on).lines) {
+        expect(rule1Violations(line), line).toEqual([]);
+        expect(rawIdViolations(line), line).toEqual([]);
+      }
+    }
   });
 });

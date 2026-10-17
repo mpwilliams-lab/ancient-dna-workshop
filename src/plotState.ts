@@ -11,7 +11,7 @@ import {
 export type PcaFocus = PeriodId | 'Europe' | 'all';
 
 export interface PlotState {
-  view: 'none' | 'pca' | 'admixture' | 'trait' | 'consumer';   // 'consumer' is set by Task 18 (consumerBars)
+  view: 'none' | 'pca' | 'admixture' | 'trait' | 'consumer';   // 'consumer': ancestry_test's bars (only with consumerBars)
   layers: PeriodId[];            // time order; 'Today' only once run_pca(Today) or run_pca(all) has run
   focus?: PcaFocus;              // the period just run on the PCA
   frame: FrameId; showNorthSea: boolean;
@@ -46,7 +46,9 @@ function withoutAdmixPeriod(s: PlotState): PlotState {
  * - run_pca(Europe): view pca, focus Europe, frame europe, layers unchanged.
  * - run_pca(all): all eight layers, focus all, frame europe, North Sea marker on.
  * - run_admixture(K = 3): bars = admixBars(s); the first mean-bar call outlines nothing, later calls outline new bars.
- * - run_admixture(K = 3, period = P), allele_freq: unchanged from v2.1. The consumer view arrives with Task 18.
+ * - run_admixture(K = 3, period = P), allele_freq: unchanged from v2.1.
+ * - ancestry_test (only with consumerBars, which is when execute emits the action): view consumer, person set; the layers, frame,
+ *   focus and ADMIXTURE bars are kept, so the next PCA or ADMIXTURE run carries on from them.
  */
 export function reducePlot(s: PlotState, a: PlotAction, data: WorkshopData): PlotState {
   const known = new Set(data.periods.map((p) => p.id));
@@ -79,6 +81,11 @@ export function reducePlot(s: PlotState, a: PlotAction, data: WorkshopData): Plo
     case 'trait': {
       if (!GENE_IDS.includes(a.gene)) return s;
       return { ...s, view: 'trait', gene: a.gene };
+    }
+    case 'consumer': {
+      // Spec §2.3 "Other views": ancestry_test draws consumer bars (P2). Only view and person change.
+      if (a.person !== 'me' && !known.has(a.person)) return s;
+      return { ...s, view: 'consumer', person: a.person };
     }
     default:
       return s;

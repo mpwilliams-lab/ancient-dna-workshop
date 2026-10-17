@@ -15,7 +15,8 @@ import { mulberry32 } from './helpers/rng';
 import { cardCount, forwardRun, screenKeys, screensOf, standingOn, type ScriptDriver } from './helpers/script';
 
 const FILE_URL = 'file:///C:/Users/lab/Desktop/ancient-dna-workshop.html';
-const FEATS = withFeatures({ back: true }, ALL_OFF);
+// consumerBars is on as well: the hook and the Iron Age test draw bars, so every walk, Back and refresh below also compares those plots.
+const FEATS = withFeatures({ back: true, consumerBars: true }, ALL_OFF);
 
 let store: MemStore;
 const clock = { t: 0 };
@@ -142,6 +143,36 @@ describe('Back on the real page: spec §4.5 test 1, at every screen', () => {
     const [step, cardIndex] = keys[from]!.split('.').map(Number) as [number, number];
     for (let j = cardIndex; j < cardCount(step - 1); j++) cardButton('card-continue').click();   // the cards of this step still ahead
     await forwardRun(dom(app), (key, s) => expect(s, `forward ${key}`).toEqual(live.get(key)), step);
+  });
+});
+
+describe('the consumer bars on the real page (Task 18, RF1: Back, replay and refresh bring the view back)', () => {
+  const rowsOnPage = (s: Shot): number => (s.plot.match(/class="consumer-bar"/g) ?? []).length;
+
+  it('the bars are the page after the hook, after load_genomes and after the Iron Age test, and at no other screen', async () => {
+    const { live, keys } = await liveRun();
+    const withBars = keys.filter((k) => live.get(k)!.plot.includes('data-view="consumer"'));
+    expect(withBars).toEqual(['1.0', '2.0', '9.0']);                 // the hook's bars stay while load_genomes draws nothing, until the Europe map
+    expect(live.get('1.0')!.plot).toContain('data-person="me"');
+    expect(live.get('2.0')!.plot).toBe(live.get('1.0')!.plot);
+    expect(live.get('9.0')!.plot).toContain('data-person="IronAge"');
+    expect([1, 2, 9].map((i) => rowsOnPage(live.get(`${i}.0`)!))).toEqual([2, 2, FIXTURE.consumer.IronAge!.length]);
+    expect(live.get('9.0')!.lines.at(-1)).toMatch(/Drawing the result as bars\.$/);
+    expect(live.get('10.0')!.plot).not.toContain('consumer');         // the reveal's Britain-today map replaces them
+  });
+
+  it('Back from the reveal shows the Iron Age bars again, as the live run had them; a refresh there, and at the hook, shows the same page', async () => {
+    const { app, live, keys } = await liveRun();
+    while (shot(app).screen.step > 9) (shot(app).cardOpen !== null ? cardButton('card-back') : backButton()).click();
+    expect(shot(app).plot, 'Back to the Iron Age test').toEqual(live.get('9.0')!.plot);
+    expect(shot(app)).toEqual(live.get('9.0'));
+    let page = start();                                    // F5 here
+    expect(shot(page, false)).toEqual({ ...live.get('9.0')!, prompt: null });
+    expect(rowsOnPage(shot(page, false))).toBe(FIXTURE.consumer.IronAge!.length);
+    while (page.controller.screen.step > 1) backButton().click();
+    page = start();                                        // F5 at the hook
+    expect(shot(page, false)).toEqual({ ...live.get(keys[1]!)!, prompt: null });
+    expect(shot(page, false).plot).toContain('data-person="me"');
   });
 });
 

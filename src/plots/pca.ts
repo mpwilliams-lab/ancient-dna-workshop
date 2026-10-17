@@ -4,7 +4,7 @@ import {
   EAST_ENGLAND_LEGEND, LEGEND_ANCIENT, LEGEND_LIVING, MAP_GROUP_LABELS, NORTH_SEA_LABEL, PCA_CAPTION, PERIOD_LABELS, withN,
 } from '../content';
 import { chipElement } from '../icons';
-import { INK, MAP_GREY, PERIOD_COLORS, PERIOD_SHAPES, shapePath, svgEl, wireTips } from './svg';
+import { INK, MAP_GREY, PERIOD_COLORS, PERIOD_SHAPES, clearPlotMarkers, shapePath, svgEl, wireTips } from './svg';
 
 /**
  * Plot box inside the fixed 1000 x 760 viewBox (spec §2.3). The plot box is unchanged from v2.1; legend rows run under
@@ -140,10 +140,11 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState, 
   const fr = data.frames[p.frame];
   const sc = makeScale(fr);
   // Only an svg that currently shows a PCA has a frame worth animating from: data-frame can be a stale leftover
-  // once the bars or a trait plot have used the same svg. Read both attributes before they are overwritten below.
+  // once the bars or a trait plot have used the same svg. Read both attributes before the markers are cleared below.
   const prevFrameId = svg.getAttribute('data-view') === 'pca' ? svg.getAttribute('data-frame') : null;
   const prev = prevFrameId === 'europe' || prevFrameId === 'britain' ? data.frames[prevFrameId] : undefined;
 
+  clearPlotMarkers(svg); // the bars (ADMIXTURE or consumer) may have used this svg just before
   svg.setAttribute('viewBox', `0 0 ${PCA_VIEW.width} ${PCA_VIEW.height}`);
   // Top-anchored: the caption strip under the svg changes height from step to step, which changes the svg's free height,
   // and a vertically centred plot would jump with it.
@@ -153,8 +154,6 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState, 
   svg.setAttribute('data-view', 'pca');
   svg.setAttribute('data-frame', p.frame);
   if (p.focus !== undefined) svg.setAttribute('data-focus', p.focus);
-  else svg.removeAttribute('data-focus');
-  svg.removeAttribute('data-callout'); // an ADMIXTURE marker: the bars may have used this svg just before
   svg.replaceChildren();
 
   const defs = svgEl('defs');

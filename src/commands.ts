@@ -1,9 +1,9 @@
-import type { WorkshopData, PeriodId, GeneId, ConsumerShare } from './types';
+import type { WorkshopData, PeriodId, GeneId, ConsumerLabel, ConsumerShare } from './types';
 import { PERIOD_IDS, GENE_IDS } from './types';
 import type { Command, PcaPeriod } from './parser';
 import {
   PERIOD_LABELS, MAP_GROUP_LABELS, SOURCE_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION,
-  CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_NOTE, ROMAN_LOG_LINE, K_REFUSAL, consumerTitle, traitSourceLabel,
+  CONSUMER_BARS_LOG, CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_NOTE, ROMAN_LOG_LINE, K_REFUSAL, consumerTitle, traitSourceLabel,
   europeProjectingLine, EUROPE_HELD_BACK, EUROPE_ALREADY_SHOWN, TODAY_PLACED, ALL_PROJECTING, ALL_TODAY_LAST,
   ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN, mapAxesLine, axesLine,
 } from './content';
@@ -14,7 +14,7 @@ export type PlotAction =
   | { kind: 'pca'; period: PcaPeriod }
   | { kind: 'admixture'; period?: PeriodId }
   | { kind: 'trait'; gene: GeneId }
-  | { kind: 'consumer'; person: PeriodId | 'me' };   // declared now; emitted only with features.consumerBars (Task 18)
+  | { kind: 'consumer'; person: PeriodId | 'me' };   // ancestry_test draws bars: emitted only with features.consumerBars (spec §2.3)
 export interface CommandResult { lines: string[]; plot: PlotAction; refused: boolean; clear: boolean }
 
 /**
@@ -59,6 +59,17 @@ export function roundPercents(shares: number[]): number[] {
   return cells.map((c) => c.pct);
 }
 
+/**
+ * A consumer result as it is shown: highest share first (a stable sort, so equal shares keep the order they have in the data),
+ * each with its whole percent from roundPercents. The terminal's bar lines, the consumer bars on the plot and the run sheet all
+ * read this one function, so what is printed, what is drawn and what the instructor reads out cannot disagree.
+ */
+export function shownPercents(shares: readonly ConsumerShare[]): { label: ConsumerLabel; pct: number }[] {
+  const sorted = [...shares].sort((a, b) => b.share - a.share);
+  const pcts = roundPercents(sorted.map((s) => s.share));
+  return sorted.map((s, i) => ({ label: s.label, pct: pcts[i] ?? 0 }));
+}
+
 /** 92 -> "[##################..]" (20 characters between the brackets, plain ASCII). */
 export function asciiBar(pct: number): string {
   const k = Math.min(BAR_WIDTH, Math.max(0, Math.round((Number.isFinite(pct) ? pct : 0) / 5)));
@@ -69,13 +80,8 @@ function nPca(data: WorkshopData, id: PeriodId): number { return data.periods.fi
 function nAdmix(data: WorkshopData, id: PeriodId): number { return data.periods.find((p) => p.id === id)?.n_admix ?? 0; }
 function periodRow(label: string, n: number): string { return `  ${label.padEnd(LABEL_WIDTH)}${formatCount(n)}`; }
 
-function shareLines(shares: ConsumerShare[]): string[] {
-  const sorted = [...shares].sort((a, b) => b.share - a.share);
-  const pcts = roundPercents(sorted.map((s) => s.share));
-  return sorted.map((s, i) => {
-    const pct = pcts[i] ?? 0;
-    return `  ${s.label.padEnd(12)} ${asciiBar(pct)} ${String(pct).padStart(3)}%`;
-  });
+function shareLines(shares: readonly ConsumerShare[]): string[] {
+  return shownPercents(shares).map(({ label, pct }) => `  ${label.padEnd(12)} ${asciiBar(pct)} ${String(pct).padStart(3)}%`);
 }
 
 function loadGenomes(data: WorkshopData): CommandResult {
@@ -144,7 +150,14 @@ function alleleFreq(data: WorkshopData, gene: GeneId): CommandResult {
   ], { kind: 'trait', gene });
 }
 
-function ancestryTest(data: WorkshopData, person: PeriodId | 'me'): CommandResult {
+/**
+ * ancestry_test. The terminal lines are the same with and without consumerBars. With the flag, the result is also drawn as bars
+ * (the plot action, spec §2.3) and one line is appended (spec §3.5); a refused test draws nothing.
+ */
+function ancestryTest(data: WorkshopData, person: PeriodId | 'me', features: Features): CommandResult {
+  const bars = features.consumerBars;
+  const tail = bars ? [CONSUMER_BARS_LOG] : [];
+  const plot: PlotAction = bars ? { kind: 'consumer', person } : NONE;
   if (person === 'me') {
     // The hook screen shows only one sentence of the note: the rest is the Beat 4 debrief and waits for a period's result.
     return ok([
@@ -153,7 +166,8 @@ function ancestryTest(data: WorkshopData, person: PeriodId | 'me'): CommandResul
       ...shareLines(ME_RESULT),
       HOOK_QUESTION,
       HOOK_NOTE,
-    ]);
+      ...tail,
+    ], plot);
   }
   // Every period, Today included, has a consumer entry (spec v2.1 §5.3), so Today is not a special case.
   const shares = data.consumer[person];
@@ -164,7 +178,8 @@ function ancestryTest(data: WorkshopData, person: PeriodId | 'me'): CommandResul
     ...shareLines(shares),
     CONSUMER_TAKEAWAY,
     CONSUMER_NOTE,
-  ]);
+    ...tail,
+  ], plot);
 }
 
 /** Runs one parsed command against the precomputed data. Pure (reads only c, data and ctx). Never throws. */
@@ -184,7 +199,7 @@ export function execute(c: Command, data: WorkshopData, ctx: ExecContext = DEFAU
         if (isGene(c.gene)) return alleleFreq(data, c.gene);
         break;
       case 'ancestry_test':
-        if (c.person === 'me' || isPeriod(c.person)) return ancestryTest(data, c.person);
+        if (c.person === 'me' || isPeriod(c.person)) return ancestryTest(data, c.person, ctx.features);
         break;
     }
   } catch {

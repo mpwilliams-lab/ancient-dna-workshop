@@ -118,6 +118,21 @@ export function shapePath(shape: Shape, x: number, y: number, r: number): string
   }
 }
 
+/**
+ * The marker attributes a view leaves on the one svg the router reuses for the PCA, the ADMIXTURE bars and the consumer bars:
+ * the PCA's data-frame and data-focus, the ADMIXTURE data-callout, the consumer bars' data-person and the finale's
+ * data-animating. (data-view is not one of them: every renderer sets its own name.)
+ */
+export const PLOT_MARKERS = ['data-frame', 'data-focus', 'data-callout', 'data-person', 'data-animating'] as const;
+
+/**
+ * Every renderer calls this first and then sets the markers it owns, so a marker can never outlive its view, whichever view
+ * drew the svg before. Anything that must be read from the previous draw (the PCA's previous frame) is read before the call.
+ */
+export function clearPlotMarkers(svg: SVGSVGElement): void {
+  for (const a of PLOT_MARKERS) svg.removeAttribute(a);
+}
+
 const wired = new WeakSet<SVGSVGElement>();
 
 /**

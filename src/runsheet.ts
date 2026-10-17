@@ -6,7 +6,7 @@ import type { Command } from './parser';
 import { formatCommand } from './parser';
 import { EXTRA_PREFIX, EXTRAS, NEXT_PREFIX, SCRIPT, SCRIPT_STEPS } from './hints';
 import { CARDS, cardVars } from './cards';
-import { execute, round10, roundPercents } from './commands';
+import { execute, round10, shownPercents } from './commands';
 import { INITIAL_PLOT, reducePlot, steppePct } from './plotState';
 import {
   CARD_HINT, CONSUMER_TAKEAWAY, HOOK_QUESTION, ME_RESULT, NORTH_SEA_LABEL, PAGES_URL, PERIOD_LABELS, PREDICT_HINT, RESTORED_NOTICE,
@@ -149,14 +149,12 @@ export const OPEN_CHECKS: readonly OpenCheck[] = [
 ];
 
 /**
- * A consumer result as the terminal prints it: highest share first, whole percents by largest remainder (commands.ts
- * roundPercents, the same call as the terminal's bar lines). One rounding rule, so what the instructor reads out from the
- * sheet is what is on the projector.
+ * A consumer result as the terminal prints it and the consumer bars draw it (commands.ts shownPercents: highest share first,
+ * whole percents by largest remainder). One ordering and one rounding rule, so what the instructor reads out from the sheet is
+ * what is on the projector.
  */
-function shownShares(rows: ConsumerShare[] | undefined): { label: ConsumerShare['label']; pct: number }[] {
-  const sorted = [...(rows ?? [])].sort((a, b) => b.share - a.share);
-  const pcts = roundPercents(sorted.map((r) => r.share));
-  return sorted.map((r, i) => ({ label: r.label, pct: pcts[i] ?? 0 }));
+function shownShares(rows: readonly ConsumerShare[] | undefined): { label: ConsumerShare['label']; pct: number }[] {
+  return shownPercents(rows ?? []);
 }
 function share(rows: ConsumerShare[] | undefined, label: ConsumerShare['label']): number {
   return shownShares(rows).find((r) => r.label === label)?.pct ?? 0;

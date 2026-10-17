@@ -3,7 +3,7 @@ import { admixBars, admixCallout, steppePct, type PlotState } from '../plotState
 import {
   ANGLO_SAXON_TAKEAWAY, BEAKER_CALLOUT, PERIOD_LABELS, REVEAL_CALLOUT, SOURCE_LABELS, admixPeopleTitle, revealNote, steppePctLabel,
 } from '../content';
-import { INK, SOURCE_COLORS, svgEl, textBlock, wrapText } from './svg';
+import { INK, SOURCE_COLORS, clearPlotMarkers, svgEl, textBlock, wrapText } from './svg';
 
 /**
  * barsBottom leaves room below the bars for the bar labels (up to four lines for the longest period name when all
@@ -52,12 +52,11 @@ function barOf(data: WorkshopData, id: PeriodId): AdmixBar | undefined {
 }
 
 export function renderAdmixture(svg: SVGSVGElement, data: WorkshopData, p: PlotState): void {
+  clearPlotMarkers(svg); // the PCA's frame and focus, the consumer bars' person: the next PCA must not animate from a stale frame
   svg.setAttribute('viewBox', `0 0 ${ADMIX_VIEW.width} ${ADMIX_VIEW.height}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet'); // the bars stay centred; the PCA sets its own (top-anchored) value
   svg.setAttribute('role', 'img');
   svg.setAttribute('data-view', 'admixture');
-  svg.removeAttribute('data-frame'); // the next PCA render must not animate from a stale frame
-  svg.removeAttribute('data-focus'); // a PCA marker too: the bars have no focus layer
   svg.replaceChildren();
 
   // Legend: the three sources, once.

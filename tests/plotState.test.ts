@@ -6,6 +6,7 @@ import { PERIOD_FRAME } from '../src/types';
 import type { Command, PcaPeriod } from '../src/parser';
 import type { PlotAction } from '../src/commands';
 import { execute } from '../src/commands';
+import { withFeatures } from '../src/features';
 import { advance, SCRIPT } from '../src/hints';
 import {
   CHIP_DNA_CHANGED, CHIP_DNA_CHANGED_EAST, EUROPE_CAPTION, FINALE_CAPTION, PCA_CAPTION, REVEAL_PCA_CAPTION,
@@ -148,13 +149,12 @@ describe('reducePlot: PCA layers, focus and frames', () => {
     expect(back.view).toBe('pca');
     expect(back.layers).toEqual(['IronAge', 'Roman', 'AngloSaxon']);
   });
-  it('an unknown period, gene or action leaves the state untouched; a consumer action does nothing until Task 18', () => {
+  it('an unknown period, gene or action leaves the state untouched', () => {
     const s = run([pca('IronAge')]);
     expect(reducePlot(s, { kind: 'pca', period: 'Neolithic' } as unknown as PlotAction, data)).toBe(s);
     expect(reducePlot(s, { kind: 'admixture', period: 'Neolithic' } as unknown as PlotAction, data)).toBe(s);
     expect(reducePlot(s, { kind: 'trait', gene: 'XYZ' } as unknown as PlotAction, data)).toBe(s);
     expect(reducePlot(s, { kind: 'bogus' } as unknown as PlotAction, data)).toBe(s);
-    expect(reducePlot(s, { kind: 'consumer', person: 'IronAge' }, data)).toBe(s);
   });
   it('never mutates the previous state', () => {
     const s = deepFreeze(run([pca('IronAge')]));
@@ -369,5 +369,76 @@ describe('RF2: free-pacing sequences through execute -> reducePlot -> advance', 
     expect(plot.layers).toEqual(PERIODS);
     expect(plot.focus).toBe('Europe');
     for (const id of PERIODS) expect(layerOpacity(plot, id)).toBe('1');
+  });
+});
+
+describe('consumer view (Task 18)', () => {
+  const cons = (person: PeriodId | 'me'): PlotAction => ({ kind: 'consumer', person });
+  it('sets view and person and changes nothing else', () => {
+    const s = run([pca('IronAge'), adm()]);
+    const c = reducePlot(s, cons('IronAge'), data);
+    expect(c).toEqual({ ...s, view: 'consumer', person: 'IronAge' });
+    expect(reducePlot(INITIAL_PLOT, cons('me'), data)).toEqual({ ...INITIAL_PLOT, view: 'consumer', person: 'me' });
+  });
+  it('accepts "me" and every period, Britain today too, and never adds a layer', () => {
+    for (const person of [...PERIODS, 'me' as const]) {
+      const c = reducePlot(INITIAL_PLOT, cons(person), data);
+      expect([c.view, c.person, c.layers], person).toEqual(['consumer', person, []]);
+      expect(todayShown(c), person).toBe(false);
+    }
+  });
+  it('an unknown person leaves the state as it is', () => {
+    expect(reducePlot(INITIAL_PLOT, { kind: 'consumer', person: 'Mars' as never }, data)).toBe(INITIAL_PLOT);
+    const s = run([pca('IronAge')]);
+    expect(reducePlot(s, { kind: 'consumer', person: 'Neolithic' as never }, data)).toBe(s);
+  });
+  it('the next PCA run leaves the consumer view, and keeps the layers and frame it had', () => {
+    const c = run([pca('IronAge'), cons('IronAge')]);
+    const next = reducePlot(c, pca('Roman'), data);
+    expect([next.view, next.layers, next.focus, next.frame]).toEqual(['pca', ['IronAge', 'Roman'], 'Roman', 'britain']);
+    expect(reducePlot(reducePlot(INITIAL_PLOT, cons('me'), data), pca('Europe'), data).view).toBe('pca');
+  });
+  it('the next ADMIXTURE run leaves it too, and the bars carry on from the ones drawn before it', () => {
+    const before = run([pca('IronAge'), adm()]);
+    expect(run([cons('IronAge'), adm()], before)).toEqual({ ...run([adm()], before), person: 'IronAge' });
+    expect(reducePlot(reducePlot(INITIAL_PLOT, cons('me'), data), adm('BellBeaker'), data).view).toBe('admixture');
+  });
+  it('a trait after it leaves it', () => {
+    expect(run([cons('me'), { kind: 'trait', gene: 'LCT' }]).view).toBe('trait');
+  });
+  it('is the same view again when repeated, and a second person replaces the first', () => {
+    const once = run([cons('IronAge')]);
+    expect(reducePlot(once, cons('IronAge'), data)).toEqual(once);
+    expect(reducePlot(once, cons('Today'), data)).toEqual({ ...once, person: 'Today' });
+  });
+  it('never mutates the previous state', () => {
+    const s = deepFreeze(run([pca('IronAge'), adm()]));
+    expect(() => reducePlot(s, cons('Viking'), data)).not.toThrow();
+    expect(s.view).toBe('admixture');
+    expect(s.person).toBeUndefined();
+  });
+  it('the guided path: the hook and the Iron Age test draw bars, and the layers are the ones the PCA steps made', () => {
+    // Under the shipped flags (consumerBars on) execute emits the action; with the flag off the plot is left alone.
+    const on = { todayShown: false, features: withFeatures({ consumerBars: true }) };
+    const off = { todayShown: false, features: withFeatures({ consumerBars: false }) };
+    const walk = (ctx: typeof on): PlotState[] => {
+      let plot = INITIAL_PLOT;
+      return SCRIPT.map((c) => (plot = reducePlot(plot, execute(c, data, ctx).plot, data)));
+    };
+    const bars = walk(on);
+    const plain = walk(off);
+    const hook = SCRIPT.findIndex((c) => c.name === 'ancestry_test' && c.person === 'me');
+    const ironAge = SCRIPT.findIndex((c) => c.name === 'ancestry_test' && c.person === 'IronAge');
+    expect([bars[hook]!.view, bars[hook]!.person]).toEqual(['consumer', 'me']);
+    expect([bars[ironAge]!.view, bars[ironAge]!.person]).toEqual(['consumer', 'IronAge']);
+    SCRIPT.forEach((c, k) => {
+      const view = bars[k]!.view;
+      if (c.name === 'ancestry_test') expect(view, `step ${k}`).toBe('consumer');
+      else if (c.name === 'load_genomes') expect(view, `step ${k}: draws nothing, so the plot stays`).toBe(k === 0 ? 'none' : bars[k - 1]!.view);
+      else expect(view, `step ${k}: every other command draws its own view`).not.toBe('consumer');
+    });
+    expect(plain.map((p) => p.view)).not.toContain('consumer');
+    // Only view and person differ between the two walks: the layers are never touched by the consumer view.
+    bars.forEach((p, k) => expect({ ...p, view: undefined, person: undefined }, `step ${k}`).toEqual({ ...plain[k]!, view: undefined, person: undefined }));
   });
 });

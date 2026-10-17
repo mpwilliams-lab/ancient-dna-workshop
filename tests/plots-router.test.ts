@@ -5,6 +5,7 @@ import type { GeneId, PeriodId, WorkshopData } from '../src/types';
 import type { PlotAction } from '../src/commands';
 import type { PcaPeriod } from '../src/parser';
 import { INITIAL_PLOT, admixCallout, pcaCaptions, reducePlot, type PcaCaptionItem, type PlotState } from '../src/plotState';
+import { consumerRows } from '../src/plots/consumer';
 import { finishPlotAnimations, plotIsAnimating, renderPlot } from '../src/plots/index';
 import {
   CHIP_TEXT, EUROPE_CAPTION, FINALE_CAPTION, PCA_CAPTION, PLOT_EMPTY, REVEAL_PCA_CAPTION, ROMAN_FOCUS_CAPTION,
@@ -50,6 +51,7 @@ function checkRendered(h: HTMLElement, s: PlotState, d: WorkshopData): void {
     const svg = h.querySelector('svg.plot-svg')!;
     expect(svg.getAttribute('data-frame')).toBe(s.frame);
     expect(svg.hasAttribute('data-callout')).toBe(false); // an ADMIXTURE marker: never left over on the PCA
+    expect(svg.hasAttribute('data-person')).toBe(false);  // nor the consumer bars' marker
     const inOrder = ORDER.filter((id) => s.layers.includes(id));
     const f = inOrder.find((id) => id === s.focus);
     expect([...svg.querySelectorAll('g.layer.period')].map((g) => g.getAttribute('data-layer')))
@@ -67,6 +69,7 @@ function checkRendered(h: HTMLElement, s: PlotState, d: WorkshopData): void {
     const callout = admixCallout(s, d).kind;
     expect(svg.hasAttribute('data-frame')).toBe(false);
     expect(svg.hasAttribute('data-focus')).toBe(false);
+    expect(svg.hasAttribute('data-person')).toBe(false);
     expect(svg.getAttribute('data-callout')).toBe(callout);
     expect(svg.querySelectorAll('text.admix-callout')).toHaveLength(callout === 'none' ? 0 : 1);
     expect(svg.querySelectorAll('text.admix-reveal-note')).toHaveLength(callout === 'reveal' ? 1 : 0);
@@ -82,6 +85,17 @@ function checkRendered(h: HTMLElement, s: PlotState, d: WorkshopData): void {
   }
   if (s.view === 'trait') {
     expect(h.querySelector('.traj')?.getAttribute('data-gene')).toBe(s.gene);
+  }
+  if (s.view === 'consumer') {
+    expect(h.children).toHaveLength(1); // no caption strip on the bars either
+    const svg = h.querySelector('svg.plot-svg')!;
+    // Every marker of the other views is gone; the bars carry only their own.
+    for (const a of ['data-frame', 'data-focus', 'data-callout', 'data-animating']) expect(svg.hasAttribute(a), a).toBe(false);
+    expect(svg.getAttribute('data-view')).toBe('consumer');
+    expect(svg.getAttribute('data-person')).toBe(s.person);
+    const rows = consumerRows(d, s.person!);
+    expect([...svg.querySelectorAll('g.consumer-bar')].map((g) => [g.getAttribute('data-label'), g.getAttribute('data-pct')]))
+      .toEqual(rows.map((r) => [r.label, String(r.pct)]));
   }
 }
 
@@ -100,6 +114,7 @@ function play(actions: PlotAction[]): void {
 const pca = (period: PcaPeriod): PlotAction => ({ kind: 'pca', period });
 const adm = (period?: PeriodId): PlotAction => (period ? { kind: 'admixture', period } : { kind: 'admixture' });
 const trait = (gene: GeneId): PlotAction => ({ kind: 'trait', gene });
+const cons = (person: PeriodId | 'me'): PlotAction => ({ kind: 'consumer', person });
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -227,6 +242,75 @@ describe('RF2: out-of-order commands under free pacing', () => {
   it('per-person view in any order, including a period with no per-person data', () =>
     play([adm('BellBeaker'), pca('Viking'), adm('Today'), adm('IronAge'), adm(), pca('BronzeAge')]));
   it('traits interleaved with maps', () => play([trait('HLA-DQ2'), pca('AngloSaxon'), trait('HERC2'), adm(), trait('SLC45A2'), pca('Viking')]));
+  it('the consumer bars in the guided order: the hook first, then the Iron Age test between the PCA and the reveal', () =>
+    play([cons('me'), pca('Europe'), pca('IronAge'), cons('IronAge'), pca('Today'), adm()]));
+  it('the consumer bars between the other views, in any order', () =>
+    play([cons('IronAge'), adm(), cons('Today'), trait('LCT'), cons('me'), pca('Roman'), cons('Roman'), adm('BellBeaker'), cons('Viking'), pca('all')]));
+  it('every person in a row, then a PCA', () => play([cons('me'), ...ORDER.map(cons), pca('IronAge')]));
+  it('the same bars twice, and a second person on the same svg', () => play([cons('IronAge'), cons('IronAge'), cons('FirstFarmers'), cons('me')]));
+});
+
+describe('the one svg: every view clears the markers of the others, whichever view came before', () => {
+  type View = 'pca' | 'admixture' | 'consumer';
+  const MARKERS = ['data-frame', 'data-focus', 'data-callout', 'data-person', 'data-animating'];
+  const VIEW_ACTIONS: Record<View, PlotAction> = { pca: pca('IronAge'), admixture: adm(), consumer: cons('IronAge') };
+  // The data-* markers each view leaves on the svg (and nothing else): data-view is the view's own name, not a marker to clear.
+  const OWN: Record<View, string[]> = {
+    pca: ['data-view', 'data-frame', 'data-focus'],
+    admixture: ['data-view', 'data-callout'],
+    consumer: ['data-view', 'data-person'],
+  };
+  const dataAttrs = (e: Element): string[] => [...e.attributes].map((a) => a.name).filter((n) => n.startsWith('data-')).sort();
+  const VIEWS: View[] = ['pca', 'admixture', 'consumer'];
+
+  it.each(VIEWS.flatMap((a) => VIEWS.map((b) => [a, b] as const)))('%s, then %s: only the second view\'s own markers are left, and a stale flag is gone', (a, b) => {
+    const d = data();
+    const h = host();
+    let s = reducePlot(INITIAL_PLOT, pca('IronAge'), d);
+    s = reducePlot(s, VIEW_ACTIONS[a], d);
+    renderPlot(h, d, s);
+    const svg = h.querySelector('svg.plot-svg')!;
+    expect(dataAttrs(svg), `after the ${a} view`).toEqual([...OWN[a]].sort());
+    for (const m of MARKERS) svg.setAttribute(m, 'stale');          // whatever a view or a running animation left behind
+    s = reducePlot(s, VIEW_ACTIONS[b], d);
+    renderPlot(h, d, s);
+    expect(h.querySelector('svg.plot-svg'), 'the svg is reused').toBe(svg);
+    expect(dataAttrs(svg), `after the ${a} view, then the ${b} view`).toEqual([...OWN[b]].sort());
+    expect(svg.getAttribute('data-view')).toBe(b);
+  });
+
+  it('the consumer view sets its own aspect ratio and role, and the PCA that follows sets the top-anchored one again', () => {
+    const d = data();
+    const h = host();
+    let s = reducePlot(INITIAL_PLOT, cons('IronAge'), d);
+    renderPlot(h, d, s);
+    const svg = h.querySelector('svg.plot-svg')!;
+    expect([svg.getAttribute('viewBox'), svg.getAttribute('preserveAspectRatio'), svg.getAttribute('role')]).toEqual(['0 0 1000 700', 'xMidYMid meet', 'img']);
+    s = reducePlot(s, pca('Today'), d);
+    renderPlot(h, d, s);
+    expect([svg.getAttribute('viewBox'), svg.getAttribute('preserveAspectRatio')]).toEqual(['0 0 1000 760', 'xMidYMin meet']);
+    expect(svg.getAttribute('data-frame')).toBe('britain');       // and the PCA's own marker is back
+  });
+
+  it('a PCA drawn after the bars does not animate from a stale frame', () => {
+    const animate = vi.fn();
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'animate');
+    Object.defineProperty(Element.prototype, 'animate', { value: animate, configurable: true, writable: true });
+    try {
+      const d = data();
+      const h = host();
+      let s = reducePlot(INITIAL_PLOT, pca('FirstFarmers'), d);         // the Europe frame
+      renderPlot(h, d, s);
+      s = reducePlot(s, cons('IronAge'), d);
+      renderPlot(h, d, s);
+      s = reducePlot(s, pca('IronAge'), d);                              // the British frame, straight after the bars
+      renderPlot(h, d, s);
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      if (original) Object.defineProperty(Element.prototype, 'animate', original);
+      else delete (Element.prototype as unknown as { animate?: unknown }).animate;
+    }
+  });
 });
 
 describe('caption strip: text that depends on what has been run (spec §2.3, free pacing)', () => {
@@ -294,7 +378,7 @@ describe('caption strip: text that depends on what has been run (spec §2.3, fre
       const run = actions.reduce((p, a) => reducePlot(p, a, d), INITIAL_PLOT);
       for (const view of VIEWS) {
         const h = host();
-        renderPlot(h, d, { ...run, view, gene: 'LCT' });
+        renderPlot(h, d, { ...run, view, gene: 'LCT', person: 'IronAge' });
         expect(h.querySelector('div.pca-captions') !== null, `${view} after ${JSON.stringify(actions)}`).toBe(view === 'pca');
       }
     }
@@ -312,6 +396,7 @@ describe('§6 rule 1 across every view the router can draw', () => {
       { ...INITIAL_PLOT, view: 'admixture', admixShown: [...ORDER], admixNew: [...ORDER] },
       ...ORDER.map((p): PlotState => ({ ...INITIAL_PLOT, view: 'admixture', admixPeriod: p, admixShown: [], admixNew: [] })),
       ...GENES.map((g): PlotState => ({ ...INITIAL_PLOT, view: 'trait', gene: g })),
+      ...(['me', ...ORDER] as const).map((person): PlotState => ({ ...INITIAL_PLOT, view: 'consumer', person })),
     ];
     for (const s of states) {
       renderPlot(h, d, s);
