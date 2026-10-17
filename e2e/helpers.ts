@@ -102,3 +102,41 @@ export async function screenViolations(page: Page): Promise<string[]> {
   });
   return texts.flatMap((s) => ruleViolations(s).map((v) => `${v}: ${s}`));
 }
+
+/**
+ * Spec §5.3 repeat guard: Enter or Esc within 400 ms of a card opening (or of the previous advance) is ignored.
+ * Tests wait a little longer than that before pressing a key on a card. Continue clicks are never throttled.
+ */
+export const CARD_KEY_GAP_MS = 450;
+
+/** Advances one card the way a student does: a blank Enter in the prompt, after the repeat guard. */
+export async function closeCardWithEnter(page: Page): Promise<void> {
+  await page.waitForTimeout(CARD_KEY_GAP_MS);
+  await prompt(page).press('Enter');
+}
+
+/** Closes every open card with blank Enters (at most 5 presses). */
+export async function closeAllCards(page: Page): Promise<void> {
+  for (let i = 0; i < 5 && (await page.locator('#card').isVisible()); i++) await closeCardWithEnter(page);
+  await expect(page.locator('#card')).toBeHidden();
+}
+
+/** The session cursor (step, card), from the read-only test hook. */
+export async function screen(page: Page): Promise<{ step: number; card: number }> {
+  return page.evaluate(() => window.__adw!.screen());
+}
+
+/** The id of the open card, or null. */
+export async function cardOpen(page: Page): Promise<string | null> {
+  return page.evaluate(() => window.__adw!.cardOpen());
+}
+
+/** The data-layer ids of the PCA period layers on screen (one per PlotState.layers entry, CONTRACT §4.12). */
+export async function layersShown(page: Page): Promise<string[]> {
+  return page.locator('#plot g.layer.period').evaluateAll((els) => els.map((e) => e.getAttribute('data-layer') ?? ''));
+}
+
+/** The data-layer id of the focus layer, or null when no layer is in focus (Europe, all). */
+export async function focusLayer(page: Page): Promise<string | null> {
+  return page.locator('#plot g.layer.period[data-focus="true"]').evaluateAll((els) => (els.length === 1 ? els[0]!.getAttribute('data-layer') : els.length === 0 ? null : 'MORE THAN ONE'));
+}

@@ -1,26 +1,61 @@
 import { expect, test } from '@playwright/test';
-import { SCRIPT, SCRIPT_STEPS } from '../src/hints';
+import { NEXT_PREFIX, SCRIPT, SCRIPT_STEPS } from '../src/hints';
 import { formatCommand, PARSE_TEXT } from '../src/parser';
+import { CARDS } from '../src/cards';
+import { FEATURES } from '../src/features';
 import {
-  BEAKER_CALLOUT, EAST_ENGLAND_LEGEND, HLA_REVEAL_LINE, HLA_TEXT_CARD, PERIOD_LABELS, REVEAL_CALLOUT, ROMAN_LOG_LINE,
-  revealNote, steppePctLabel,
+  BEAKER_CALLOUT, CARD_HINT, cardCounter, EAST_ENGLAND_LEGEND, EUROPE_HELD_BACK, HLA_REVEAL_LINE, HLA_TEXT_CARD, PERIOD_LABELS,
+  PREDICT_HINT, REVEAL_CALLOUT, REVEAL_HINT, ROMAN_LOG_LINE, TODAY_PLACED,
 } from '../src/content';
-import { centreOf, DATA, freshStart, hintIndex, idle, plotSettled, run, screenViolations, watch } from './helpers';
+import { PERIOD_IDS, type PeriodId } from '../src/types';
+import {
+  cardOpen, centreOf, closeCardWithEnter, DATA, focusLayer, freshStart, hintIndex, idle, layersShown, plotSettled, run, screenViolations, watch,
+} from './helpers';
 
-test('the full guided script runs over file:// with zero network requests and no page errors', async ({ page }) => {
+const REVEAL_PCA = SCRIPT_STEPS.findIndex((s) => s.id === 'revealPca');
+
+/** The plot after SCRIPT[0..i] under the shipped flags (spec §2.3): the view, and the layers in time order (Today only once run). */
+function expectedAfter(i: number): { view: string; layers: PeriodId[] } {
+  let view = 'none';
+  const layers = new Set<PeriodId>();
+  for (const c of SCRIPT.slice(0, i + 1)) {
+    if (c.name === 'run_pca') {
+      view = 'pca';
+      if (c.period === 'all') for (const p of PERIOD_IDS) layers.add(p);
+      else if (c.period !== 'Europe') layers.add(c.period);
+    } else if (c.name === 'run_admixture') view = 'admixture';
+    else if (c.name === 'allele_freq') view = 'trait';
+    else if (c.name === 'ancestry_test' && FEATURES.consumerBars) view = 'consumer';
+  }
+  return { view, layers: PERIOD_IDS.filter((p) => layers.has(p)) };
+}
+
+/** The hint line before step i on the guided path: the Predict line before BellBeaker, the Reveal line before Today. */
+function hintBefore(i: number): string {
+  const step = SCRIPT[i]!;
+  if (step.name === 'run_pca' && step.period === 'BellBeaker') return PREDICT_HINT;
+  if (step.name === 'run_pca' && step.period === 'Today') return REVEAL_HINT;
+  return NEXT_PREFIX + formatCommand(step);
+}
+
+test('the 19-step guided script runs over file://: cards in order, Britain today held back, callouts switch; no network, no errors', async ({ page }) => {
+  test.setTimeout(300_000);
   const w = watch(page);
   await freshStart(page);
   expect(await hintIndex(page)).toBe(0);
   expect(await screenViolations(page), 'on load').toEqual([]);
 
   for (let i = 0; i < SCRIPT.length; i++) {
-    const step = SCRIPT[i];
+    const step = SCRIPT[i]!;
     const cmd = formatCommand(step);
+    await expect(page.locator('#terminal .term-hint'), `hint before step ${i}`).toHaveText(hintBefore(i));
+
     const afterPlotClick = i === 0 || i === 3;
     if (afterPlotClick) {
-      // Students click the plot, then type. Nothing here clicks or focuses the prompt, so the shell itself must have
-      // handed the keyboard back to it (Task 13's document-level mouseup refocus). Step 0 clicks the empty plot
-      // panel; step 3 clicks the PCA that step 2 drew.
+      // Students click the plot, then type: the shell must hand the keyboard back to the prompt by itself.
+      // Step 3 follows step 2 (run_pca Europe), whose card A1 covers the plot column while it is open. The card loop below
+      // closed it at the end of the previous iteration; this pins that the click lands on the plot and not on a card.
+      await expect(page.locator('#card'), `no card covers the plot before step ${i}`).toBeHidden();
       await page.locator(i === 0 ? '#plot' : '#plot svg').first().click();
       await page.keyboard.type(cmd, { delay: 5 });
       await page.keyboard.press('Enter');
@@ -28,64 +63,68 @@ test('the full guided script runs over file:// with zero network requests and no
     } else {
       await run(page, cmd, { typeDelay: 5 });
     }
-    const how = afterPlotClick ? ', typed straight after a click on the plot (the prompt must keep the keyboard)' : '';
-    expect(await hintIndex(page), `after ${cmd}${how}`).toBe(i + 1);
-    // Spec §6: every rule holds on the text the built page actually shows after each step.
+    expect(await hintIndex(page), `after ${cmd}`).toBe(i + 1);
+
+    // Cards (spec §2.1, §5.3): after-cards open when the log ends, before-cards on acceptance; each one in order.
+    const cards = SCRIPT_STEPS[i]!.cards;
+    const ids = cards?.ids ?? [];
+    for (let j = 0; j < ids.length; j++) {
+      const id = ids[j]!;
+      const card = page.locator(`#card[data-card-id="${id}"]`);
+      await expect(card, `${cmd}: card ${id}`).toBeVisible();
+      await expect(card.locator('#card-title')).toHaveText(CARDS[id].title);
+      await expect(card.locator('.card-counter')).toHaveText(cardCounter(j + 1, ids.length));
+      await expect(page.locator('#terminal .term-hint')).toHaveText(CARD_HINT);
+      expect(await cardOpen(page)).toBe(id);
+      expect(await screenViolations(page), `with card ${id} open`).toEqual([]);
+      await closeCardWithEnter(page);
+    }
+    await expect(page.locator('#card')).toBeHidden();
     expect(await screenViolations(page), `after ${cmd}`).toEqual([]);
 
-    if (step.name === 'run_admixture') {
-      // Spec v3 §2.3, §3.2, §3.3. The first run (admix1) draws only First farmers / Stonehenge builders and Bell Beaker under
-      // the plain Beaker callout: Britain today has not been mapped yet. The run after Britain today and the Iron Age are
-      // both mapped (revealAdmix) swaps in the reveal callout and a note whose two numbers are the whole percents the bar
-      // labels show, read here from this build's JSON. The v2.1 bridge line is gone in both.
-      const stepId = SCRIPT_STEPS[i]!.id;
-      const pct = (id: string) => Math.round(DATA.admixture.bars.find((b) => b.period === id)!.STEPPE * 100);
-      const labels = page.locator('#plot g.period-bar .bar-label');
-      const pcts = page.locator('#plot g.period-bar .steppe-pct');
-      if (stepId === 'admix1') {
-        await expect(page.locator('#plot svg.plot-svg')).toHaveAttribute('data-callout', 'beaker');
-        await expect(page.locator('#plot .admix-callout')).toHaveText(BEAKER_CALLOUT);
-        await expect(page.locator('#plot .admix-reveal-note')).toHaveCount(0);
-        await expect(labels).toHaveText([PERIOD_LABELS.FirstFarmers, PERIOD_LABELS.BellBeaker]);
-      } else {
-        expect(stepId).toBe('revealAdmix');
-        await expect(page.locator('#plot svg.plot-svg')).toHaveAttribute('data-callout', 'reveal');
-        await expect(page.locator('#plot .admix-callout')).toHaveText(REVEAL_CALLOUT);
-        await expect(page.locator('#plot .admix-reveal-note')).toHaveText(revealNote(pct('Today'), pct('IronAge')));
-        await expect(labels).toHaveText(
-          (['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Today'] as const).map((id) => PERIOD_LABELS[id]));
-        await expect(pcts).toHaveText(
-          (['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Today'] as const).map((id) => steppePctLabel(pct(id))));
+    // The plot under the cards (spec §2.3).
+    const exp = expectedAfter(i);
+    await expect(page.locator('#plot')).toHaveAttribute('data-view', exp.view);
+    if (exp.view === 'pca') {
+      await plotSettled(page);
+      expect([...(await layersShown(page))].sort(), `layers after ${cmd}`).toEqual([...exp.layers].sort());
+      if (step.name === 'run_pca' && step.period !== 'Europe' && step.period !== 'all') {
+        expect(await focusLayer(page), `focus after ${cmd}`).toBe(step.period);
       }
-      await expect(page.locator('#plot .admix-bridge')).toHaveCount(0);
-      expect((await page.locator('body').textContent()) ?? '').not.toMatch(/rises to \d+%, not 90%/);
     }
-
-    if (step.name === 'run_pca' && step.period === 'Roman') {
-      // Spec v3 §3.5: run_pca(period = "Roman") prints the Roman log line in the terminal.
-      await expect(page.locator('#terminal')).toContainText(ROMAN_LOG_LINE);
+    if (i < REVEAL_PCA) {
+      // Britain today is held back until the reveal (spec §1.1 decision 4).
+      await expect(page.locator('#plot g.layer.period[data-layer="Today"]'), `no Britain today after ${cmd}`).toHaveCount(0);
+      await expect(page.locator('#plot .today-ring'), `no Britain today rings after ${cmd}`).toHaveCount(0);
     }
 
     if (step.name === 'run_pca') {
-      // Beat 3: the black-outlined eastern-England points are explained in the legend, from the real data's `east` flags.
-      // Before the Anglo-Saxon step there is no item. The v3 finale (run_pca(all), step 13) is not checked here: Task 8
-      // shows the item only while Anglo-Saxon is in focus, and Task 14 rewrites this spec for the v3 script.
-      const item = page.locator('#plot .legend-item[data-legend="east"]');
+      // The eastern-England outline is explained in the legend only while Anglo-Saxon is in focus.
+      const east = page.locator('#plot .legend-item[data-legend="east"]');
       if (step.period === 'AngloSaxon') {
-        await expect(item).toHaveCount(1);
-        await expect(item).toHaveText(EAST_ENGLAND_LEGEND);
-        expect(await page.locator('#plot .pt.east').count(), 'outlined points on the plot').toBeGreaterThan(0);
-      } else if (step.period !== 'all') {
-        await expect(item, `after ${cmd}`).toHaveCount(0);
+        await expect(east).toHaveCount(1);
+        await expect(east).toHaveText(EAST_ENGLAND_LEGEND);
+      } else {
+        await expect(east, `after ${cmd}`).toHaveCount(0);
       }
+      if (step.period === 'Europe') await expect(page.locator('#terminal')).toContainText(EUROPE_HELD_BACK);
+      if (step.period === 'Today') await expect(page.locator('#terminal')).toContainText(TODAY_PLACED);
+      if (step.period === 'Roman') await expect(page.locator('#terminal')).toContainText(ROMAN_LOG_LINE);
+    }
+
+    if (step.name === 'run_admixture') {
+      // Step 5: Beaker callout; step 10: the reveal callout and its note. No bridge line anywhere (spec §3.2-§3.3).
+      const reveal = SCRIPT_STEPS[i]!.id === 'revealAdmix';
+      const svg = page.locator('#plot svg[data-callout]');
+      await expect(svg).toHaveAttribute('data-callout', reveal ? 'reveal' : 'beaker');
+      await expect(svg).toHaveAttribute('aria-label', reveal ? REVEAL_CALLOUT : BEAKER_CALLOUT);
+      await expect(page.locator('#plot .admix-reveal-note')).toHaveCount(reveal ? 1 : 0);
+      await expect(page.locator('#plot .admix-bridge')).toHaveCount(0);
     }
 
     if (step.name === 'allele_freq') {
       const trait = DATA.traits.find((t) => t.gene === step.gene)!;
       const plot = page.locator('#plot');
-      // Spec v3 §3.4 L-reveal: the HLA-DQ2 line sits under a drawn HLA trajectory only, never on the text card or elsewhere.
-      await expect(plot.locator('.traj-reveal')).toHaveCount(step.gene === 'HLA-DQ2' && trait.source !== 'text' ? 1 : 0);
-      if (step.gene === 'HLA-DQ2' && trait.source !== 'text') await expect(plot.locator('.traj-reveal')).toHaveText(HLA_REVEAL_LINE);
       if (trait.source === 'text') {
         await expect(plot).toContainText(HLA_TEXT_CARD);
       } else {
@@ -101,23 +140,21 @@ test('the full guided script runs over file:// with zero network requests and no
           return { lines, dots };
         }, trait.points.length);
         expect(drawn.lines > 0 || drawn.dots >= trait.points.length, `${trait.gene} drew ${JSON.stringify(drawn)}`).toBe(true);
+        if (step.gene === 'HLA-DQ2') await expect(page.locator('#plot .traj-reveal')).toHaveText(HLA_REVEAL_LINE);
       }
     }
   }
 
-  // Spec §6 on the extras students can reach (whole-Europe view, a period off the script, per-person bars).
-  for (const extra of ['run_pca(period = "all")', 'run_pca(period = "Viking")', 'run_admixture(K = 3, period = "BellBeaker")']) {
+  // The extras (spec §2.1), in rotation order; none opens a card.
+  for (const extra of ['run_pca(period = "Viking")', 'run_admixture(K = 3, period = "BellBeaker")', 'ancestry_test(person = "Today")', 'run_admixture(K = 3)']) {
     await run(page, extra);
+    await expect(page.locator('#card')).toBeHidden();
     expect(await screenViolations(page), `after ${extra}`).toEqual([]);
   }
-
-  // Spec v2.1 §5.3: consumer includes Today, so ancestry_test(person = "Today") shows bars like any period.
-  await run(page, 'ancestry_test(person = "Today")');
   await expect(page.locator('#terminal')).toContainText(`Consumer-style ancestry test: ${PERIOD_LABELS.Today} (`);
-  await expect(page.locator('#terminal')).not.toContainText('No consumer-test result for');
-  expect(await screenViolations(page), 'after ancestry_test(person = "Today")').toEqual([]);
+  await expect(page.locator('#plot svg[data-callout]')).toHaveAttribute('data-callout', 'reveal');
 
-  // Spec §6 rule 7 + §3 wrap: the wrap screen text obeys the rules too.
+  // Wrap screen.
   await page.locator('#wrap-open').click();
   await expect(page.locator('#wrap')).toBeVisible();
   expect(await screenViolations(page), 'wrap screen').toEqual([]);
@@ -131,7 +168,7 @@ test('Iron Age -> Anglo-Saxon centre shift is at least 25 px at 1366x768 in the 
   await freshStart(page);
   await run(page, 'run_pca(period = "IronAge")');
   await run(page, 'run_pca(period = "AngloSaxon")');
-  await plotSettled(page); // the frame animation is about 0.5 s; measure only once it has finished
+  await plotSettled(page);
   const a = await centreOf(page, '#plot .centre[data-centre="IronAge"]');
   const b = await centreOf(page, '#plot .centre[data-centre="AngloSaxon"]');
   const shift = Math.hypot(b.x - a.x, b.y - a.y);
@@ -147,20 +184,21 @@ test('Enter while a log is printing keeps plot actions in command order', async 
   await run(page, 'run_pca(period = "AngloSaxon")');
   await plotSettled(page);
   await expect(page.locator('#plot .centre[data-centre="AngloSaxon"]')).toHaveCount(1);
+  await expect(page.locator('#card')).toBeHidden();   // off-script runs open no card
   expect(w.errors).toEqual([]);
 });
 
-test('typing the hint line exactly as shown, label and all, runs that step: no unknown-command error, and the hint moves on', async ({ page }) => {
+test('typing the hint line exactly as shown, label and all, runs that step (step 2 is Europe)', async ({ page }) => {
   const w = watch(page);
   await freshStart(page);
-  // The first three steps (hook, load, Europe) show "Next: <command>"; the fourth onwards is covered at unit level for every
-  // step and every extra (tests/hints.test.ts), since the predict line replaces the hint after run_pca(FirstFarmers).
   for (let i = 0; i < 3; i++) {
     const shown = ((await page.locator('#terminal .term-hint').textContent()) ?? '').trim();
-    expect(shown, `the hint before step ${i}`).toBe(`Next: ${formatCommand(SCRIPT[i])}`);
+    expect(shown, `the hint before step ${i}`).toBe(`Next: ${formatCommand(SCRIPT[i]!)}`);
     await run(page, shown, { typeDelay: 5 });
     expect(await hintIndex(page), `after typing "${shown}"`).toBe(i + 1);
   }
+  expect(formatCommand(SCRIPT[2]!)).toBe('run_pca(period = "Europe")');
+  await expect(page.locator('#card[data-card-id="A1"]')).toBeVisible();
   await expect(page.locator('#terminal')).not.toContainText(PARSE_TEXT.unknownCommand);
   expect(w.requests).toEqual([]);
   expect(w.errors).toEqual([]);
