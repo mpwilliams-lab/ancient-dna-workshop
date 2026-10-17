@@ -31,7 +31,6 @@ const SHOULD_SHOW: Readonly<Record<string, readonly string[]>> = {
     '26 pairs of dots, each pair joined by a thin grey line: a grey dot where a group of people lives today and a blue dot where their DNA places them (the card says so in its first lines). The blue dots are the map of the DNA, turned and scaled to fit the real map as closely as possible.',
     'Grey dots in the right countries, from Norway in the north to Crete in the south and from Spain in the west to Russia in the east. Blue dots near them, in the same order: north groups at the top, south groups at the bottom (north and south agree well), east and west only roughly. Lines short and readable; the longest (Norway, North Spain, Iberia, Russia) are the groups furthest from where the DNA puts them.',
     'Nine groups are left off on purpose (isolated groups such as Basque, Saami and Sardinian people; the card says why). Nothing on the map names a group by an ID or a code.',
-    'Labels: until you confirm open check 14 the map ships WITHOUT labels. Below the card pictures you will see the map alone twice: as it ships (no labels) and with the eight groups named, so you can decide. Are the eight names right, and readable at projector size?',
   ],
   D1: [
     'One thick red arrow from "Steppe herders\' homeland" (north of the Black Sea) west through central Europe ("Corded Ware people"), to the mouth of the Rhine ("Bell Beaker people") and across to Britain (arrowhead near Wiltshire, labelled "Britain").',
@@ -145,6 +144,10 @@ async function main(argv: string[]): Promise<void> {
   // the preview also draws it with the data build's eight names, so he can decide. Once the list is filled, the shipped map has them.
   const candidates = A1_CONFIRMED_LABELS.length > 0 ? [] :
     (DATA.europe_pops ?? []).filter((p) => !p.isolate && p.map_label).map((p) => p.label);
+  /** What to look for in A1's labels: the question depends on whether the names are confirmed yet. */
+  const a1LabelLine = candidates.length > 0
+    ? 'Labels: until you confirm open check 14 the map ships WITHOUT labels. Below the card pictures you will see the map alone twice: as it ships (no labels) and with the eight groups named, so you can decide. Are the eight names right, and readable at projector size?'
+    : `Labels: the eight confirmed names are on the map (${A1_CONFIRMED_LABELS.join(', ')}). Are they readable at projector size, and clear of the dots?`;
 
   const sections: string[] = [];
   for (const id of ids) {
@@ -153,7 +156,7 @@ async function main(argv: string[]): Promise<void> {
     const named = id === 'A1' && candidates.length > 0 ? drawn(specA1(DATA, candidates)) : null;
     const title = id in CARDS ? CARDS[id as keyof typeof CARDS].title : id;
     const aspect = spec.view !== undefined ? spec.view.width / spec.view.height : 1000 / 700;
-    const expect = (SHOULD_SHOW[id] ?? []).map((line) => `<li>${escapeHtml(line)}</li>`).join('');
+    const expect = [...(SHOULD_SHOW[id] ?? []), ...(id === 'A1' ? [a1LabelLine] : [])].map((line) => `<li>${escapeHtml(line)}</li>`).join('');
     const figures = SCREENS.map((screen) => {
       const shot = shots?.get(`${id}@${screen.width}`);
       // Without a measured card: the room a card has at best, its width less the card's padding, and the spec cap on the height.

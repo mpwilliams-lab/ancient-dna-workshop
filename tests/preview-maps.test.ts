@@ -80,11 +80,14 @@ describe('npm run preview-maps', () => {
     expect(text.match(/class="map-label"/g) ?? []).toHaveLength(16);
     for (const name of eight) expect(text.match(new RegExp(`>${name}</text>`, 'g')), name).toHaveLength(2);
     if (A1_CONFIRMED_LABELS.length === 0) {
+      expect(text).toContain('Labels: until you confirm open check 14 the map ships WITHOUT labels');
       expect(text).toContain('as it ships: no labels');
       expect(text).toContain(`groups named (${eight.join(', ')})`);
       expect(text).toContain('The app does not show these labels until you do');
     } else {
-      expect(text).not.toContain('groups named');
+      // Confirmed: the shipped map has the names, the question is whether they read well, and nothing is shown that is not shipped.
+      expect(text).toContain(`Labels: the eight confirmed names are on the map (${A1_CONFIRMED_LABELS.join(', ')})`);
+      for (const stale of ['groups named', 'as it ships: no labels', 'until you confirm', 'does not show these labels']) expect(text, stale).not.toContain(stale);
     }
     expect(text).not.toMatch(/<script/i);
   });
