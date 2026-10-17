@@ -12,11 +12,11 @@ export interface Fetched extends StagedImage {
 }
 /** The two network calls the script makes; tests pass stand-ins. */
 export interface Network {
-  getJson(url: string): Promise<unknown>;
-  download(url: string): Promise<{ buf: Buffer; type: string }>;
+  getJson(url: string, max?: number): Promise<unknown>;
+  download(url: string, max?: number): Promise<{ buf: Buffer; type: string }>;
 }
 
-export const PATHS: { manifest: string; raw: string; staged: string; img: string };
+export const PATHS: { manifest: string; raw: string; staged: string; img: string; svg: string };
 export const LICENCE_URLS: Readonly<Record<LicenceId, string | null>>;
 export const MEDIA_PREFIXES: readonly string[];
 export const UPLOAD_PREFIX: string;
@@ -28,6 +28,7 @@ export const PORTRAIT_HEIGHT: number;
 export const QUALITIES: readonly number[];
 export const IMAGE_MAX_BYTES: number;
 export const MAX_DOWNLOAD_BYTES: number;
+export const MAX_JSON_BYTES: number;
 export const NETWORK: Network;
 export function thumbApiUrl(commonsFile: string): string;
 export function isMediaUrl(url: unknown): boolean;
@@ -45,3 +46,6 @@ export function freshRawDir(dirs: Pick<Dirs, 'raw' | 'staged'>, clean: boolean):
 export function stageImage(entry: StageEntry, rawPath: string, stagedDir: string): StagedImage;
 export function fetchEntry(entry: ImageEntry, io?: Network, dirs?: Pick<Dirs, 'raw' | 'staged'>): Promise<Fetched>;
 export function promote(manifest: { images: ImageEntry[] }, dirs?: Pick<Dirs, 'staged' | 'img'>): string[];
+export function assertProcessable(entry: Pick<ImageEntry, 'id' | 'licence' | 'ops' | 'crop'>): void;
+export function removePromoted(imgDir: string, id: string): boolean;
+export function main(argv: string[], env?: { paths?: Partial<Dirs> & { manifest: string; svg?: string }; network?: Network; log?: (line: string) => void }): Promise<void>;

@@ -17,7 +17,7 @@ import { ALL_OFF, ALL_ON, withFeatures, type Features } from '../src/features';
 import { CARD_IDS, GENE_IDS, type CardId, type WorkshopData } from '../src/types';
 import { ruleViolations } from './contentRules';
 import { FIXTURE } from './fixtures/fixture';
-import { checkedManifest, fakeUrls } from './helpers/assetEnv';
+import { checkedManifest, fakeUrls, uncheckedManifest } from './helpers/assetEnv';
 import { loadIndexHtml } from './helpers/shellEnv';
 
 const ctx = (over: Partial<CardRenderContext> = {}): CardRenderContext => ({
@@ -39,9 +39,9 @@ describe('renderCardBody: every card in its P1 text form', () => {
     expect(b.querySelector('.card-map')).toBeNull();
     expect(b.textContent).not.toMatch(/[{}]/);
   });
-  it.each(CARD_IDS)('%s still renders its text form with every flag on (no asset is ready before Tasks 15 and 20)', (id) => {
+  it.each(CARD_IDS)('%s still renders its text form with every flag on while nothing is checked or bundled (and no map exists before Task 20)', (id) => {
     expect(upgradedFormShown(CARDS[id], ALL_ON)).toBe(false);
-    const b = body(id, { features: ALL_ON });
+    const b = body(id, { features: ALL_ON, manifest: uncheckedManifest(), imageUrls: {} });
     expect(b.querySelector('img')).toBeNull();
     expect(b.querySelector('.card-map')).toBeNull();
   });
@@ -620,10 +620,10 @@ describe('card credits button (Task 15)', () => {
     view.open('B1', 0, 1, 'after');
     expect(root.querySelector('.card-credits')).toBeNull();
   });
-  it('is absent on a card with no upgrade, and with the shipped manifest and files (nothing is checked or bundled yet)', () => {
+  it('is absent on a card with no upgrade, and while nothing is checked or bundled', () => {
     loadIndexHtml();
     const root = document.getElementById('card')!;
-    const view = mountCardView(root, FIXTURE, handlers(), ALL_ON);
+    const view = mountCardView(root, FIXTURE, handlers(), ALL_ON, { manifest: uncheckedManifest(), urls: {} });
     for (const id of CARD_IDS) {
       view.open(id, 0, 1, 'after');
       expect(root.querySelector('.card-credits'), id).toBeNull();

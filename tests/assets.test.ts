@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { PNG } from 'pngjs';
 import { afterAll, describe, expect, it } from 'vitest';
 import raw from '../assets/manifest.json';
@@ -23,11 +23,13 @@ import {
   COMMONS_API, PORTRAIT_HEIGHT, THUMB_PREFIX, THUMB_WIDTH, UPLOAD_PREFIX, cropFits, parseSipsSize, scaleCrop, sipsSteps, thumbApiUrl,
   thumbFromApi, titleOf, useFallback,
 } from '../scripts/fetch-assets.mjs';
-import { checkedManifest, fakeUrls } from './helpers/assetEnv';
+import { checkedManifest, fakeUrls, uncheckedManifest } from './helpers/assetEnv';
 
 const ROOT = resolve(__dirname, '..');
 const FETCH_SCRIPT = resolve(ROOT, 'scripts/fetch-assets.mjs');
 const entry = (id: ImageId): ImageEntry => ASSET_MANIFEST.images.find((e) => e.id === id)!;
+/** A copy of one entry as Task 15 shipped it (nothing checked, nothing fetched): the committed file changes as the instructor works. */
+const fresh = (id: ImageId): ImageEntry => uncheckedManifest().images.find((e) => e.id === id)!;
 const rawCopy = (): any => structuredClone(raw);
 
 // Spec §7.1 first choices: id, card, Commons file (null = own drawing), author, licence, ops.
@@ -445,6 +447,20 @@ function fakeIo(png: Buffer, answer: unknown) {
     },
   };
 }
+const STAMP = { by: 'instructor', at: '2026-10-19T15:00:00-07:00' } as const;
+/** <tmp>/assets/manifest.json, assets/raw, assets/staged, src/assets/img and src/assets/svg: the folders main() works on. */
+function tempPaths(setUp: (m: ReturnType<typeof uncheckedManifest>) => void = () => {}) {
+  const base = tempDir();
+  const p = {
+    manifest: join(base, 'assets/manifest.json'), raw: join(base, 'assets/raw'), staged: join(base, 'assets/staged'),
+    img: join(base, 'src/assets/img'), svg: join(base, 'src/assets/svg'),
+  };
+  for (const dir of [dirname(p.manifest), p.img, p.svg]) mkdirSync(dir, { recursive: true });
+  const m = uncheckedManifest();
+  setUp(m);
+  writeFileSync(p.manifest, `${JSON.stringify(m, null, 2)}\n`);
+  return { ...p, read: () => JSON.parse(readFileSync(p.manifest, 'utf8')) as typeof m };
+}
 const dirsOf = () => {
   const base = tempDir();
   return { raw: join(base, 'raw'), staged: join(base, 'staged'), img: join(base, 'img') };
@@ -498,7 +514,7 @@ describe.skipIf(!HAS_SIPS)('fetchEntry with a stubbed Commons (the live API answ
     mkdirSync(d.raw, { recursive: true });
     const png = drawBanded(960, 380);
     const { io, calls } = fakeIo(png, apiAnswer(900, 356));
-    const e = structuredClone(entry('ring-of-brodgar'));
+    const e = fresh('ring-of-brodgar');
     const out = await script.fetchEntry(e, io, d);
     expect(calls).toHaveLength(2);
     // The box {0, 28, 900, 300} was written for a 900 px thumbnail. On the 960 px file it must cover the whole width and the
@@ -521,25 +537,55 @@ describe.skipIf(!HAS_SIPS)('fetchEntry with a stubbed Commons (the live API answ
   it('orientation comes from the downloaded file, not from the API: a tall shield is portrait, a small near-square original is too', async () => {
     const d = dirsOf();
     mkdirSync(d.raw, { recursive: true });
-    const shield = structuredClone(entry('battersea-shield'));
+    const shield = fresh('battersea-shield');
     const a = await script.fetchEntry(shield, fakeIo(drawPng(480, 1048), apiAnswer(900, 1966)).io, d);
     expect(shield.orientation).toBe('portrait');
     expect(sizeOf(a.staged).height).toBe(PORTRAIT_HEIGHT);
-    const coins = structuredClone(entry('hoxne-coins'));
+    const coins = fresh('hoxne-coins');
     coins.orientation = 'landscape';
     const b = await script.fetchEntry(coins, fakeIo(drawPng(879, 891), apiAnswer(900, 912)).io, d);
     expect(coins.orientation).toBe('portrait');
     expect(sizeOf(b.staged).height).toBe(PORTRAIT_HEIGHT);
     // Even when the API's size says the opposite, the file decides.
-    const tall = structuredClone(entry('stonehenge'));
+    const tall = fresh('stonehenge');
     const c = await script.fetchEntry(tall, fakeIo(drawPng(400, 800), apiAnswer(900, 600)).io, d);
     expect(tall.orientation).toBe('portrait');
     expect(sizeOf(c.staged).height).toBe(PORTRAIT_HEIGHT);
   });
+  it('converts a PNG to JPEG when the entry says so (the Blausen melanocyte: CC BY 3.0, "resized, converted to JPEG")', async () => {
+    const d = dirsOf();
+    mkdirSync(d.raw, { recursive: true });
+    const e = fresh('melanocyte');
+    const out = await script.fetchEntry(e, fakeIo(drawPng(960, 768), apiAnswer(900, 720)).io, d);
+    expect(sizeOf(out.staged)).toEqual({ width: 900, height: 720 });
+    expect(readFileSync(out.staged).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(readdirSync(d.raw)).toEqual(['melanocyte.png']);
+  });
+  it('main --ids records each image in the manifest as soon as it is staged: a later failure keeps what the earlier ones recorded', async () => {
+    const p = tempPaths();
+    let downloads = 0;
+    const network = {
+      getJson: async () => apiAnswer(900, 600),
+      download: async () => {
+        downloads += 1;
+        if (downloads === 2) throw new Error('HTTP 503 from the second download');
+        return { buf: drawPng(960, 640), type: 'image/png' };
+      },
+    };
+    const log: string[] = [];
+    await expect(script.main(['--ids', 'avebury,stonehenge', '--clean'], { paths: p, network, log: (l) => log.push(l) })).rejects.toThrow(/HTTP 503/);
+    const m = p.read();
+    expect(entryIn(m, 'avebury').raw_sha256, 'the first image was recorded').toMatch(/^[0-9a-f]{64}$/);
+    expect(entryIn(m, 'avebury').thumb_url).toContain(THUMB_PREFIX);
+    expect(entryIn(m, 'stonehenge').raw_sha256, 'the second never was').toBeNull();
+    expect(entryIn(m, 'avebury').visual_check, 'and no check is ever written').toBeNull();
+    expect(readdirSync(p.staged)).toEqual(['avebury.jpg']);
+    expect(log[0]).toMatch(/^fetch-assets: avebury: 960x640 image\/png -> assets\/staged\/avebury\.jpg \(\d+ KB, quality 70, landscape\)$/);
+  });
   it('stops when the file on Commons changed after the instructor checked it, and records nothing', async () => {
     const d = dirsOf();
     mkdirSync(d.raw, { recursive: true });
-    const e = structuredClone(entry('avebury'));
+    const e = fresh('avebury');
     e.visual_check = { by: 'instructor', at: '2026-10-19T15:00:00-07:00' };
     e.raw_sha256 = 'a'.repeat(64);
     await expect(script.fetchEntry(e, fakeIo(drawPng(960, 715), apiAnswer(900, 670)).io, d)).rejects.toThrow(/changed since the instructor checked it/);
@@ -551,10 +597,119 @@ describe.skipIf(!HAS_SIPS)('fetchEntry with a stubbed Commons (the live API answ
   it('refuses a crop box that does not fit the thumbnail, and an own drawing', async () => {
     const d = dirsOf();
     mkdirSync(d.raw, { recursive: true });
-    const e = structuredClone(entry('ring-of-brodgar'));
+    const e = fresh('ring-of-brodgar');
     e.crop = { x: 0, y: 100, width: 900, height: 300 };
     await expect(script.fetchEntry(e, fakeIo(drawPng(960, 380), apiAnswer(900, 356)).io, d)).rejects.toThrow(/does not fit/);
-    await expect(script.fetchEntry(structuredClone(entry('irises')), fakeIo(drawPng(10, 10), apiAnswer(10, 10)).io, d)).rejects.toThrow(/own drawing/);
+    await expect(script.fetchEntry(fresh('irises'), fakeIo(drawPng(10, 10), apiAnswer(10, 10)).io, d)).rejects.toThrow(/own drawing/);
+  });
+});
+
+describe('an entry edited by hand cannot be staged (spec §7.1: CC BY-SA resized only, a crop box needs the crop op)', () => {
+  const box = { x: 0, y: 0, width: 900, height: 300 };
+  const can = (over: Partial<ImageEntry>): void => script.assertProcessable({ ...fresh('stonehenge'), ...over });
+  it('assertProcessable allows what the manifest validator allows and refuses the rest', () => {
+    expect(() => can({})).not.toThrow();
+    expect(() => can({ ops: ['resize', 'crop'], crop: box }), 'a CC0 crop').not.toThrow();
+    expect(() => can({ licence: 'CC BY-SA 4.0', ops: ['resize'] }), 'a CC BY-SA resize').not.toThrow();
+    expect(() => can({ ops: ['resize'], crop: box })).toThrow(/crop box but ops does not allow cropping/);
+    expect(() => can({ ops: [], crop: box })).toThrow(/does not allow cropping/);
+    expect(() => can({ licence: 'CC BY-SA 4.0', ops: ['resize', 'crop'] })).toThrow(/CC BY-SA images are resized only/);
+    expect(() => can({ licence: 'CC BY-SA 2.0', ops: ['resize', 'crop'], crop: box })).toThrow(/CC BY-SA images are resized only/);
+    expect(() => can({ licence: 'CC BY-SA 3.0', ops: ['resize', 'convert'] })).toThrow(/never cropped, overlaid, annotated or converted/);
+    expect(() => can({ licence: 'CC BY-SA 3.0', ops: [] })).toThrow(/resized only/);
+    expect(() => can({ licence: 'CC BY-SA 3.0', ops: ['crop'] })).toThrow(/resized only/);
+  });
+  it('fetchEntry refuses a hand-edited CC BY-SA entry with a crop box before it asks Commons for anything', async () => {
+    const d = dirsOf();
+    mkdirSync(d.raw, { recursive: true });
+    const e = fresh('castlerigg');
+    e.ops = ['resize', 'crop'];
+    e.crop = box;
+    const f = fakeIo(drawPng(10, 10), apiAnswer(900, 600));
+    await expect(script.fetchEntry(e, f.io, d)).rejects.toThrow(/CC BY-SA images are resized only/);
+    expect(f.calls, 'no API call and no download').toEqual([]);
+    expect(readdirSync(d.raw)).toEqual([]);
+  });
+  it('fetchEntry refuses a crop box on an entry whose ops do not include crop', async () => {
+    const d = dirsOf();
+    mkdirSync(d.raw, { recursive: true });
+    const e = fresh('battersea-shield');
+    e.crop = box;
+    const f = fakeIo(drawPng(10, 10), apiAnswer(900, 600));
+    await expect(script.fetchEntry(e, f.io, d)).rejects.toThrow(/crop box but ops does not allow cropping/);
+    expect(f.calls).toEqual([]);
+  });
+  it('fetchEntry refuses a PNG for a CC BY entry that does not say "convert", and any PNG for a CC BY-SA entry; nothing is written', async () => {
+    const d = dirsOf();
+    mkdirSync(d.raw, { recursive: true });
+    for (const id of ['shrewton-beaker', 'castlerigg'] as const) {
+      const f = fakeIo(drawPng(10, 10), apiAnswer(900, 600));      // fakeIo answers with a PNG
+      await expect(script.fetchEntry(fresh(id), f.io, d), id).rejects.toThrow(/Commons sent a PNG, which is converted to JPEG, but ops does not say "convert"/);
+    }
+    expect(readdirSync(d.raw)).toEqual([]);
+  });
+});
+
+describe('rejecting an image leaves nothing stale behind (removePromoted, --use-fallback)', () => {
+  it('removePromoted deletes <id>.jpg and only that, and says whether it deleted anything', () => {
+    const p = tempPaths();
+    for (const f of ['castlerigg.jpg', 'avebury.jpg', 'castlerigg.jpg.bak']) writeFileSync(join(p.img, f), 'x');
+    expect(script.removePromoted(p.img, 'castlerigg')).toBe(true);
+    expect(readdirSync(p.img).sort()).toEqual(['avebury.jpg', 'castlerigg.jpg.bak']);
+    expect(script.removePromoted(p.img, 'castlerigg')).toBe(false);
+    expect(script.removePromoted(join(p.img, 'no-such-folder'), 'castlerigg')).toBe(false);
+  });
+  it('--use-fallback switches the entry, resets its check and its fetch records, and deletes the promoted file of the image that was rejected', async () => {
+    const p = tempPaths((m) => {
+      entryIn(m, 'castlerigg').visual_check = { ...STAMP };
+      entryIn(m, 'castlerigg').raw_sha256 = 'b'.repeat(64);
+      entryIn(m, 'avebury').visual_check = { ...STAMP };
+    });
+    for (const id of ['castlerigg', 'avebury']) writeFileSync(join(p.img, `${id}.jpg`), `promoted ${id}`);
+    const log: string[] = [];
+    await script.main(['--use-fallback', 'castlerigg'], { paths: p, log: (l) => log.push(l) });
+    const after = p.read();
+    expect(entryIn(after, 'castlerigg')).toMatchObject({
+      licence: 'CC0', author: 'Yale Center for British Art', visual_check: null, thumb_url: null, raw_sha256: null, fallback: null,
+    });
+    expect(entryIn(after, 'avebury').visual_check, 'another image keeps its check').not.toBeNull();
+    expect(existsSync(join(p.img, 'castlerigg.jpg')), 'the rejected image is no longer bundled').toBe(false);
+    expect(existsSync(join(p.img, 'avebury.jpg'))).toBe(true);
+    expect(log.join('\n')).toContain('castlerigg now uses its fallback');
+    expect(log.join('\n')).toContain('deleted the old promoted file src/assets/img/castlerigg.jpg');
+    expect(() => parseManifest(after)).not.toThrow();
+  });
+  it('--use-fallback on an image with no fallback is refused, and deletes nothing', async () => {
+    const p = tempPaths((m) => {
+      entryIn(m, 'west-stow').visual_check = { ...STAMP };
+    });
+    writeFileSync(join(p.img, 'west-stow.jpg'), 'promoted');
+    const before = readFileSync(p.manifest, 'utf8');
+    await expect(script.main(['--use-fallback', 'west-stow'], { paths: p, log: () => {} })).rejects.toThrow(/no .*fallback/i);
+    expect(readFileSync(p.manifest, 'utf8')).toBe(before);
+    expect(existsSync(join(p.img, 'west-stow.jpg'))).toBe(true);
+    await expect(script.main(['--use-fallback', 'no-such-image'], { paths: p, log: () => {} })).rejects.toThrow(/unknown image id/);
+  });
+  it('switching an own drawing to its photo fallback warns that the drawing is still there, and does not delete it', async () => {
+    const p = tempPaths();
+    writeFileSync(join(p.svg, 'thornborough-plan.svg'), '<svg/>');
+    const log: string[] = [];
+    await script.main(['--use-fallback', 'thornborough-plan'], { paths: p, log: (l) => log.push(l) });
+    expect(entryIn(p.read(), 'thornborough-plan').kind).toBe('photo');
+    expect(existsSync(join(p.svg, 'thornborough-plan.svg'))).toBe(true);
+    expect(log.join('\n')).toContain('WARNING: src/assets/svg/thornborough-plan.svg is still there');
+  });
+  it('--promote copies the checked photos and says so (the command-line path), and a stale file is not among them', async () => {
+    const p = tempPaths((m) => {
+      entryIn(m, 'avebury').visual_check = { ...STAMP };
+    });
+    mkdirSync(p.staged, { recursive: true });
+    writeFileSync(join(p.staged, 'avebury.jpg'), 'jpeg');
+    writeFileSync(join(p.staged, 'stonehenge.jpg'), 'jpeg');
+    const log: string[] = [];
+    await script.main(['--promote'], { paths: p, log: (l) => log.push(l) });
+    expect(readdirSync(p.img)).toEqual(['avebury.jpg']);
+    expect(log.at(-1)).toBe('promote-assets: 1 checked image(s) promoted. Unchecked images stay in assets/staged/.');
   });
 });
 
@@ -573,7 +728,7 @@ describe('fresh download folder and promote (no sips needed)', () => {
     const d = dirsOf();
     mkdirSync(d.staged, { recursive: true });
     for (const id of ['stonehenge', 'avebury']) writeFileSync(join(d.staged, `${id}.jpg`), `jpeg of ${id}`);
-    const m = structuredClone(ASSET_MANIFEST);
+    const m = uncheckedManifest();
     entryIn(m, 'stonehenge').visual_check = { by: 'instructor', at: '2026-10-19T15:00:00-07:00' };
     expect(script.promote(m, d)).toEqual(['stonehenge']);
     expect(readdirSync(d.img)).toEqual(['stonehenge.jpg']);
@@ -582,7 +737,7 @@ describe('fresh download folder and promote (no sips needed)', () => {
   it('promotes nothing for an own drawing, refuses a checked image with no staged file, and refuses a file over 160 KB', () => {
     const d = dirsOf();
     mkdirSync(d.staged, { recursive: true });
-    const m = structuredClone(ASSET_MANIFEST);
+    const m = uncheckedManifest();
     entryIn(m, 'thornborough-plan').visual_check = { by: 'instructor', at: '2026-10-19T15:00:00-07:00' };
     expect(script.promote(m, d)).toEqual([]);
     entryIn(m, 'avebury').visual_check = { by: 'instructor', at: '2026-10-19T15:00:00-07:00' };
@@ -596,10 +751,11 @@ describe('fresh download folder and promote (no sips needed)', () => {
     mkdirSync(d.staged, { recursive: true });
     mkdirSync(d.img, { recursive: true });
     writeFileSync(join(d.img, 'avebury.jpg'), 'already promoted');
-    const m = structuredClone(ASSET_MANIFEST);
+    const m = uncheckedManifest();
     entryIn(m, 'avebury').visual_check = { by: 'instructor', at: '2026-10-19T15:00:00-07:00' };
+    const before = JSON.stringify(m);
     expect(script.promote(m, d)).toEqual([]);
-    expect(entryIn(ASSET_MANIFEST, 'stonehenge').visual_check).toBeNull();
+    expect(JSON.stringify(m), 'promote reads the manifest and changes nothing in it').toBe(before);
   });
 });
 

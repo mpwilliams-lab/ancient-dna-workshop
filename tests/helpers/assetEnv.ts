@@ -5,6 +5,23 @@ import type { ImageId, MapId } from '../../src/types';
 
 export const CHECK = { by: 'instructor', at: '2026-10-19T15:00:00-07:00' } as const;
 
+/**
+ * A deep copy of the committed manifest as Task 15 shipped it: nothing checked and nothing fetched (every visual_check, thumb_url
+ * and raw_sha256 is null). The committed file and src/assets/img change as the instructor checks and promotes images (Task 16
+ * and later), so a test whose premise is "nothing is checked or bundled" must use this, with `urls: {}` or an explicit list of
+ * files, and never read ASSET_MANIFEST or BUNDLED_IMAGES for that premise.
+ */
+export function uncheckedManifest(): AssetManifest {
+  const m = structuredClone(ASSET_MANIFEST);
+  for (const e of m.images) {
+    e.visual_check = null;
+    e.thumb_url = null;
+    e.raw_sha256 = null;
+  }
+  for (const id of MAP_IDS) m.maps[id] = { visual_check: null };
+  return m;
+}
+
 /** A deep copy of the committed manifest with every image and map checked, except the ids listed. */
 export function checkedManifest(except: readonly string[] = []): AssetManifest {
   const m = structuredClone(ASSET_MANIFEST);

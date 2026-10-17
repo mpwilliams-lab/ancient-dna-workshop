@@ -11,12 +11,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ASSET_MANIFEST, MAP_IDS, attributionString } from '../src/assetManifest';
 import { CARDS } from '../src/cards';
 import { CREDITS_CLOSE, CREDITS_FOOTER, CREDITS_LINK, CREDITS_TITLE, MAP_SOURCE_SUFFIX } from '../src/content';
+import { BUNDLED_IMAGES } from '../src/assets';
 import { creditsGroups } from '../src/credits';
 import { ALL_OFF } from '../src/features';
 import { boot, type BootEnv } from '../src/shell';
 import { CARD_IDS } from '../src/types';
 import { ruleViolations } from './contentRules';
-import { checkedManifest, fakeUrls, onlyChecked } from './helpers/assetEnv';
+import { checkedManifest, fakeUrls, onlyChecked, uncheckedManifest } from './helpers/assetEnv';
 import { FIXTURE, MemStore, loadIndexHtml } from './helpers/shellEnv';
 
 const MAKE_CREDITS = resolve(__dirname, '../scripts/make-credits.mjs');
@@ -40,12 +41,14 @@ afterEach(() => {
 });
 
 describe('creditsGroups (D-L5: every image and map in the build)', () => {
-  it('lists nothing while no image is bundled and no map is checked (the shipped state)', () => {
-    expect(creditsGroups()).toEqual([]);
-    expect(creditsGroups(ASSET_MANIFEST, {})).toEqual([]);
+  it('lists nothing while no image is bundled and no map is checked', () => {
+    expect(creditsGroups(uncheckedManifest(), {})).toEqual([]);
+  });
+  it('reads the committed manifest and the bundled files unless it is given others', () => {
+    expect(creditsGroups()).toEqual(creditsGroups(ASSET_MANIFEST, BUNDLED_IMAGES));
   });
   it('lists every bundled image, grouped by card in card order: the attribution string, then the Commons file page as plain text', () => {
-    const groups = creditsGroups(ASSET_MANIFEST, fakeUrls());
+    const groups = creditsGroups(uncheckedManifest(), fakeUrls());
     expect(groups.map((g) => g.cardId)).toEqual(['B1', 'C1', 'E2', 'F1', 'G2', 'H1', 'I1', 'J1']);
     expect(groups.map((g) => g.title)).toEqual(groups.map((g) => CARDS[g.cardId].title));
     expect(groups.find((g) => g.cardId === 'C1')).toEqual({
@@ -64,7 +67,7 @@ describe('creditsGroups (D-L5: every image and map in the build)', () => {
     expect(total, 'one file page per photo, none for the two own drawings').toBe(19);
   });
   it('does not look at flags or checks: an unchecked image of a card that is off is credited as soon as its file is in the build', () => {
-    expect(creditsGroups(ASSET_MANIFEST, { stonehenge: 'data:image/jpeg;base64,x' })).toEqual([{
+    expect(creditsGroups(uncheckedManifest(), { stonehenge: 'data:image/jpeg;base64,x' })).toEqual([{
       cardId: 'B1', title: CARDS.B1.title,
       lines: ['Photo: Gary Todd (CC0), via Wikimedia Commons', 'https://commons.wikimedia.org/wiki/File:Stonehenge_(9816864014).jpg'],
     }]);
@@ -78,10 +81,10 @@ describe('creditsGroups (D-L5: every image and map in the build)', () => {
     expect(all).toContain('Couleur');
   });
   it('an own drawing has its attribution line and no URL', () => {
-    const b1 = creditsGroups(ASSET_MANIFEST, fakeUrls()).find((g) => g.cardId === 'B1')!;
+    const b1 = creditsGroups(uncheckedManifest(), fakeUrls()).find((g) => g.cardId === 'B1')!;
     expect(b1.lines).toContain('Plan drawn for this workshop');
     expect(b1.lines.filter((l) => l.startsWith('https://'))).toHaveLength(4);
-    expect(creditsGroups(ASSET_MANIFEST, fakeUrls()).find((g) => g.cardId === 'J1')!.lines).toEqual(['Drawn for this workshop']);
+    expect(creditsGroups(uncheckedManifest(), fakeUrls()).find((g) => g.cardId === 'J1')!.lines).toEqual(['Drawn for this workshop']);
   });
   it('lists each map the instructor has checked, once, as the Natural Earth line under its card; the F1 inset under F1', () => {
     expect(creditsGroups(onlyChecked(['D1', 'H2', 'F1inset']), {})).toEqual([
@@ -157,8 +160,8 @@ describe('credits panel (spec §5.2)', () => {
     byId('wrap-credits').click();
     expect(document.querySelectorAll('#credits-list section')).toHaveLength(expected.length);
   });
-  it('is empty of images while no image is bundled (the shipped state): the title, the data credits footer and Close', () => {
-    bootApp();
+  it('is empty of images while no image is bundled: the title, the data credits footer and Close', () => {
+    bootApp({ assets: { manifest: uncheckedManifest(), urls: {} } });
     byId('wrap-open').click();
     byId('wrap-credits').click();
     expect(document.querySelectorAll('#credits-list section')).toHaveLength(0);
