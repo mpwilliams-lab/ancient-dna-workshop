@@ -20,8 +20,8 @@ const MANIFEST_ID = '/repo/assets/manifest.json';
 const MAPS_ID = '/repo/src/maps.ts';
 
 describe('forceMaps: the flags (src/features.ts)', () => {
-  it('covers the four map cards built so far', () => {
-    expect([...MAP_CARD_IDS]).toEqual(['A1', 'D1', 'E1', 'G1']);
+  it('covers the seven map cards built so far', () => {
+    expect([...MAP_CARD_IDS]).toEqual(['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3']);
   });
 
   it('sets the map flags to true and changes no other line of the module', () => {

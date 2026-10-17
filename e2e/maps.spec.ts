@@ -1,22 +1,25 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { CARDS } from '../src/cards';
-import { MAP_TEXT } from '../src/content';
+import { CARDS, distributionRows } from '../src/cards';
+import { IRELAND_FOOTNOTE, MAP_TEXT } from '../src/content';
 import { FEATURES } from '../src/features';
-import { A1_CONFIRMED_LABELS } from '../src/maps';
+import { A1_CONFIRMED_LABELS, DISTRIBUTION_MAP_GENE } from '../src/maps';
 import type { CardId } from '../src/types';
-import { a1LabelCandidates, buildMapApp, type MapApp } from './mapBuild';
-import { idle, intersects, prompt, screenViolations, watch, type Rect } from './helpers';
+import { a1LabelCandidates, buildMapApp, MAP_CARD_IDS, type MapApp } from './mapBuild';
+import { DATA, idle, intersects, prompt, screenViolations, watch, type Rect } from './helpers';
 
 /**
- * The map cards A1 (Task 23), D1, E1 and G1 (Task 20) in their MAP form. The shipped build draws their text form until the instructor
- * has checked the maps, so this spec builds its own copy of the app with the four map flags forced on and the four maps recorded as
- * checked, and A1's label list filled with the eight names the data build chose (e2e/mapBuild.ts: an in-memory change while Vite reads
- * three modules, into a temporary directory; nothing in the repo is written and the shipped flags and the empty A1 list stay as
- * committed). It then asks what spec §5.2 and §5.4 ask of every card, of these four: no page scroll, title, first bullet and every
- * footer button on screen, the prompt and hint line uncovered, and no `dense` at the lab-standard screens at 100% (`normal`); plus what
- * only a map can get wrong: a label cut off or overlapped, a picture too small to read, rule violations in the map text, and for A1 a
- * dot cut off by its window or hidden under a word. A1's window does not depend on its labels (src/maps.ts specA1), so the card is the
- * same size with the map labelled or not, and the labelled build proves both.
+ * The map cards A1 (Task 23), D1, E1 and G1 (Task 20), and the distribution cards H2, I2 and J3 (Task 24), in their MAP form. The shipped
+ * build draws their text form until the instructor has checked the maps, so this spec builds its own copy of the app with the seven map
+ * flags forced on and the seven maps recorded as checked, and A1's label list filled with the eight names the data build chose
+ * (e2e/mapBuild.ts: an in-memory change while Vite reads three modules, into a temporary directory; nothing in the repo is written and
+ * the shipped flags and the empty A1 list stay as committed). It then asks what spec §5.2 and §5.4 ask of every card, of these seven:
+ * no page scroll, title, first body line and every footer button on screen, the prompt and hint line uncovered, and no `dense` at the
+ * lab-standard screens at 100% (`normal`); plus what only a map can get wrong: a label cut off or overlapped, a picture too small to
+ * read, rule violations in the map text, and for A1 a dot cut off by its window or hidden under a word. A1's window does not depend on
+ * its labels (src/maps.ts specA1), so the card is the same size with the map labelled or not, and the labelled build proves both.
+ * The distribution maps (the real data's rows, in the real browser) are asked for a dot for every row with coordinates (a ring exactly
+ * where the number prints 0, a dot of at least 4 map units otherwise), no word over any dot or over another word, every word whole
+ * inside the picture, the side list for the rows without coordinates in view beside it, and H2's Ireland footnote under the map.
  *
  * The viewport matrix is the one e2e/layout.spec.ts uses (26 cases plus LAB_VIEWPORTS); keep the two in step.
  */
@@ -44,13 +47,20 @@ for (const spec of (process.env.LAB_VIEWPORTS ?? '').split(',').filter(Boolean))
   cases.push({ name: `lab ${w}x${h} @${s * 100}%`, width: Math.floor(w / s), height: Math.floor(h / s), dsf: s, fit: 'no-scroll' });
 }
 
-/** The map cards built so far, in card order (Tasks 24 and 27 draw their own checks for theirs). */
-const IDS = ['A1', 'D1', 'E1', 'G1'] as const satisfies readonly CardId[];
+/** The map cards built so far, in card order (Task 27 adds its own for K2 and L3). */
+const IDS = ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3'] as const satisfies readonly CardId[];
 type MapCardId = (typeof IDS)[number];
+type DistributionCardId = 'H2' | 'I2' | 'J3';
+const isDistribution = (id: MapCardId): id is DistributionCardId => id === 'H2' || id === 'I2' || id === 'J3';
+const hasCoordinates = (r: { lat?: number; lon?: number }): boolean => r.lat !== undefined && r.lon !== undefined;
+/** The rows of a distribution card from the real data, in the card's order: the ones with coordinates are dots, the others the side list. */
+const rowsOf = (id: DistributionCardId) => distributionRows(DATA, DISTRIBUTION_MAP_GENE[id]);
 
-/** The words each map must carry: the approved text, and for A1 the eight groups the data build chose (the build forces them in). */
+/** The words each map must carry: the approved text; for A1 the eight groups the data build chose (the build forces them in); for the
+ *  distribution maps "<place> <copies>" for every row with coordinates, the numbers the value list prints. */
 const LABELS = a1LabelCandidates();
-const expectedLabels = (id: MapCardId): string[] => (id === 'A1' ? [...LABELS] : [...MAP_TEXT[id]]);
+const expectedLabels = (id: MapCardId): string[] =>
+  id === 'A1' ? [...LABELS] : isDistribution(id) ? rowsOf(id).filter(hasCoordinates).map((r) => `${r.label} ${r.display}`) : [...MAP_TEXT[id]];
 
 /** A label in the picture must be at least this many CSS px tall at the lab-standard screens at 100% (spec §5.2 body text is 19 px). */
 const MIN_LABEL_PX = 14;
@@ -87,9 +97,12 @@ interface MapGeometry {
     labels: MapLabel[]; arrows: Box[];
     /** A1: the dots (grey = the true place, blue = where the DNA puts the group) in map units, and how many links and lines were drawn. */
     dots: { kind: string; cx: number; cy: number; r: number; px: number }[]; links: number; lines: number;
+    /** The distribution maps (Task 24): the value dots and zero rings in map units (px = drawn width in CSS px), and the side list. */
+    values: { zero: boolean; cx: number; cy: number; r: number; px: number }[];
+    side: null | { rect: Rect; items: string[] };
   };
 }
-interface MapLabel { text: string; box: Box; glyphs: Box; fontPx: number }
+interface MapLabel { text: string; box: Box; glyphs: Box; fontPx: number; widthVsEstimate: number }
 
 /** Everything the checks need, read in one evaluate so the numbers belong to one moment. */
 async function geometry(page: Page): Promise<MapGeometry> {
@@ -132,6 +145,8 @@ async function geometry(page: Page): Promise<MapGeometry> {
           return {
             text: t.textContent ?? '', box: box(b), fontPx: f,
             glyphs: { left: b.x, right: b.x + b.width, top: y - 0.8 * f, bottom: y + 0.25 * f },
+            // How wide the word really draws against src/maps.ts' estimate (0.58 em a character): the placer keeps clear of the estimate.
+            widthVsEstimate: b.width / ((t.textContent ?? '').length * 0.58 * f),
           };
         }),
         arrows: [...svg.querySelectorAll<SVGGraphicsElement>('path.map-arrow')].map((p) => box(p.getBBox())),
@@ -142,6 +157,15 @@ async function geometry(page: Page): Promise<MapGeometry> {
         })),
         links: svg.querySelectorAll('g.map-link').length,
         lines: svg.querySelectorAll('g.map-link line').length,
+        values: [...svg.querySelectorAll<SVGCircleElement>('circle.map-dot--value, circle.map-dot--zero')].map((e) => ({
+          zero: e.classList.contains('map-dot--zero'),
+          cx: Number(e.getAttribute('cx')), cy: Number(e.getAttribute('cy')), r: Number(e.getAttribute('r')),
+          px: e.getBoundingClientRect().width,
+        })),
+        side: ((): null | { rect: Rect; items: string[] } => {
+          const list = slot.querySelector<HTMLElement>('ul.card-map-side');
+          return list ? { rect: rect(list)!, items: [...list.querySelectorAll('li')].map((li) => li.textContent ?? '') } : null;
+        })(),
       };
     }
     const hint = document.querySelector('#terminal .term-hint');
@@ -175,16 +199,20 @@ test.describe('map cards in their map form', () => {
     app?.cleanup();
   });
 
-  test('the scratch build differs from the shipped flags in the four map flags only', async ({ page }) => {
+  test('the proof covers exactly the map cards the scratch build can force on (e2e/mapBuild.ts MAP_CARD_IDS)', () => {
+    expect([...IDS]).toEqual([...MAP_CARD_IDS]);
+  });
+
+  test('the scratch build differs from the shipped flags in the seven map flags only', async ({ page }) => {
     await page.goto(`${app.url}?test&reset`);
     await expect(prompt(page)).toBeVisible();
     await idle(page);
     const features = await page.evaluate(() => ({ ...window.__adw!.features }));
-    expect(features).toEqual({ ...FEATURES, 'map.A1': true, 'map.D1': true, 'map.E1': true, 'map.G1': true });
+    expect(features).toEqual({ ...FEATURES, ...Object.fromEntries(IDS.map((id) => [`map.${id}`, true])) });
   });
 
   for (const c of cases) {
-    test(`A1, D1, E1 and G1 show their map and fit: ${c.name}`, async ({ browser }, testInfo) => {
+    test(`A1, D1, E1, G1, H2, I2 and J3 show their map and fit: ${c.name}`, async ({ browser }, testInfo) => {
       test.setTimeout(240_000);
       await withPage(browser, c, async (page) => {
         const w = watch(page);
@@ -214,7 +242,7 @@ test.describe('map cards in their map form', () => {
           };
           onScreen('card', g.card);
           onScreen('title', g.title);
-          onScreen('first bullet', g.first);
+          onScreen('first bullet (a distribution card has its first line)', g.first);
           expect(g.first!.top, `${id}: first bullet inside the card body`).toBeLessThan(g.body!.bottom);
           expect(g.buttons.length, `${id}: footer buttons`).toBeGreaterThanOrEqual(2);
           g.buttons.forEach((b, k) => onScreen(`footer button ${k}`, b));
@@ -240,7 +268,8 @@ test.describe('map cards in their map form', () => {
           // Spec §5.2: maps fill the image row at max-height min(52vh, 460px).
           expect(m!.svg.bottom - m!.svg.top, `${id}: map height against the spec cap`).toBeLessThanOrEqual(Math.min(0.52 * g.vh, 460) + 0.5);
           if (c.fit !== 'any') expect(m!.svg.bottom - m!.svg.top, `${id}: map height at ${c.name}`).toBeGreaterThanOrEqual(MIN_MAP_PX);
-          // A label is its font size (20 map units; A1's 24) tall; at the lab-standard screens at 100% it must be legible on a projector.
+          // A label is its font size (20 map units; A1's and the distribution maps' 24 to 26) tall; at the lab-standard screens at 100% it
+          // must be legible on a projector.
           const fontPx = Math.min(...m!.labels.map((t) => t.fontPx));
           expect(fontPx, `${id}: the labels have a font size`).toBeGreaterThanOrEqual(20);
           if (c.fit === 'normal') expect(fontPx * m!.scale, `${id}: label height in CSS px at ${c.name}`).toBeGreaterThanOrEqual(MIN_LABEL_PX);
@@ -256,14 +285,15 @@ test.describe('map cards in their map form', () => {
           }
           // The arrow maps' words are far apart, so they are held to the whole line box. A1 puts one word at each of eight dots, and two of
           // them sit one line apart (27 units between the Estonian and Lithuanian dots against a line box of 1.2 em, 29 at 24): the
-          // letters are clear of each other but the empty space above and below them is not, so A1 is judged on the glyphs.
-          const extent = (t: MapLabel): Box => (id === 'A1' ? t.glyphs : t.box);
+          // letters are clear of each other but the empty space above and below them is not, so A1 is judged on the glyphs. So are the
+          // distribution maps, whose twenty (H2) or ten words sit close to their dots (Task 24); src/maps.ts placeDotLabels measures the same.
+          const extent = (t: MapLabel): Box => (id === 'A1' || isDistribution(id) ? t.glyphs : t.box);
           for (let i = 0; i < m!.labels.length; i++) {
             for (let j = i + 1; j < m!.labels.length; j++) {
               expect(overlaps(extent(m!.labels[i]!), extent(m!.labels[j]!)), `${id}: "${m!.labels[i]!.text}" overlaps "${m!.labels[j]!.text}"`).toBe(false);
             }
           }
-          expect(m!.arrows.length, `${id}: arrows`).toBe(id === 'A1' ? 0 : id === 'D1' ? 2 : id === 'E1' ? 1 : 5);
+          expect(m!.arrows.length, `${id}: arrows`).toBe(id === 'A1' || isDistribution(id) ? 0 : id === 'D1' ? 2 : id === 'E1' ? 1 : 5);
           for (const a of m!.arrows) {
             expect(a.left >= vb.left && a.right <= vb.right && a.top >= vb.top && a.bottom <= vb.bottom, `${id}: an arrow leaves the picture`).toBe(true);
           }
@@ -292,9 +322,51 @@ test.describe('map cards in their map form', () => {
             expect(source, 'A1: source line').toMatch(/^Drawn from this workshop's data \(\d+ groups, [\d,]+ people\)\. The DNA map was turned and scaled to fit the real map as closely as possible\. Inspired by Novembre et al\. 2008\. Map outline: Made with Natural Earth\.$/);
           }
 
+          // H2, I2, J3 (Task 24; the real data's rows). A dot for every row with coordinates, whole inside the picture, a ring exactly where the
+          // number prints 0 and a filled dot of at least 4 map units for every other number; no word over any dot (its own included) and, as above,
+          // none over another word; the rows without coordinates in the side list, in view beside the picture.
+          if (isDistribution(id)) {
+            const rows = rowsOf(id);
+            const dotRows = rows.filter(hasCoordinates);
+            const sideRows = rows.filter((r) => !hasCoordinates(r));
+            expect(m!.values, `${id}: a dot for every row with coordinates`).toHaveLength(dotRows.length);
+            expect(m!.values.filter((v) => v.zero), `${id}: a ring for every number that prints 0, and for no other`).toHaveLength(dotRows.filter((r) => r.display === '0').length);
+            for (const v of m!.values) {
+              const at = `${v.zero ? 'ring' : 'dot'} at ${v.cx.toFixed(0)}, ${v.cy.toFixed(0)}`;
+              expect(v.zero ? v.r === 3 : v.r >= 4, `${id}: the ${at} has radius ${v.r}`).toBe(true);
+              expect(v.cx - v.r >= vb.left - 0.01 && v.cx + v.r <= vb.right + 0.01 && v.cy - v.r >= vb.top - 0.01 && v.cy + v.r <= vb.bottom + 0.01,
+                `${id}: the ${at} is cut off by the window`).toBe(true);
+              for (const t of m!.labels) {
+                const nearest = Math.hypot(Math.max(t.glyphs.left - v.cx, 0, v.cx - t.glyphs.right), Math.max(t.glyphs.top - v.cy, 0, v.cy - t.glyphs.bottom));
+                expect(nearest, `${id}: "${t.text}" covers the ${at}`).toBeGreaterThanOrEqual(v.r);
+              }
+            }
+            if (c.fit === 'normal') {
+              const filled = m!.values.filter((v) => !v.zero).map((v) => v.px);
+              const rings = m!.values.filter((v) => v.zero).map((v) => v.px);
+              expect(Math.min(...filled), `${id}: the smallest dot's width in CSS px at ${c.name}`).toBeGreaterThanOrEqual(4);
+              if (rings.length > 0) expect(Math.min(...filled), `${id}: even the smallest filled dot is wider than the zero ring`).toBeGreaterThan(Math.max(...rings));
+            }
+            const side = m!.side;
+            expect(side?.items ?? [], `${id}: the side list holds the rows without coordinates`).toEqual(sideRows.map((r) => `${r.label} ${r.display}`));
+            if (side !== null) {
+              onScreen('side list', side.rect);
+              expect(side.rect.right, `${id}: the side list inside the card`).toBeLessThanOrEqual(g.card!.right + 0.5);
+              expect(side.rect.bottom, `${id}: the side list inside the card body`).toBeLessThanOrEqual(g.body!.bottom + 0.5);
+              expect(intersects(side.rect, m!.svg), `${id}: the side list is beside the picture, not over it`).toBe(false);
+            }
+            if (id === 'H2') {
+              const note = page.locator('#card .card-side-note');
+              expect(await note.textContent(), 'H2: the Ireland footnote').toBe(IRELAND_FOOTNOTE);
+              const box = await note.boundingBox();
+              expect(box!.y, 'H2: the footnote is under the map').toBeGreaterThanOrEqual(m!.svg.bottom - 0.5);
+              expect(box!.y + box!.height, 'H2: the footnote is on screen').toBeLessThanOrEqual(g.vh + 0.5);
+            }
+          }
+
           // Spec §5.4 (guided.spec): no content-rule violation in anything on screen with this card open.
           expect(await screenViolations(page), `${id}: rule violations on screen`).toEqual([]);
-          testInfo.annotations.push({ type: 'map size', description: `${id} at ${c.name}: ${m!.sizeCss[0]} x ${m!.sizeCss[1]} px, scale ${m!.scale.toFixed(3)}, label ${(fontPx * m!.scale).toFixed(1)} px, fit ${g.fit}` });
+          testInfo.annotations.push({ type: 'map size', description: `${id} at ${c.name}: ${m!.sizeCss[0]} x ${m!.sizeCss[1]} px, scale ${m!.scale.toFixed(3)}, label ${(fontPx * m!.scale).toFixed(1)} px, fit ${g.fit}, widest word ${Math.max(...m!.labels.map((t) => t.widthVsEstimate), 0).toFixed(2)} of its estimate` });
 
           await page.locator('#card .card-continue').click();
           await expect(page.locator('#card')).toBeHidden();
@@ -307,7 +379,7 @@ test.describe('map cards in their map form', () => {
     });
   }
 
-  test('the map cards are the four and only four cards that draw a map in this build', async ({ page }) => {
+  test('the map cards are the seven and only seven cards that draw a map in this build', async ({ page }) => {
     await page.goto(`${app.url}?test&reset`);
     await expect(prompt(page)).toBeVisible();
     await idle(page);

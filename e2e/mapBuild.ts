@@ -20,9 +20,9 @@ import type { MapId } from '../src/types.ts';
 /** The repo root: read when a build starts, not when the module loads, so the plugin can be imported anywhere (the unit tests do). */
 const repoRoot = (): string => fileURLToPath(new URL('..', import.meta.url));
 
-/** The map cards built so far (Tasks 20 and 23): the card, its flag (`map.<id>`) and its manifest key are all this id. Tasks 24, 27
+/** The map cards built so far (Tasks 20, 23 and 24): the card, its flag (`map.<id>`) and its manifest key are all this id. Tasks 27
  *  and 29 add theirs. */
-export const MAP_CARD_IDS: readonly MapId[] = ['A1', 'D1', 'E1', 'G1'];
+export const MAP_CARD_IDS: readonly MapId[] = ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3'];
 
 export interface ForceOptions {
   /** A1 only: the names the scratch build puts in A1_CONFIRMED_LABELS (src/maps.ts), so the map is drawn labelled. In the repo that list

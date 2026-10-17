@@ -46,6 +46,41 @@ const SHOULD_SHOW: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+type DistributionRow = { label: string; display: string; lat?: number; lon?: number };
+
+/**
+ * What the instructor should see on H2, I2 and J3 (Task 24, spec §3.4, §6), written from the real rows so the numbers here are the ones the
+ * card prints. Plain words for the person checking; never shown to students. `source` is the card's source line (verbatim from spec §3.4)
+ * and `footnote` H2's side note.
+ */
+function distributionShouldShow(id: 'H2' | 'I2' | 'J3', rows: readonly DistributionRow[], source: string, footnote: string): string[] {
+  const placed = (r: DistributionRow): boolean => r.lat !== undefined && r.lon !== undefined;
+  const dots = rows.filter(placed);
+  const side = rows.filter((r) => !placed(r));
+  const named = (list: readonly DistributionRow[]): string => list.map((r) => `${r.label} ${r.display}`).join(', ');
+  const rings = dots.filter((r) => r.display === '0');
+  const smallest = dots.filter((r) => r.display !== '0').at(-1);
+  const small = `A bigger number is a bigger and darker dot (the biggest is ${dots[0]!.label} ${dots[0]!.display}). A small number never looks weaker than none: `
+    + (rings.length > 0 ? `${rings.map((r) => r.label).join(', ')} print 0 and are the small hollow rings, and ` : '')
+    + (smallest === undefined ? '' : `every other number, even the smallest (${smallest.label} ${smallest.display}), is a filled dot a little bigger than a ring, in a blue that still shows on the land.`);
+  return [
+    id === 'H2'
+      ? `One dot for each of ${dots.length} countries, in its own country, each with its name and number as the card's value list has them (biggest first): ${named(dots)}.`
+      : `One dot for each of ${dots.length} places where 1000 Genomes took its samples, each with its name and number: ${named(dots)}. Britain, Finland, Tuscany and Spain in Europe; Pakistan (Lahore) and Bangladesh (Dhaka) in South Asia; China (Beijing) and Japan (Tokyo) in East Asia; Nigeria (Ibadan) and Kenya (Webuye) in Africa. Each dot in its own country or city.`,
+    small,
+    id === 'H2'
+      ? `Under the map, as in the spec's side-list footnote: "${footnote}"`
+      : `${named(side)}: no point for it (a region, not a place), so it is in a side list beside the map, as the spec says for places without coordinates. The value list the map replaces has all ${rows.length} rows.`,
+    ...(id === 'I2' ? ['The card\'s second line sends students to China and Japan ("look at their numbers"): both words must be easy to find and read.'] : []),
+    id === 'H2'
+      ? 'Every word sits beside its own dot, is readable at projector size, and hides no other word and no dot. Where dots crowd (north-west Europe: Ireland, the United Kingdom, the Netherlands, Germany, Poland) check that each number is clearly its own dot\'s. A word may hang over the edge of the map\'s frame (Ireland and Portugal on the west, Russia on the east): that is where the room is. The picture is a window cut to the dots, so it leaves out the empty Arctic and the south of the frame.'
+      : 'Every word sits beside its own dot, is readable at projector size, and hides no other word and no dot. The picture is a window cut to the dots: it leaves out the empty north and south of the frame and some of its west, so the picture\'s left edge is not the frame\'s.',
+    ...(id === 'H2' ? [] : ['The east edge of the frame cuts Hokkaido (the frame ends at 145 degrees east): that is the frame, not a missing piece.']),
+    `Source line (spec §3.4, as the card prints it): ${source}`,
+    'Nothing on this map gives the puzzle away: it holds place names and numbers only (no dates, no "selection", no "spread"). The card is a "before" card: students see it before the plot.',
+  ];
+}
+
 interface Options { ids: string[]; out: string; cards: boolean }
 
 function parseArgs(argv: string[]): Options {
@@ -116,9 +151,10 @@ async function main(argv: string[]): Promise<void> {
   // svgEl() and renderMap() create elements through the global document.
   Object.assign(globalThis, { document: dom.window.document, window: dom.window });
   const { DATA } = await import('../src/data');
-  const { A1_CONFIRMED_LABELS, mapSpec, MAP_SPECS_BUILT, specA1 } = await import('../src/maps');
+  const { A1_CONFIRMED_LABELS, DISTRIBUTION_MAP_GENE, mapSpec, MAP_SPECS_BUILT, specA1 } = await import('../src/maps');
   const { renderMap } = await import('../src/plots/map');
-  const { CARDS } = await import('../src/cards');
+  const { CARDS, distributionRows } = await import('../src/cards');
+  const { IRELAND_FOOTNOTE } = await import('../src/content');
   const { SVG_NS } = await import('../src/plots/svg');
   for (const id of options.ids) {
     if (!MAP_SPECS_BUILT.has(id as never)) throw new Error(`${id} is not a built map (built: ${[...MAP_SPECS_BUILT].join(', ')})`);
@@ -156,7 +192,13 @@ async function main(argv: string[]): Promise<void> {
     const named = id === 'A1' && candidates.length > 0 ? drawn(specA1(DATA, candidates)) : null;
     const title = id in CARDS ? CARDS[id as keyof typeof CARDS].title : id;
     const aspect = spec.view !== undefined ? spec.view.width / spec.view.height : 1000 / 700;
-    const expect = [...(SHOULD_SHOW[id] ?? []), ...(id === 'A1' ? [a1LabelLine] : [])].map((line) => `<li>${escapeHtml(line)}</li>`).join('');
+    // The distribution maps' lines are written from the real rows (Task 24); the others' are fixed words above.
+    const distribution = id === 'H2' || id === 'I2' || id === 'J3'
+      ? distributionShouldShow(id, distributionRows(DATA, DISTRIBUTION_MAP_GENE[id]), CARDS[id].source ?? '', IRELAND_FOOTNOTE) : [];
+    // On the card the rows without coordinates sit in a side list beside the picture, which this picture of the svg alone does not draw.
+    const sideNote = (spec.sideList ?? []).length > 0
+      ? ` On the card the side list sits beside it: ${(spec.sideList ?? []).map((r) => `${r.label} ${r.display}`).join(', ')}.` : '';
+    const expect = [...(SHOULD_SHOW[id] ?? []), ...distribution, ...(id === 'A1' ? [a1LabelLine] : [])].map((line) => `<li>${escapeHtml(line)}</li>`).join('');
     const figures = SCREENS.map((screen) => {
       const shot = shots?.get(`${id}@${screen.width}`);
       // Without a measured card: the room a card has at best, its width less the card's padding, and the spec cap on the height.
@@ -167,7 +209,7 @@ async function main(argv: string[]): Promise<void> {
         `<figure><img class="card" src="${escapeHtml(shot.file)}" alt="The ${escapeHtml(id)} card at ${label}">` +
         `<figcaption>The whole card as the students see it at ${label} (picture size: its real size).</figcaption></figure>`;
       const alone = `<figure><div class="map" style="width:${width}px;height:${height}px">${svg.outerHTML}</div>` +
-        `<figcaption>The map alone at ${label}: ${width} x ${height} px${shot === undefined ? ' (estimated)' : ''}${named === null ? '' : ', as it ships: no labels'}. Zoom in to look closer.</figcaption></figure>`;
+        `<figcaption>The map alone at ${label}: ${width} x ${height} px${shot === undefined ? ' (estimated)' : ''}${named === null ? '' : ', as it ships: no labels'}. Zoom in to look closer.${escapeHtml(sideNote)}</figcaption></figure>`;
       const withNames = named === null ? '' :
         `<figure><div class="map" style="width:${width}px;height:${height}px">${named.outerHTML}</div>` +
         `<figcaption>The same map with its ${candidates.length} groups named (${escapeHtml(candidates.join(', '))}): how it will look if you confirm the names (open check 14). The app does not show these labels until you do.</figcaption></figure>`;

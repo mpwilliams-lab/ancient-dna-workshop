@@ -92,6 +92,38 @@ describe('npm run preview-maps', () => {
     expect(text).not.toMatch(/<script/i);
   });
 
+  // Task 24: the distribution maps' what-to-look-for lines are written from the real rows, so they cannot go stale when the data does.
+  it('H2, I2, J3: what to look for from the real rows, the Ireland footnote, the side list, the card\'s own source line, and the map drawn with its words', () => {
+    const before = sha(MANIFEST);
+    const r = preview('H2', 'I2', 'J3');
+    expect(r.status, r.stderr).toBe(0);
+    const html = readFileSync(join(r.dir, 'maps.html'), 'utf8');
+    const text = unescape(html);
+    for (const id of ['H2', 'I2', 'J3']) expect(text).toContain(`<section id="${id}">`);
+    expect(text).toContain('npm run visual-check -- H2 I2 J3</code>');
+    // H2: twenty countries with the card's numbers, the footnote under the map, no side list.
+    expect(text).toContain('One dot for each of 20 countries');
+    expect(text).toContain('Ireland 96, Norway 84, United Kingdom 75, Sweden 73, Netherlands 68');
+    expect(text).toContain('Under the map, as in the spec\'s side-list footnote: "Ireland: small sample."');
+    expect(text).toContain('>United Kingdom 75</text>');
+    // I2 and J3: ten places, the Middle East in a side list, the hollow rings named.
+    expect(text).toContain('One dot for each of 10 places where 1000 Genomes took its samples');
+    expect(text).toContain('Britain 98, Tuscany 97, Finland 96, Spain 82, Pakistan 6, Bangladesh 4, China 1, Kenya 1, Japan 0, Nigeria 0');
+    expect(text).toContain('Finland 91, Britain 82, Tuscany 42, Spain 32, Pakistan 10, Bangladesh 10, China 0, Japan 0, Nigeria 0, Kenya 0');
+    expect(text).toContain('Japan, Nigeria print 0 and are the small hollow rings');
+    expect(text).toContain('China, Japan, Nigeria, Kenya print 0 and are the small hollow rings');
+    expect(text).toContain('Middle East 47: no point for it');
+    expect(text).toContain('Middle East 21: no point for it');
+    expect(text).toContain('On the card the side list sits beside it: Middle East 47.');
+    expect(text).toContain('>Britain 98</text>');
+    // The cards' source lines, verbatim from spec §3.4.
+    expect(text).toContain('Source line (spec §3.4, as the card prints it): Data: Liebert et al. 2017 (CC BY 4.0). Map outline: Made with Natural Earth.');
+    expect(text.match(/Source line \(spec §3\.4, as the card prints it\): Data: 1000 Genomes Project; gnomAD\. Map outline: Made with Natural Earth\./g)).toHaveLength(2);
+    expect(text).toContain('Nothing on this map gives the puzzle away');
+    expect(html).not.toMatch(/<script/i);
+    expect(sha(MANIFEST)).toBe(before);
+  });
+
   it('refuses a map that is not built, and an option it does not know, and writes nothing', () => {
     const unbuilt = preview('F1inset');
     expect(unbuilt.status).toBe(1);
