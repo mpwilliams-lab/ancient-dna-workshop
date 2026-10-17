@@ -94,16 +94,25 @@ test('refresh with a card open after Back shows the same card; ?reset clears the
   expect(w.errors).toEqual([]);
 });
 
-// ---- The disabled Back button (review fix round 1) ----
+// ---- The disabled Back button (review fix rounds 1 and 2) ----
 
-test('a click on the disabled Back button at the first screen leaves the keyboard on the prompt, so typing still works', async ({ page }) => {
+test('a click, a double click and a triple click on the disabled Back button at the first screen each leave the keyboard on the prompt and nothing highlighted, so typing still works', async ({ page }) => {
   const w = watch(page);
   await freshStart(page);
   await expect(page.locator('#back')).toBeDisabled();
-  // A student clicks it. Chrome sends no mouse events to a disabled control, so the page's "a click puts the prompt back in focus"
-  // handler never ran and the keyboard fell to <body>; the button now takes no pointer events and the click reaches the header.
-  await page.locator('#back').click({ force: true });
-  await expect(prompt(page)).toBeFocused();
+  // Students click it, and click it again. Chrome sends no mouse events to a disabled control, so the page's "a click puts the prompt
+  // back in focus" handler never ran and the keyboard fell to <body> (round 1): the button now takes no pointer events and the click
+  // reaches the header. A double or triple click then selected the word "Back" there, and that handler leaves the focus alone while
+  // text is selected, so the keyboard fell to <body> again and "Back" showed highlighted (round 2): the header selects nothing.
+  for (const clickCount of [1, 2, 3]) {
+    const label = `after ${clickCount} click(s)`;
+    await page.locator('#back').click({ force: true, clickCount });
+    await expect(prompt(page), `${label}: the prompt has the keyboard`).toBeFocused();
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? ''), `${label}: nothing is highlighted`).toBe('');
+    await page.keyboard.type(`abc${clickCount}`);
+    await expect(prompt(page), `${label}: typing reaches the prompt`).toHaveValue(`abc${clickCount}`);
+    await prompt(page).fill('');
+  }
   await page.keyboard.type(formatCommand(SCRIPT[0]!));
   await page.keyboard.press('Enter');
   await idle(page);

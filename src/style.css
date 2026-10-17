@@ -57,6 +57,9 @@ body {
   padding: 0 12px;
   border-bottom: 1px solid var(--border);
   min-width: 0;
+  /* Nothing in the header is text to select. A double or triple click on it (students double-click a disabled Back) would highlight
+     "Back", and the page's "a click puts the prompt back in focus" handler leaves the focus alone while text is selected. */
+  user-select: none;
 }
 
 #app-title {
