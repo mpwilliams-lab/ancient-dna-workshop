@@ -576,8 +576,8 @@ describe('the legend explains the outlined eastern-England points', () => {
   const eastItem = (svg: SVGSVGElement) => svg.querySelector('.legend .legend-item[data-legend="east"]');
   const legendTexts = (svg: SVGSVGElement) => [...svg.querySelectorAll('.legend-item')].map((t) => t.textContent);
 
-  it('the label is "Eastern England (outlined)", written once in content.ts', () => {
-    expect(EAST_ENGLAND_LEGEND).toBe('Eastern England (outlined)');
+  it('the label is "Anglo-Saxon burials, eastern England (outlined)" (v3 §3.5), written once in content.ts', () => {
+    expect(EAST_ENGLAND_LEGEND).toBe('Anglo-Saxon burials, eastern England (outlined)');
   });
 
   it('adds exactly one item, straight after the Anglo-Saxon one, when that layer is drawn and a point carries east', () => {

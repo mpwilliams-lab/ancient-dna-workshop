@@ -1,8 +1,9 @@
-// Every on-screen string lives here (spec §6). tests/content.test.ts scans allRenderableStrings()
+// Every on-screen string lives here (spec §6, v3 §3). tests/content.test.ts scans allRenderableStrings()
 // with tests/contentRules.ts, so any string added to this file is checked automatically.
 import * as self from './content';
-import type { AxisTick, ConsumerShare, GeneId, MapGroupId, PeriodId, SourceId, Trait } from './types';
-import { GENE_IDS } from './types';
+import type { AxisTick, ChipIcon, ChipKey, ConsumerShare, GeneId, MapGroupId, PeriodId, SourceId, Trait } from './types';
+import { GENE_IDS, MAP_GROUP_IDS } from './types';
+import { ALL_OFF, ALL_ON, FEATURES, type Features } from './features';
 
 export const APP_TITLE = 'Ancient DNA of Britain';
 export const PAGES_URL = 'https://mpwilliams-lab.github.io/ancient-dna-workshop/';
@@ -58,6 +59,9 @@ export function withN(label: string, n: number): string {
   return `${label} (n = ${n})`;
 }
 
+/** Open check 1 (spec v3 §11) passed: Silva et al. 2026 is shown. false selects every §3.3 fallback string. */
+export const SILVA_2026_SHOWN: boolean = true;
+
 // ---- Hook and today's map (spec §3) ----
 export const ME_HEADING = 'Example customer (made up for this demo, not a real person)';
 export const ME_RESULT: ConsumerShare[] = [
@@ -67,30 +71,76 @@ export const ME_RESULT: ConsumerShare[] = [
 export const HOOK_QUESTION = 'Can a test like this tell us who lived in Britain long ago?';
 export const PCA_CAPTION = 'North is up. Dots close together share more ancestry.';
 
-// ---- Beat 1: Beaker arrival (spec §3, §6 rule 3) ----
-export const BEAKER_CALLOUT =
-  "At least 90% ± 2% of Britain's gene pool was replaced by the Middle Bronze Age (Olalde et al. 2018).";
-
-/** Spec §3 bridging line. pct must be data.admixture.beaker_steppe_pct (a whole number 0-100). */
-export function beakerBridge(pct: number): string {
-  if (!Number.isInteger(pct) || pct < 0 || pct > 100) throw new RangeError(`beakerBridge: expected a whole percent, got ${pct}`);
-  return `The newcomers were themselves part steppe herder, part farmer, so the steppe colour rises to ${pct}%, not 90%.`;
+// ---- v3 §3.5: PCA captions, zoom note, legend headings ----
+export const EUROPE_CAPTION = 'Each dot is a person living in Europe today. Britain is held back for now.';
+/** Every British-frame PCA shows this in the caption strip; z = zoomFactor(data) (5 on the real data). */
+export function zoomNote(z: number): string {
+  return `Zoomed in about ${z}× on Britain`;
 }
+export const REVEAL_PCA_CAPTION =
+  "Britain today lands right on top of the Iron Age cloud: much of the Iron Age people's DNA is still here. " +
+  '(Our Britain today people come from England and Scotland, including Orkney; none are from Wales.)';
+export const FINALE_CAPTION =
+  'Every period, oldest first. The Beaker people and the Anglo-Saxons brought new people: DNA changed. ' +
+  'The Romans brought new ideas to mostly the same families: culture changed, DNA barely did. ' +
+  'Britain today arrives last, close to the Iron Age and later Britons.';
+export const ROMAN_FOCUS_CAPTION = 'New rulers, mostly the same families: culture changed, DNA barely did';
+export const LEGEND_ANCIENT = 'Ancient Britons';
+export const LEGEND_LIVING = 'People living today';
+
+// ---- v3 §3.5 chip rule: every chip starts "DNA changed" (double-helix icon) or "Culture changed" (pot icon) ----
+export const CHIP_DNA_CHANGED = 'DNA changed: new people';
+export const CHIP_CULTURE_CHANGED = 'Culture changed: new things';
+export const CHIP_DNA_SLIGHT = 'DNA changed, but only slightly';
+export const CHIP_CULTURE_ONLY = 'Culture changed, DNA did not: new ideas, same people';
+export const CHIP_ROMAN = 'Culture changed, DNA barely did: new ideas, mostly the same people';
+export const CHIP_DNA_CHANGED_EAST = 'DNA changed, most of all in the east: new people';
+export const CHIP_TEXT: Readonly<Record<ChipKey, string>> = {
+  CHIP_DNA_CHANGED,
+  CHIP_CULTURE_CHANGED,
+  CHIP_DNA_SLIGHT,
+  CHIP_CULTURE_ONLY,
+  CHIP_ROMAN,
+  CHIP_DNA_CHANGED_EAST,
+};
+/** The icon follows the stem, so a chip can be read without colour (spec v3 §3.5, rule 13). */
+export function chipIcon(key: ChipKey): ChipIcon {
+  const text = CHIP_TEXT[key];
+  if (text?.startsWith('DNA changed')) return 'dna';
+  if (text?.startsWith('Culture changed')) return 'pot';
+  throw new Error(`chipIcon: ${String(key)} does not start with "DNA changed" or "Culture changed"`);
+}
+
+// ---- Beat 1: Beaker arrival (spec v3 §3.2, rule 3). The v2.1 bridge line is deleted everywhere. ----
+export const BEAKER_CALLOUT =
+  "Within about ten generations of the Beaker people arriving, at least 9 in 10 parts of Britain's DNA came from the newcomers. " +
+  "The First farmers / Stonehenge builders' share shrank to about 1 in 10 or less (Olalde et al. 2018).";
 
 export const K_REFUSAL = "This workshop's run uses K = 3. Try run_admixture(K = 3).";
 
-// ---- Beat 2: Romans (spec §6 rule 4) ----
-export const ROMAN_CARD =
-  'New rulers, roads and Latin — mostly the same people (Silva et al. 2026; Martiniano et al. 2016).';
+// ---- The reveal (spec v3 §3.3) ----
+export const REVEAL_CALLOUT =
+  "Most of Britain's ancestry today was already here by the Iron Age. " +
+  'Later, Anglo-Saxon newcomers added a sizeable share, most of it in eastern England (Gretzinger et al. 2022).';
+/** t and i are whole steppe percents from data.admixture.bars (Today and IronAge); 56 and 57 on the current build. */
+export function revealNote(t: number, i: number): string {
+  return `Britain today: ${t}% steppe. Iron Age: ${i}% steppe. Of all the periods, the Iron Age bar is the closest match.`;
+}
 
-// ---- Beat 3: Anglo-Saxons (spec §3, §6 rule 5) ----
+// ---- Romans (spec v3 §3.3, §3.5) ----
+/** The run_pca(period = "Roman") log line (replaces the v2.1 Roman card). */
+export const ROMAN_LOG_LINE: string = SILVA_2026_SHOWN
+  ? 'New rulers, mostly the same families (Silva et al. 2026; Scheib et al. 2024; Martiniano et al. 2016).'
+  : 'New rulers, mostly the same families (Scheib et al. 2024; Martiniano et al. 2016).';
+
+// ---- Anglo-Saxons (spec v3 §3.5, rule 5) ----
 export const ANGLO_SAXON_TAKEAWAY =
-  'A real migration: eastern-England burials carry up to 76% continental ancestry (Gretzinger et al. 2022). ' +
-  'Yet the Anglo-Saxon bar looks almost the same as the Iron Age and Roman bars, because a tool only sees differences its reference groups can tell apart.';
-/** PCA legend item (src/plots/pca.ts) for the black-outlined Anglo-Saxon points flagged as eastern England; shown only when such points are drawn. */
-export const EAST_ENGLAND_LEGEND = 'Eastern England (outlined)';
+  'A real migration: Anglo-Saxon-period burials sampled in England carry about 76% continental ancestry on average (Gretzinger et al. 2022). ' +
+  "Yet the Anglo-Saxon bar looks almost the same as the Iron Age bar: both groups were part steppe herder, part farmer, so this three-colour test can't tell them apart.";
+/** PCA legend item (src/plots/pca.ts) for the black-outlined Anglo-Saxon points flagged as eastern England. */
+export const EAST_ENGLAND_LEGEND = 'Anglo-Saxon burials, eastern England (outlined)';
 
-// ---- Beat 4: consumer DNA (spec §3, §5.3, §6 rule 8) ----
+// ---- Beat 4: consumer DNA (spec §3, §5.3, §6 rule 8; v3 §3.3) ----
 /** The one sentence of CONSUMER_NOTE that the hook screen (ancestry_test(person = "me")) shows; the rest is the Beat 4 debrief. */
 export const HOOK_NOTE = 'These labels are illustrative, not a measurement.';
 export const CONSUMER_NOTE =
@@ -100,6 +150,12 @@ export const CONSUMER_NOTE =
 export const CONSUMER_TAKEAWAY =
   'Consumer tests compare you with living people: AncestryDNA\'s reference panel is "people with long family histories in a particular region or group" (AncestryDNA Ethnicity Estimate 2023 white paper). ' +
   'Only ancient DNA reveals the turnovers.';
+/** The terminal heading of a period's consumer result; also the consumer-bars plot title (Task 18). */
+export function consumerTitle(label: string, n: number): string {
+  return `Consumer-style ancestry test: ${label} (${n} people)`;
+}
+export const CONSUMER_PLOT_SUBTITLE = 'Compared with people living in Europe today';
+export const CONSUMER_PLOT_NOTE = "These labels show where similar people live today, not who anyone's ancestors were.";
 
 // ---- Traits (spec §5.4, §6 rule 6) ----
 export const TRAIT_CAPTIONS = {
@@ -133,9 +189,13 @@ export function countNote(f: number, n: number): string {
   return `about ${Math.round(f * 100)}% (${Math.round(f * n)} of ${n})`;
 }
 
+/** Spec v3 §3.4: the HLA text card (fallback only). Akbari's "19-fold" conflicts with its own figure legend, so it gives no number. */
 export const HLA_TEXT_CARD =
-  `${TRAIT_CAPTIONS['HLA-DQ2']} Today about 1 in 5 copies of this stretch of DNA carry it, and people with two copies are about 19 times more likely to get coeliac disease or gluten sensitivity (Akbari et al. 2026). ` +
+  `${TRAIT_CAPTIONS['HLA-DQ2']} Today about 1 in 5 copies of this stretch of DNA carry it, and people with two copies are much more likely to get coeliac disease or gluten sensitivity (Akbari et al. 2026). ` +
   "Our British ancient-DNA data do not cover this spot, so there is no plot here: the numbers come from Akbari et al.'s West Eurasian study.";
+/** Spec v3 §3.4 L-reveal: a second caption line under the HLA-DQ2 trajectory (drawn by Task 9). */
+export const HLA_REVEAL_LINE =
+  'One leading idea, still a hypothesis: immune versions like this helped people fight infections, and coeliac disease is the price a few people pay (Zhernakova et al. 2010; Akbari et al. 2026).';
 
 // ---- Wrap (spec §3, §6 rule 7) ----
 export const WRAP_LINE =
@@ -143,35 +203,86 @@ export const WRAP_LINE =
 export const WRAP_QR_CAPTION = 'Take the app home: scan the code or visit';
 export const WRAP_CREDIT = 'WWU Biology · Walla Walla University';
 
-// ---- Terminal (spec §4, §7) ----
+// ---- Terminal (spec §4, §7; v3 §3.5) ----
 export const RESTORED_NOTICE = 'Restored previous session — reload with ?reset to start fresh';
 export const PREDICT_HINT = 'Predict: where will the Beaker newcomers land? Then run run_pca(period = "BellBeaker")';
+export const REVEAL_HINT = 'Predict: where will Britain today land? Then run run_pca(period = "Today")';
+/** The hint line while a card is open. The controller shows it (Task 6); hintText never returns it. */
+export const CARD_HINT = 'Press Enter to continue (or click Continue).';
 export const HINT_PREFIX = 'Try: ';
+
+// ---- Cards, buttons and credits (v3 §3.5) ----
+export const BACK_BUTTON = 'Back';
+export const BACK_BUTTON_LABEL = 'Back one screen';
+export const CARD_CONTINUE = 'Continue';
+export const CARD_CONTINUE_TO_PLOT = 'Show the plot';
+export const CARD_CONTINUE_DONE = 'See the plot';
+/** "2 of 3"; i is 1-based. */
+export function cardCounter(i: number, n: number): string {
+  return `${i} of ${n}`;
+}
+export const CREDITS_LINK = 'Image credits';
+export const CREDITS_TITLE = 'Image and data credits';
+export const CREDITS_CLOSE = 'Close';
+export const CREDITS_FOOTER =
+  'Map outlines: Made with Natural Earth (public domain). Allele frequencies: 1000 Genomes Project; gnomAD; Akbari et al. 2026 (AGES). ' +
+  "Lactase data: Liebert et al. 2017, Human Genetics (CC BY 4.0). The app's code licence does not cover these images; each keeps its own licence.";
+
+// ---- Terminal log lines (v3 §3.5, CONTRACT §4.1). commands.ts imports them, so the content scan reaches them. ----
+/** load_genomes(); n = logs.pca_people_unique rounded to 10 (wired by Task 7). */
+export function mapAxesLine(n: number): string {
+  return `Map axes: built from about ${n} present-day Europeans. Britons are left out, then placed on the map the same way as ancient Britons.`;
+}
+/** Every run_pca (wired by Task 7). */
+export function axesLine(n: number): string {
+  return `Axes: about ${n} present-day Europeans. Britons are left out, then placed on the map the same way as ancient Britons.`;
+}
+/** run_pca(period = "Europe") (wired by Task 4): the map-group labels in map_groups order. */
+export function europeProjectingLine(labels: string[]): string {
+  return `Projecting present-day Europeans onto the axes: ${labels.length} map groups (${labels.join(', ')})`;
+}
+export const EUROPE_HELD_BACK = 'Britain today: held back for now.';
+export const EUROPE_ALREADY_SHOWN = 'Britain today: already on the map.';
+export const TODAY_PLACED = 'Britain today: placed on the map the same way as the ancient Britons.';
+export const ALL_PROJECTING = 'Projecting every period onto the axes, oldest first:';
+export const ALL_TODAY_LAST = 'Britain today: placed last.';
+export const ADMIX_TODAY_HIDDEN = 'Britain today is not shown yet.';
+export const ADMIX_TODAY_SHOWN = 'Now with Britain today.';
+/** Appended to ancestry_test(...) only with features.consumerBars (Task 18). */
+export const CONSUMER_BARS_LOG = 'Drawing the result as bars.';
+
+// ---- help() (v3 §3.5) ----
 // Every line is at most 60 characters: the terminal pane is about 69 characters wide at 1366 x 768, and a longer line wraps
 // under its own command. Each command has a line to itself with its description indented below it (tests/content.test.ts).
-export const HELP_LINES: string[] = [
-  'Commands (type one, then press Enter):',
-  '  help()',
-  '      show this list',
-  '  load_genomes()',
-  '      load the genomes',
-  '  run_pca(period = "IronAge")',
-  '      map one period: Today, FirstFarmers, BellBeaker,',
-  '      BronzeAge, IronAge, Roman, AngloSaxon, Viking or all',
-  '  run_admixture(K = 3)',
-  '      ancestry bars for the periods you have mapped',
-  '  run_admixture(K = 3, period = "BellBeaker")',
-  '      one thin bar per person in that period',
-  '  allele_freq(gene = "LCT")',
-  '      a trait through time: LCT, SLC45A2, HERC2,',
-  '      TYK2, HLA-DQ2',
-  '  ancestry_test(person = "me")',
-  '      a consumer-style test: "me" or any period',
-  '  clear()',
-  '      clear the text (the plot stays)',
-  'Keys: Tab completes, Up/Down shows earlier commands,',
-  '      Esc fills in the hint.',
-];
+/** help() for a flag set: " (bars)" only with consumerBars, the Back line only with back (spec v3 §3.5, §10.3). */
+export function helpLines(features: Features = FEATURES): string[] {
+  return [
+    'Commands (type one, then press Enter):',
+    '  help()',
+    '      show this list',
+    '  load_genomes()',
+    '      load the genomes',
+    '  run_pca(period = "IronAge")',
+    '      map one period: Today, FirstFarmers, BellBeaker,',
+    '      BronzeAge, IronAge, Roman, AngloSaxon, Viking or all',
+    '  run_admixture(K = 3)',
+    '      ancestry bars for the periods you have mapped',
+    '  run_admixture(K = 3, period = "BellBeaker")',
+    '      one thin bar per person in that period',
+    '  allele_freq(gene = "LCT")',
+    '      a trait through time: LCT, SLC45A2, HERC2,',
+    '      TYK2, HLA-DQ2',
+    '  ancestry_test(person = "me")',
+    `      a consumer-style test: "me" or any period${features.consumerBars ? ' (bars)' : ''}`,
+    '  clear()',
+    '      clear the text (the plot stays)',
+    'Keys: Tab completes, Up/Down shows earlier commands,',
+    '      Esc fills in the hint.',
+    ...(features.back ? ['      Back button: step back one screen.'] : []),
+  ];
+}
+/** help() as shipped (CONTRACT §4.1: stays exported and equals helpLines(FEATURES)). */
+export const HELP_LINES: string[] = helpLines(FEATURES);
 
 // ---- Rule-test hook ----
 function collect(v: unknown, out: string[]): void {
@@ -194,9 +305,11 @@ export function allRenderableStrings(): string[] {
       out.push(traitCaption(t), traitSourceLabel(t));
     }
   }
-  for (const pct of [0, 64, 100]) out.push(beakerBridge(pct));
   out.push(countNote(7 / 68, 68), withN(PERIOD_LABELS.Roman, 15));
   out.push(steppePctLabel(65), admixPeopleTitle(PERIOD_LABELS.BellBeaker, 64));
+  out.push(zoomNote(5), revealNote(56, 57), cardCounter(2, 3), consumerTitle(PERIOD_LABELS.IronAge, 371));
+  out.push(mapAxesLine(950), axesLine(950), europeProjectingLine(MAP_GROUP_IDS.map((id) => MAP_GROUP_LABELS[id])));
+  out.push(...helpLines(ALL_ON), ...helpLines(ALL_OFF));
   out.push(...SHELL_STRINGS);
   return out;
 }

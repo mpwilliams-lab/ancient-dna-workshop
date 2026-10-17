@@ -4,8 +4,8 @@ import type { Command } from './parser';
 import { formatCommand } from './parser';
 import { EXTRA_PREFIX, EXTRAS, NEXT_PREFIX, SCRIPT } from './hints';
 import {
-  ANGLO_SAXON_TAKEAWAY, BEAKER_CALLOUT, beakerBridge, CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_QUESTION, ME_RESULT,
-  NORTH_SEA_LABEL, PAGES_URL, PERIOD_LABELS, PREDICT_HINT, RESTORED_NOTICE, ROMAN_CARD, traitCaption, traitSourceLabel,
+  ANGLO_SAXON_TAKEAWAY, BEAKER_CALLOUT, CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_QUESTION, ME_RESULT,
+  NORTH_SEA_LABEL, PAGES_URL, PERIOD_LABELS, PREDICT_HINT, RESTORED_NOTICE, ROMAN_LOG_LINE, traitCaption, traitSourceLabel,
   WRAP_BUTTON, WRAP_CLOSE, WRAP_LINE,
 } from './content';
 
@@ -43,7 +43,6 @@ const at = (i: number): Command => {
 
 /** The minute-by-minute beats of spec §3 with the exact commands from hints.SCRIPT. */
 export function beats(data: WorkshopData): Beat[] {
-  const steppe = data.admixture.beaker_steppe_pct;
   const trait = (g: string) => data.traits.find((t) => t.gene === g)!;
   const me = ME_RESULT.map((r) => `${pct(r.share)}% ${r.label}`).join(', ');
   return [
@@ -60,12 +59,11 @@ export function beats(data: WorkshopData): Beat[] {
       `The hint line now reads "${PREDICT_HINT}". Ask the room to predict before anyone presses Enter.`,
       `${PERIOD_LABELS.BellBeaker}-period Britons land near modern Britons and Scandinavians.`,
       BEAKER_CALLOUT,
-      beakerBridge(steppe),
     ] },
     { min: '13–16', beat: 'Beat 2: Romans (culture changed, people did not)', commands: [at(6), at(7)], say: [
       'The view zooms in on Britain.',
       `The ${PERIOD_LABELS.Roman} layer is small (n = ${n(data, 'Roman')}) and lands inside the ${PERIOD_LABELS.IronAge} cloud.`,
-      ROMAN_CARD,
+      ROMAN_LOG_LINE,
     ] },
     { min: '16–20', beat: 'Beat 3: Anglo-Saxons (migration)', commands: [at(8), at(9)], say: [
       `${PERIOD_LABELS.AngloSaxon}-period Britons move toward the "${NORTH_SEA_LABEL}" marker. Eastern-England burials are furthest along (Gretzinger et al. 2022: up to 76% continental ancestry). On screen they are the triangles with a black outline, and the legend names them.`,

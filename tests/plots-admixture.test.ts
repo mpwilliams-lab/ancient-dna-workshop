@@ -6,7 +6,7 @@ import { INITIAL_PLOT, type PlotState } from '../src/plotState';
 import { ADMIX_VIEW, renderAdmixture, steppePct } from '../src/plots/admixture';
 import {
   ANGLO_SAXON_TAKEAWAY, BEAKER_CALLOUT, PERIOD_LABELS, PLOT_EMPTY, SOURCE_LABELS, TRAIT_Y_LABEL,
-  admixPeopleTitle, allRenderableStrings, beakerBridge, steppePctLabel,
+  admixPeopleTitle, allRenderableStrings, steppePctLabel,
 } from '../src/content';
 
 // Bars and people pinned here (the shared fixture supplies the rest).
@@ -82,13 +82,13 @@ describe('renderAdmixture: mean bars', () => {
       .toEqual(['FirstFarmers', 'BellBeaker', 'IronAge', 'Roman', 'AngloSaxon', 'Today'].map((id) => PERIOD_LABELS[id as PeriodId]));
   });
 
-  it('always shows the exact Beaker callout and the bridging line with the JSON steppe %', () => {
+  it('always shows the exact Beaker callout and never the deleted bridge line (spec v3 §3.2)', () => {
     const svg = newSvg();
     const d = makeData();
     renderAdmixture(svg, d, admix({ admixShown: ['IronAge'], admixNew: [] }));
     expect(svg.querySelector('.admix-callout')?.textContent).toBe(BEAKER_CALLOUT);
-    expect(svg.querySelector('.admix-bridge')?.textContent).toBe(beakerBridge(63));
-    expect(svg.querySelector('.admix-bridge')?.textContent).toContain('63%');
+    expect(svg.querySelector('.admix-bridge')).toBeNull();
+    expect(svg.textContent ?? '').not.toMatch(/not 90%|rises to/);
     // the Bell Beaker bar's own label agrees with the JSON value
     renderAdmixture(svg, d, admix({ admixShown: ['BellBeaker'], admixNew: [] }));
     const bb = d.admixture.bars.find((b) => b.period === 'BellBeaker')!;
@@ -141,7 +141,7 @@ describe('renderAdmixture: mean bars', () => {
 });
 
 describe('renderAdmixture: one bar per person', () => {
-  it('draws one thin bar per person, highest steppe first, with callout and bridge', () => {
+  it('draws one thin bar per person, highest steppe first, with the callout and no bridge line', () => {
     const svg = newSvg();
     renderAdmixture(svg, makeData(), admix({ admixPeriod: 'BellBeaker', admixShown: ['BellBeaker'], admixNew: [] }));
     const bars = [...svg.querySelectorAll('g.person-bar')];
@@ -152,7 +152,7 @@ describe('renderAdmixture: one bar per person', () => {
     expect(Number(bars[0].querySelector('rect')?.getAttribute('width'))).toBe(230); // 920 / 4
     expect(svg.querySelector('.admix-people-title')?.textContent).toBe(admixPeopleTitle(PERIOD_LABELS.BellBeaker, 4));
     expect(svg.querySelector('.admix-callout')?.textContent).toBe(BEAKER_CALLOUT);
-    expect(svg.querySelector('.admix-bridge')?.textContent).toBe(beakerBridge(63));
+    expect(svg.querySelector('.admix-bridge')).toBeNull();
   });
 
   it('falls back to the mean bars when the period has no per-person shares', () => {

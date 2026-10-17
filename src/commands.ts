@@ -3,7 +3,7 @@ import { PERIOD_IDS, GENE_IDS } from './types';
 import type { Command } from './parser';
 import {
   PERIOD_LABELS, MAP_GROUP_LABELS, SOURCE_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION,
-  CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_NOTE, ROMAN_CARD, K_REFUSAL, beakerBridge, traitSourceLabel,
+  CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_NOTE, ROMAN_LOG_LINE, K_REFUSAL, consumerTitle, traitSourceLabel,
 } from './content';
 
 export type PlotAction =
@@ -88,7 +88,7 @@ function runPca(data: WorkshopData, period: PeriodId | 'all'): CommandResult {
     if (period === 'Today') {
       body.push(`Map groups: ${data.map_groups.map((g) => `${MAP_GROUP_LABELS[g.id]} (${formatCount(g.n)})`).join(', ')}`);
     }
-    if (period === 'Roman') body.push(ROMAN_CARD); // spec §3 beat 2 card, §6 rule 4
+    if (period === 'Roman') body.push(ROMAN_LOG_LINE); // spec v3 §3.5 (replaces the v2.1 Roman card), §6 rule 4
   }
   return ok([...head, ...body, 'Done: PC1 and PC2 written.'], { kind: 'pca', period });
 }
@@ -105,7 +105,6 @@ function runAdmixture(data: WorkshopData, K: number, period: PeriodId | undefine
     period === undefined
       ? 'Drawing one average bar per period.'
       : `Showing one bar per person: ${PERIOD_LABELS[period]} (${formatCount(nAdmix(data, period))} people in this ancestry run)`,
-    beakerBridge(data.admixture.beaker_steppe_pct),
   ];
   return ok(lines, period === undefined ? { kind: 'admixture' } : { kind: 'admixture', period });
 }
@@ -135,7 +134,7 @@ function ancestryTest(data: WorkshopData, person: PeriodId | 'me'): CommandResul
   const shares = data.consumer[person];
   if (!shares || shares.length === 0) return refuse([`No consumer-test result for ${PERIOD_LABELS[person]} in this build.`]);
   return ok([
-    `Consumer-style ancestry test: ${PERIOD_LABELS[person]} (${formatCount(nPca(data, person))} people)`,
+    consumerTitle(PERIOD_LABELS[person], nPca(data, person)),
     'Compared with: people living in Europe today',
     ...shareLines(shares),
     CONSUMER_TAKEAWAY,

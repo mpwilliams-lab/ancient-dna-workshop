@@ -58,3 +58,8 @@ export const PERIOD_FRAME: Readonly<Record<PeriodId, FrameId>> = {
   FirstFarmers: 'europe', BellBeaker: 'europe', BronzeAge: 'britain', IronAge: 'britain',
   Roman: 'britain', AngloSaxon: 'britain', Viking: 'britain', Today: 'europe',
 };
+
+// ---- v3 chip ids (Task 3; CONTRACT §3). Task 4 adds the step, card, image, map and diagram ids. ----
+export type ChipKey = 'CHIP_DNA_CHANGED' | 'CHIP_CULTURE_CHANGED' | 'CHIP_DNA_SLIGHT' | 'CHIP_CULTURE_ONLY'
+  | 'CHIP_ROMAN' | 'CHIP_DNA_CHANGED_EAST';
+export type ChipIcon = 'dna' | 'pot';

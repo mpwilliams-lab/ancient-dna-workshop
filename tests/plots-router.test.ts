@@ -5,7 +5,7 @@ import type { GeneId, PeriodId, WorkshopData } from '../src/types';
 import type { PlotAction } from '../src/commands';
 import { INITIAL_PLOT, reducePlot, type PlotState } from '../src/plotState';
 import { renderPlot } from '../src/plots/index';
-import { PLOT_EMPTY, beakerBridge } from '../src/content';
+import { PLOT_EMPTY } from '../src/content';
 
 const data = (): WorkshopData => structuredClone(fixture) as unknown as WorkshopData;
 const ORDER: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
@@ -44,7 +44,8 @@ function checkRendered(h: HTMLElement, s: PlotState, d: WorkshopData): void {
   }
   if (s.view === 'admixture') {
     const svg = h.querySelector('svg.plot-svg')!;
-    expect(svg.querySelector('.admix-bridge')?.textContent).toBe(beakerBridge(d.admixture.beaker_steppe_pct));
+    expect(svg.querySelector('.admix-callout')).not.toBeNull();
+    expect(svg.querySelector('.admix-bridge')).toBeNull();
     const people = s.admixPeriod ? d.admixture.people[s.admixPeriod] ?? [] : [];
     if (people.length > 0) {
       expect(svg.querySelectorAll('g.person-bar')).toHaveLength(people.length);

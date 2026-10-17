@@ -39,8 +39,10 @@ function wholePct(f: number): number {
 describe('allRenderableStrings()', () => {
   it('collects every exported string, including labels, help lines and both TYK2 captions', () => {
     expect(ALL.length).toBeGreaterThanOrEqual(80);
-    for (const s of [C.BEAKER_CALLOUT, C.ROMAN_CARD, C.WRAP_LINE, C.RESTORED_NOTICE, C.PREDICT_HINT, C.HLA_TEXT_CARD, C.NORTH_SEA_LABEL,
-      C.TRAIT_CAPTIONS.TYK2_AGES, C.TRAIT_CAPTIONS.TYK2_LOCAL, C.AGES_SOURCE_LABEL, C.LOCAL_SOURCE_LABEL, C.beakerBridge(64),
+    for (const s of [C.BEAKER_CALLOUT, C.ROMAN_LOG_LINE, C.WRAP_LINE, C.RESTORED_NOTICE, C.PREDICT_HINT, C.HLA_TEXT_CARD, C.NORTH_SEA_LABEL,
+      C.TRAIT_CAPTIONS.TYK2_AGES, C.TRAIT_CAPTIONS.TYK2_LOCAL, C.AGES_SOURCE_LABEL, C.LOCAL_SOURCE_LABEL,
+      C.REVEAL_CALLOUT, C.REVEAL_PCA_CAPTION, C.FINALE_CAPTION, C.HLA_REVEAL_LINE, C.CREDITS_FOOTER, C.REVEAL_HINT, C.CARD_HINT,
+      ...Object.values(C.CHIP_TEXT), C.zoomNote(5), C.revealNote(56, 57), C.cardCounter(2, 3), C.mapAxesLine(950), C.axesLine(950),
       ...C.HELP_LINES, ...Object.values(C.PERIOD_LABELS), ...Object.values(C.SOURCE_LABELS), ...Object.values(C.TICK_LABELS),
       ...Object.values(C.MAP_GROUP_LABELS), 'British', 'Scandinavian']) {
       expect(ALL).toContain(s);
@@ -87,10 +89,20 @@ describe('the rule checker catches what it must (so a clean pass means something
     ['sample I12345', 'rule1:sample-id'],
     ['First farmers', 'rule2:earlier-group-label'],
     ['the first farmers of Britain', 'rule2:earlier-group-label'],
-    ['90% of the gene pool was replaced', 'rule3:90-without-at-least'],
-    ['The Beakers replaced 90% of the population', 'rule3:90-without-at-least'],
-    ['a 90% turnover', 'rule3:90-without-at-least'],
-    ['90% ± 2% (Olalde et al. 2018)', 'rule3:90-without-at-least'],
+    ['90% of the gene pool was replaced', 'rule3:turnover-90'],
+    ['The Beakers replaced 90% of the population', 'rule3:turnover-90'],
+    ['a 90% turnover', 'rule3:turnover-90'],
+    ['90% ± 2% (Olalde et al. 2018)', 'rule3:turnover-90'],
+    ['At least 90% ± 2% of the gene pool', 'rule3:turnover-90'],
+    ["9 in 10 parts of Britain's DNA came from the newcomers (Olalde et al. 2018).", 'rule3:9-in-10-without-at-least'],
+    ['The newcomers replaced about 9 in 10 people', 'rule3:9-in-10-without-at-least'],
+    ['The newcomers were themselves part steppe herder, part farmer, so the steppe colour rises to 64%, not 90%.', 'rule3:bridge-line'],
+    ['Britain today is called modern England here', 'rule11:england-for-britain-today'],
+    ['England today', 'rule11:england-for-britain-today'],
+    ['a paternity question', 'rule14:never-on-screen'],
+    ['a Y-chromosome mismatch', 'rule14:never-on-screen'],
+    ['an affair', 'rule14:never-on-screen'],
+    ['illegitimate', 'rule14:never-on-screen'],
     ['23andMe uses 45 populations', 'rule8:23andme-number'],
     ['AncestryDNA goes back 1,000 years', 'rule8:ancestrydna-without-white-paper'],
   ])('%s -> %s', (text, rule) => {
@@ -101,10 +113,13 @@ describe('the rule checker catches what it must (so a clean pass means something
     'First farmers / Stonehenge builders',
     'run_pca(period = "FirstFarmers")',
     'Iron Age',
-    'At least 90% ± 2% of the gene pool',
     'British 90%',
     'British       ██████████████████  90%',
-    'The newcomers were themselves part steppe herder, part farmer, so the steppe colour rises to 64%, not 90%.',
+    "at least 9 in 10 parts of Britain's DNA came from the newcomers (Olalde et al. 2018)",
+    'Afterwards, more than 9 in 10 of 52 men did (Olalde et al. 2018).',
+    "his DNA score for keeping a beat was lower than about 9 in 10 people's",
+    'people in England today carry about a quarter to a half of this ancestry',
+    'Britain today',
     'Roman and later periods may show 43 CE',
     'SNPs used: 496,901',
     'a 23andMe test',
@@ -119,29 +134,31 @@ describe('rule 2: the earlier group label', () => {
   });
 });
 
-describe('rule 3: Beaker turnover', () => {
-  it('callout is exact', () => {
-    expect(C.BEAKER_CALLOUT).toBe("At least 90% ± 2% of Britain's gene pool was replaced by the Middle Bronze Age (Olalde et al. 2018).");
-  });
-  it('every string mentioning 90% says "at least", except the bridging line', () => {
-    for (const s of ALL.filter((x) => /\b90\s*%/.test(x))) {
-      const isBridge = s.startsWith('The newcomers were themselves');
-      expect(isBridge || /at least 90% ± 2%/i.test(s)).toBe(true);
-    }
-  });
-  it('bridging line uses the JSON value from the data', () => {
-    expect(C.beakerBridge(FIXTURE.admixture.beaker_steppe_pct)).toBe(
-      'The newcomers were themselves part steppe herder, part farmer, so the steppe colour rises to 64%, not 90%.',
+describe('rule 3: Beaker turnover (v3 §3.2; open check 13)', () => {
+  it('callout is exact and breaks no rule', () => {
+    expect(C.BEAKER_CALLOUT).toBe(
+      "Within about ten generations of the Beaker people arriving, at least 9 in 10 parts of Britain's DNA came from the newcomers. The First farmers / Stonehenge builders' share shrank to about 1 in 10 or less (Olalde et al. 2018).",
     );
+    expect(ruleViolations(C.BEAKER_CALLOUT)).toEqual([]);
   });
-  it.each([63.8, -1, 101, Number.NaN])('bridging line refuses a non-whole or out-of-range percent (%s)', (pct) => {
-    expect(() => C.beakerBridge(pct)).toThrow(RangeError);
+  it('no renderable string shows a turnover 90%, and the bridge line is gone everywhere', () => {
+    expect(ALL.filter((s) => /\b90\s*%/.test(s) && /replac|turnover|gene pool|Olalde/i.test(s))).toEqual([]);
+    expect(ALL.filter((s) => /not 90\s*%|rises to \d+%/i.test(s))).toEqual([]);
+    expect('beakerBridge' in C).toBe(false);
+    expect('ROMAN_CARD' in C).toBe(false);
+  });
+  it('every "9 in 10" in a turnover string reads "at least" or "more than"', () => {
+    for (const s of ALL.filter((x) => /\b9 in 10\b/.test(x) && /replac|turnover|gene pool|Olalde/i.test(x))) {
+      expect(s.replace(/\b(?:at least|more than) 9 in 10\b/gi, ''), s).not.toMatch(/\b9 in 10\b/);
+    }
   });
 });
 
-describe('rule 4: Romans', () => {
-  it('card is exact and cites both papers', () => {
-    expect(C.ROMAN_CARD).toBe('New rulers, roads and Latin — mostly the same people (Silva et al. 2026; Martiniano et al. 2016).');
+describe('rule 4: Romans (v3 §3.5)', () => {
+  it('the Roman log line is exact and cites all three papers while open check 1 passes', () => {
+    expect(C.SILVA_2026_SHOWN).toBe(true);
+    expect(C.ROMAN_LOG_LINE).toBe('New rulers, mostly the same families (Silva et al. 2026; Scheib et al. 2024; Martiniano et al. 2016).');
+    expect(C.ROMAN_FOCUS_CAPTION).toBe('New rulers, mostly the same families: culture changed, DNA barely did');
   });
   it('the Roman layer label shows its n', () => {
     expect(C.withN(C.PERIOD_LABELS.Roman, 15)).toBe('Roman (n = 15)');
@@ -149,10 +166,11 @@ describe('rule 4: Romans', () => {
 });
 
 describe('rule 5: Anglo-Saxons', () => {
-  it('is called a real migration, cites Gretzinger, and explains the flat bar as a limit of the tool', () => {
-    expect(C.ANGLO_SAXON_TAKEAWAY).toContain('A real migration');
-    expect(C.ANGLO_SAXON_TAKEAWAY).toContain('(Gretzinger et al. 2022)');
-    expect(C.ANGLO_SAXON_TAKEAWAY).toContain('a tool only sees differences its reference groups can tell apart');
+  it('the corrected takeaway is exact: an average of about 76%, not "up to" (v3 §3.5)', () => {
+    expect(C.ANGLO_SAXON_TAKEAWAY).toBe(
+      "A real migration: Anglo-Saxon-period burials sampled in England carry about 76% continental ancestry on average (Gretzinger et al. 2022). Yet the Anglo-Saxon bar looks almost the same as the Iron Age bar: both groups were part steppe herder, part farmer, so this three-colour test can't tell them apart.",
+    );
+    expect(C.ANGLO_SAXON_TAKEAWAY).not.toMatch(/up to 76%/);
     expect(C.NORTH_SEA_LABEL).toBe('North Sea coast (early medieval)');
   });
 });
@@ -209,6 +227,14 @@ describe('rule 6: trait captions', () => {
     expect(C.traitCaption(trait('HLA-DQ2', 'ages'))).toBe(s);
     expect(C.traitCaption(trait('HLA-DQ2', 'text'))).toBe(s);
     expect(C.HLA_TEXT_CARD.startsWith(s)).toBe(true);
+    // v3 §3.4: corrected text, no "19 times" (open check 7)
+    expect(C.HLA_TEXT_CARD).toBe(
+      `${s} Today about 1 in 5 copies of this stretch of DNA carry it, and people with two copies are much more likely to get coeliac disease or gluten sensitivity (Akbari et al. 2026). Our British ancient-DNA data do not cover this spot, so there is no plot here: the numbers come from Akbari et al.'s West Eurasian study.`,
+    );
+    expect(C.HLA_TEXT_CARD).not.toMatch(/19/);
+    expect(C.HLA_REVEAL_LINE).toBe(
+      'One leading idea, still a hypothesis: immune versions like this helped people fight infections, and coeliac disease is the price a few people pay (Zhernakova et al. 2010; Akbari et al. 2026).',
+    );
     expect(C.traitSourceLabel(trait('HLA-DQ2', 'text'))).toBe(C.AGES_SOURCE_LABEL);
   });
   it('local source label and local point labels', () => {
@@ -332,9 +358,98 @@ describe('the hook screen keeps one sentence of the consumer note', () => {
 });
 
 describe('the PCA legend label for the outlined eastern-England points', () => {
-  it('is "Eastern England (outlined)", is scanned with the rest, and breaks no §6 rule', () => {
-    expect(C.EAST_ENGLAND_LEGEND).toBe('Eastern England (outlined)');
+  it('is "Anglo-Saxon burials, eastern England (outlined)" (v3 §3.5), is scanned with the rest, and breaks no rule', () => {
+    expect(C.EAST_ENGLAND_LEGEND).toBe('Anglo-Saxon burials, eastern England (outlined)');
     expect(ALL).toContain(C.EAST_ENGLAND_LEGEND);
     expect(ruleViolations(C.EAST_ENGLAND_LEGEND)).toEqual([]);
+  });
+});
+
+// ---------- v3 §3.5: every new key, verbatim (Task 3) ----------
+describe('v3 captions, chips, callouts, buttons, hints and log lines are verbatim', () => {
+  it('PCA captions, zoom note and legend headings', () => {
+    expect(C.EUROPE_CAPTION).toBe('Each dot is a person living in Europe today. Britain is held back for now.');
+    expect(C.zoomNote(5)).toBe('Zoomed in about 5× on Britain');
+    expect(C.REVEAL_PCA_CAPTION).toBe(
+      "Britain today lands right on top of the Iron Age cloud: much of the Iron Age people's DNA is still here. (Our Britain today people come from England and Scotland, including Orkney; none are from Wales.)",
+    );
+    expect(C.FINALE_CAPTION).toBe(
+      'Every period, oldest first. The Beaker people and the Anglo-Saxons brought new people: DNA changed. The Romans brought new ideas to mostly the same families: culture changed, DNA barely did. Britain today arrives last, close to the Iron Age and later Britons.',
+    );
+    expect(C.LEGEND_ANCIENT).toBe('Ancient Britons');
+    expect(C.LEGEND_LIVING).toBe('People living today');
+  });
+  it('the six chips; each starts with one of the two stems and gets the matching icon (rule 13)', () => {
+    expect(C.CHIP_TEXT).toEqual({
+      CHIP_DNA_CHANGED: 'DNA changed: new people',
+      CHIP_CULTURE_CHANGED: 'Culture changed: new things',
+      CHIP_DNA_SLIGHT: 'DNA changed, but only slightly',
+      CHIP_CULTURE_ONLY: 'Culture changed, DNA did not: new ideas, same people',
+      CHIP_ROMAN: 'Culture changed, DNA barely did: new ideas, mostly the same people',
+      CHIP_DNA_CHANGED_EAST: 'DNA changed, most of all in the east: new people',
+    });
+    expect(C.CHIP_DNA_CHANGED).toBe(C.CHIP_TEXT.CHIP_DNA_CHANGED);
+    for (const [key, text] of Object.entries(C.CHIP_TEXT) as [keyof typeof C.CHIP_TEXT, string][]) {
+      expect(text, key).toMatch(/^(DNA changed|Culture changed)/);
+      expect(C.chipIcon(key), key).toBe(text.startsWith('DNA changed') ? 'dna' : 'pot');
+    }
+    expect(() => C.chipIcon('NOT_A_CHIP' as never)).toThrow();
+  });
+  it('reveal callout and note', () => {
+    expect(C.REVEAL_CALLOUT).toBe(
+      "Most of Britain's ancestry today was already here by the Iron Age. Later, Anglo-Saxon newcomers added a sizeable share, most of it in eastern England (Gretzinger et al. 2022).",
+    );
+    expect(C.revealNote(56, 57)).toBe('Britain today: 56% steppe. Iron Age: 57% steppe. Of all the periods, the Iron Age bar is the closest match.');
+  });
+  it('hints, card buttons, counter and credits strings', () => {
+    expect(C.REVEAL_HINT).toBe('Predict: where will Britain today land? Then run run_pca(period = "Today")');
+    expect(C.CARD_HINT).toBe('Press Enter to continue (or click Continue).');
+    expect([C.BACK_BUTTON, C.BACK_BUTTON_LABEL]).toEqual(['Back', 'Back one screen']);
+    expect([C.CARD_CONTINUE, C.CARD_CONTINUE_TO_PLOT, C.CARD_CONTINUE_DONE]).toEqual(['Continue', 'Show the plot', 'See the plot']);
+    expect(C.cardCounter(2, 3)).toBe('2 of 3');
+    expect([C.CREDITS_LINK, C.CREDITS_TITLE, C.CREDITS_CLOSE]).toEqual(['Image credits', 'Image and data credits', 'Close']);
+    expect(C.CREDITS_FOOTER).toBe(
+      "Map outlines: Made with Natural Earth (public domain). Allele frequencies: 1000 Genomes Project; gnomAD; Akbari et al. 2026 (AGES). Lactase data: Liebert et al. 2017, Human Genetics (CC BY 4.0). The app's code licence does not cover these images; each keeps its own licence.",
+    );
+  });
+  it('consumer plot strings', () => {
+    expect(C.CONSUMER_PLOT_SUBTITLE).toBe('Compared with people living in Europe today');
+    expect(C.CONSUMER_PLOT_NOTE).toBe("These labels show where similar people live today, not who anyone's ancestors were.");
+    expect(C.consumerTitle('Iron Age', 371)).toBe('Consumer-style ancestry test: Iron Age (371 people)');
+  });
+  it('terminal log lines (CONTRACT §4.1)', () => {
+    expect(C.mapAxesLine(950)).toBe(
+      'Map axes: built from about 950 present-day Europeans. Britons are left out, then placed on the map the same way as ancient Britons.',
+    );
+    expect(C.axesLine(950)).toBe(
+      'Axes: about 950 present-day Europeans. Britons are left out, then placed on the map the same way as ancient Britons.',
+    );
+    expect(C.europeProjectingLine(['Sardinian', 'Spanish', 'North Italian', 'French', 'Norwegian'])).toBe(
+      'Projecting present-day Europeans onto the axes: 5 map groups (Sardinian, Spanish, North Italian, French, Norwegian)',
+    );
+    expect(C.EUROPE_HELD_BACK).toBe('Britain today: held back for now.');
+    expect(C.EUROPE_ALREADY_SHOWN).toBe('Britain today: already on the map.');
+    expect(C.TODAY_PLACED).toBe('Britain today: placed on the map the same way as the ancient Britons.');
+    expect(C.ALL_PROJECTING).toBe('Projecting every period onto the axes, oldest first:');
+    expect(C.ALL_TODAY_LAST).toBe('Britain today: placed last.');
+    expect(C.ADMIX_TODAY_HIDDEN).toBe('Britain today is not shown yet.');
+    expect(C.ADMIX_TODAY_SHOWN).toBe('Now with Britain today.');
+    expect(C.CONSUMER_BARS_LOG).toBe('Drawing the result as bars.');
+  });
+  it('every new string is in allRenderableStrings and breaks no rule', () => {
+    const fresh = [
+      C.EUROPE_CAPTION, C.REVEAL_PCA_CAPTION, C.FINALE_CAPTION, C.ROMAN_FOCUS_CAPTION, C.LEGEND_ANCIENT, C.LEGEND_LIVING,
+      ...Object.values(C.CHIP_TEXT), C.REVEAL_CALLOUT, C.REVEAL_HINT, C.CARD_HINT, C.BACK_BUTTON, C.BACK_BUTTON_LABEL,
+      C.CARD_CONTINUE, C.CARD_CONTINUE_TO_PLOT, C.CARD_CONTINUE_DONE, C.CREDITS_LINK, C.CREDITS_TITLE, C.CREDITS_CLOSE,
+      C.CREDITS_FOOTER, C.CONSUMER_PLOT_SUBTITLE, C.CONSUMER_PLOT_NOTE, C.HLA_REVEAL_LINE, C.EUROPE_HELD_BACK,
+      C.EUROPE_ALREADY_SHOWN, C.TODAY_PLACED, C.ALL_PROJECTING, C.ALL_TODAY_LAST, C.ADMIX_TODAY_HIDDEN, C.ADMIX_TODAY_SHOWN,
+      C.CONSUMER_BARS_LOG, C.ROMAN_LOG_LINE, C.zoomNote(5), C.revealNote(56, 57), C.cardCounter(2, 3),
+      C.consumerTitle('Iron Age', 371), C.mapAxesLine(950), C.axesLine(950),
+      C.europeProjectingLine(['Sardinian', 'Spanish', 'North Italian', 'French', 'Norwegian']),
+    ];
+    for (const s of fresh) {
+      expect(ALL, s).toContain(s);
+      expect(ruleViolations(s), s).toEqual([]);
+    }
   });
 });

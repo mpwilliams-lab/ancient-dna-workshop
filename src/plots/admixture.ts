@@ -1,15 +1,15 @@
 import type { AdmixShares, PeriodId, SourceId, WorkshopData } from '../types';
 import type { PlotState } from '../plotState';
 import {
-  ANGLO_SAXON_TAKEAWAY, BEAKER_CALLOUT, PERIOD_LABELS, SOURCE_LABELS, admixPeopleTitle, beakerBridge, steppePctLabel,
+  ANGLO_SAXON_TAKEAWAY, BEAKER_CALLOUT, PERIOD_LABELS, SOURCE_LABELS, admixPeopleTitle, steppePctLabel,
 } from '../content';
 import { INK, SOURCE_COLORS, svgEl, textBlock, wrapText } from './svg';
 
 /**
  * barsBottom leaves room below the bars for the bar labels (up to four lines for the longest period name when all
- * eight bars are shown) and the three-line Anglo-Saxon takeaway, all inside the 700 px viewBox.
+ * eight bars are shown) and the four-line Anglo-Saxon takeaway (v3 §3.5 text), all inside the 700 px viewBox.
  */
-export const ADMIX_VIEW = { width: 1000, height: 700, left: 40, right: 960, barsBottom: 530 } as const;
+export const ADMIX_VIEW = { width: 1000, height: 700, left: 40, right: 960, barsBottom: 510 } as const;
 
 // The takeaway is anchored to the bottom edge and grows upward: its last baseline sits TAKEAWAY_BOTTOM above the edge.
 const TAKEAWAY_CHARS = 90;
@@ -61,16 +61,12 @@ export function renderAdmixture(svg: SVGSVGElement, data: WorkshopData, p: PlotS
     lx += 26 + SOURCE_LABELS[src].length * 9.5 + 34;
   }
 
-  // Callout + bridging line: always with the bars (§6 rule 3).
+  // Callout: always with the bars (spec v3 §3.2, rule 3). The v2.1 bridge line is deleted everywhere.
   let y = 70;
   const callout = textBlock(BEAKER_CALLOUT, 78, ADMIX_VIEW.left, y, 26, {
     class: 'admix-callout', 'font-size': 20, 'font-weight': '700', fill: INK,
   });
   y += callout.lines * 26 + 6;
-  const bridge = textBlock(beakerBridge(data.admixture.beaker_steppe_pct), 86, ADMIX_VIEW.left, y, 24, {
-    class: 'admix-bridge', 'font-size': 18, 'font-style': 'italic', fill: INK,
-  });
-  y += bridge.lines * 24;
   const barsTop = y + 34; // room for the steppe % labels
 
   const body = svgEl('g', { class: 'bars' });
@@ -129,5 +125,5 @@ export function renderAdmixture(svg: SVGSVGElement, data: WorkshopData, p: PlotS
     }
   }
 
-  svg.append(legend, callout.el, bridge.el, body);
+  svg.append(legend, callout.el, body);
 }

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { SCRIPT } from '../src/hints';
 import { formatCommand, PARSE_TEXT } from '../src/parser';
-import { beakerBridge, EAST_ENGLAND_LEGEND, HLA_TEXT_CARD, PERIOD_LABELS, ROMAN_CARD } from '../src/content';
+import { BEAKER_CALLOUT, EAST_ENGLAND_LEGEND, HLA_TEXT_CARD, PERIOD_LABELS, ROMAN_LOG_LINE } from '../src/content';
 import { centreOf, DATA, freshStart, hintIndex, idle, plotSettled, run, screenViolations, watch } from './helpers';
 
 test('the full guided script runs over file:// with zero network requests and no page errors', async ({ page }) => {
@@ -9,7 +9,6 @@ test('the full guided script runs over file:// with zero network requests and no
   await freshStart(page);
   expect(await hintIndex(page)).toBe(0);
   expect(await screenViolations(page), 'on load').toEqual([]);
-  const pct = DATA.admixture.beaker_steppe_pct;
 
   for (let i = 0; i < SCRIPT.length; i++) {
     const step = SCRIPT[i];
@@ -32,16 +31,15 @@ test('the full guided script runs over file:// with zero network requests and no
     expect(await screenViolations(page), `after ${cmd}`).toEqual([]);
 
     if (step.name === 'run_admixture') {
-      // Spec §6 rule 3: the bridging line shows the JSON's beaker_steppe_pct, and no other value.
-      await expect(page.locator('body')).toContainText(beakerBridge(pct));
-      const shown = [...((await page.locator('body').textContent()) ?? '').matchAll(/rises to (\d+)%/g)].map((m) => Number(m[1]));
-      expect(shown.length).toBeGreaterThan(0);
-      expect(new Set(shown)).toEqual(new Set([pct]));
+      // Spec v3 §3.2 rule 3: the plain Beaker callout is on screen and the v2.1 bridge line is gone.
+      await expect(page.locator('#plot .admix-callout')).toHaveText(BEAKER_CALLOUT);
+      await expect(page.locator('#plot .admix-bridge')).toHaveCount(0);
+      expect((await page.locator('body').textContent()) ?? '').not.toMatch(/rises to \d+%, not 90%/);
     }
 
     if (step.name === 'run_pca' && step.period === 'Roman') {
-      // Spec §3 beat 2: run_pca(period = "Roman") prints the Roman card in the terminal.
-      await expect(page.locator('#terminal')).toContainText(ROMAN_CARD);
+      // Spec v3 §3.5: run_pca(period = "Roman") prints the Roman log line in the terminal.
+      await expect(page.locator('#terminal')).toContainText(ROMAN_LOG_LINE);
     }
 
     if (step.name === 'run_pca') {

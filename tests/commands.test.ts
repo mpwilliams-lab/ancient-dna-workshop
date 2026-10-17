@@ -5,7 +5,7 @@ import type { Command } from '../src/parser';
 import { execute, formatCount, roundPercents, asciiBar } from '../src/commands';
 import {
   PERIOD_LABELS, MAP_GROUP_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION, HOOK_NOTE, CONSUMER_NOTE, CONSUMER_TAKEAWAY,
-  ROMAN_CARD, K_REFUSAL, beakerBridge, traitSourceLabel,
+  ROMAN_LOG_LINE, K_REFUSAL, traitSourceLabel,
 } from '../src/content';
 
 const fixture = fixtureRaw as unknown as WorkshopData;
@@ -142,12 +142,12 @@ describe('execute: log templates', () => {
     expect(lines).toContain('Projecting Roman onto the axes: 15 people');
     expect(lines[lines.length - 1]).toBe('Done: PC1 and PC2 written.');
   });
-  it('run_pca(Roman) shows the Roman card just before Done; no other run_pca does (spec §3 beat 2, §6 rule 4)', () => {
+  it('run_pca(Roman) shows the Roman log line just before Done; no other run_pca does (spec v3 §3.5, §6 rule 4)', () => {
     const lines = execute({ name: 'run_pca', period: 'Roman' }, real).lines;
-    expect(lines[lines.length - 2]).toBe(ROMAN_CARD);
+    expect(lines[lines.length - 2]).toBe(ROMAN_LOG_LINE);
     expect(lines[lines.length - 1]).toBe('Done: PC1 and PC2 written.');
     for (const p of [...PERIODS.filter((x) => x !== 'Roman'), 'all' as const]) {
-      expect(execute({ name: 'run_pca', period: p }, real).lines).not.toContain(ROMAN_CARD);
+      expect(execute({ name: 'run_pca', period: p }, real).lines).not.toContain(ROMAN_LOG_LINE);
     }
   });
   it('run_pca(Today) names the five map groups and their n', () => {
@@ -170,20 +170,20 @@ describe('execute: log templates', () => {
     for (const p of PERIODS) expect(lines.some((l) => l.startsWith(`  ${PERIOD_LABELS[p]}`))).toBe(true);
     expect(lines).toContain(`  ${PERIOD_LABELS.BellBeaker.padEnd(36)}77`);
   });
-  it('run_admixture(K = 3) prints a fastmixture-style log and the bridging line', () => {
+  it('run_admixture(K = 3) prints a fastmixture-style log, and no bridge line (spec v3 §3.2)', () => {
     const lines = execute({ name: 'run_admixture', K: 3 }, real).lines;
     expect(lines[0]).toBe('$ fastmixture --bfile britain --K 3 --supervised sources.txt');
     expect(lines).toContain('Reading data... loaded 1,194 samples and 78,188 SNPs.');
     expect(lines).toContain('Reference groups: Steppe herders, Early farmers, Hunter-gatherers');
     expect(lines).toContain('Drawing one average bar per period.');
-    expect(lines[lines.length - 1]).toBe(beakerBridge(real.admixture.beaker_steppe_pct));
+    expect(lines.join('\n')).not.toMatch(/not 90%|rises to/);
   });
   it('run_admixture with a period shows that period with its ADMIXTURE n (never called the PCA sample)', () => {
     const d = withN(real, 'BellBeaker', 77, 70);
     const lines = execute({ name: 'run_admixture', K: 3, period: 'BellBeaker' }, d).lines;
     expect(lines).toContain('Showing one bar per person: Bell Beaker (70 people in this ancestry run)');
     expect(lines.join('\n')).not.toContain('77');
-    expect(lines[lines.length - 1]).toBe(beakerBridge(d.admixture.beaker_steppe_pct));
+    expect(lines[lines.length - 1]).toBe('Showing one bar per person: Bell Beaker (70 people in this ancestry run)');
   });
   it('refuses K other than 3 in a friendly way, without a plot', () => {
     for (const K of [0, 1, 2, 4, 10, -1, 2.5, Number.NaN, 1e9]) {

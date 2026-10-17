@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { beats, buildRunSheet, sayLines } from '../src/runsheet';
 import { SCRIPT } from '../src/hints';
 import { formatCommand } from '../src/parser';
-import { BEAKER_CALLOUT, beakerBridge, ROMAN_CARD, WRAP_LINE } from '../src/content';
+import { BEAKER_CALLOUT, ROMAN_LOG_LINE, WRAP_LINE } from '../src/content';
 import { FIXTURE } from './helpers/shellEnv';
 
 const AT = '2026-10-19T09:00:00Z';
@@ -36,9 +36,9 @@ describe('instructor run sheet', () => {
   });
   it('quotes the exact on-screen claims and the JSON numbers', () => {
     expect(md).toContain(BEAKER_CALLOUT);
-    expect(md).toContain(beakerBridge(FIXTURE.admixture.beaker_steppe_pct));
+    expect(md).not.toMatch(/rises to \d+%, not 90%/);
     expect(md).toContain(`| Steppe share, Bell Beaker-period Britons (this run) | ${FIXTURE.admixture.beaker_steppe_pct}% |`);
-    expect(md).toContain(ROMAN_CARD);
+    expect(md).toContain(ROMAN_LOG_LINE);
     expect(md).toContain(WRAP_LINE);
     expect(md).toContain(`(n = ${FIXTURE.periods.find((p) => p.id === 'Roman')!.n_pca})`);
     expect(md).toContain('would be called "British"');
