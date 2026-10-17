@@ -131,7 +131,8 @@ describe('renderPca v3: frame, layers, focus and fading', () => {
     renderPca(svg, makeData(), pca({ layers: ['FirstFarmers'], focus: 'FirstFarmers' }));
     expect(PCA_VIEW).toEqual({ width: 1000, height: 760, left: 20, right: 980, top: 20, bottom: 590, legendTop: 616, legendRow: 22 });
     expect(svg.getAttribute('viewBox')).toBe('0 0 1000 760');
-    expect(svg.getAttribute('preserveAspectRatio')).toBe('xMidYMid meet');
+    // top-anchored: the caption strip under the svg changes height from step to step, and a centred plot would jump with it
+    expect(svg.getAttribute('preserveAspectRatio')).toBe('xMidYMin meet');
     expect(svg.getAttribute('data-view')).toBe('pca');
     expect(svg.getAttribute('data-frame')).toBe('europe');
     expect(svg.getAttribute('data-focus')).toBe('FirstFarmers');
@@ -172,6 +173,8 @@ describe('renderPca v3: frame, layers, focus and fading', () => {
       expect(r.getAttribute('stroke')).toBe('#3A3A3A');
       expect(r.getAttribute('stroke-width')).toBe('1.5');
       expect(r.getAttribute('d')).toContain('a3.5 3.5');
+      // an unfilled path takes the pointer only on its 1 px stroke; "all" makes the whole disc hoverable and tappable
+      expect(r.getAttribute('pointer-events')).toBe('all');
     }
     expect(svg.querySelector('.centre[data-centre="Today"]')).toBeNull();
   });
@@ -521,6 +524,7 @@ describe('Britain today at the frame edge, and reduced motion', () => {
     expect(ghosts[0]!.getAttribute('fill')).toBe('none');
     expect(ghosts[0]!.getAttribute('stroke')).toBe(TODAY_RING.stroke);
     expect(ghosts[0]!.getAttribute('opacity')).toBe('0.35');
+    expect(ghosts[0]!.getAttribute('pointer-events')).toBe('all');
     expect(ghosts[0]!.getAttribute('d')).toMatch(/^M781\.5 /); // pinned to x = 2.7 (785 px), minus the ring radius 3.5
     for (const r of todayRings(svg).filter((x) => !x.classList.contains('clipped'))) expect(r.hasAttribute('opacity')).toBe(false);
     // another period in focus: Britain today stays on the map as faded rings, but its clipped point is not drawn
@@ -738,6 +742,9 @@ describe('legend (spec §2.3, §3.5)', () => {
     const groups = [...svg.querySelectorAll('g.legend-group')];
     expect(groups.map((g) => g.getAttribute('data-legend-group'))).toEqual(['ancient', 'living']);
     expect(groups.map((g) => g.querySelector('text.legend-heading')?.textContent)).toEqual([LEGEND_ANCIENT, LEGEND_LIVING]);
+    // the headings are what tells ancient from living at a glance: bold, while no item text is
+    expect(groups.map((g) => g.querySelector('text.legend-heading')?.getAttribute('font-weight'))).toEqual(['700', '700']);
+    expect(svg.querySelectorAll('.legend-item text[font-weight]')).toHaveLength(0);
     expect(groupTexts(svg, 'ancient')).toEqual([withN(PERIOD_LABELS.FirstFarmers, 4), withN(PERIOD_LABELS.BellBeaker, 4)]);
     expect([...groups[1]!.querySelectorAll('.legend-item')].map((i) => i.getAttribute('data-legend')))
       .toEqual(['Sardinian', 'Spanish', 'ItalianNorth', 'French', 'Norwegian', 'Today']);
@@ -748,6 +755,7 @@ describe('legend (spec §2.3, §3.5)', () => {
     const todayMark = svg.querySelector('.legend-item[data-legend="Today"] path')!;
     expect(todayMark.getAttribute('fill')).toBe('none');
     expect(todayMark.getAttribute('stroke')).toBe(TODAY_RING.stroke);
+    expect(todayMark.getAttribute('pointer-events')).toBe('all'); // the legend ring is hoverable over its whole disc too
     expect(svg.querySelector('.legend-item[data-legend="French"] path')?.getAttribute('fill')).toBe(MAP_GREY);
   });
 
@@ -876,6 +884,9 @@ describe('caption strip and chips (renderPcaCaptions, icons.ts)', () => {
       expect(el.getAttribute('data-chip')).toBe(key);
       expect(el.querySelector('svg.chip-icon path')?.getAttribute('d')).toBe(CHIP_ICON_PATHS[icon]);
       expect(el.querySelector('svg.chip-icon')?.getAttribute('viewBox')).toBe('0 0 24 24');
+      // built in the SVG namespace (an svg made any other way would not draw), written out so a re-declared constant is caught
+      expect(el.querySelector('svg.chip-icon')?.namespaceURI).toBe('http://www.w3.org/2000/svg');
+      expect(el.querySelector('svg.chip-icon path')?.namespaceURI).toBe('http://www.w3.org/2000/svg');
       expect(el.textContent).toBe(CHIP_TEXT[key]);
     }
   });

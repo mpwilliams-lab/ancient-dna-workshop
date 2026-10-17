@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-// The real shell and controller, with the plot router replaced by a spy: what matters here is which arguments the
-// shell's deps hand the router (spec v3 §2.3: restore and Back pass animate: false, a live command passes nothing).
-vi.mock('../src/plots/index', () => ({ renderPlot: vi.fn() }));
+// The real shell and controller, with renderPlot replaced by a spy: what matters here is which arguments the shell's
+// deps hand the router (spec v3 §2.3: restore and Back pass animate: false, a live command passes nothing). Every other
+// export of the module stays real, so the shell can import more of it later (plotIsAnimating, finishPlotAnimations).
+vi.mock('../src/plots/index', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../src/plots/index')>();
+  return { ...mod, renderPlot: vi.fn() };
+});
 
 import { boot } from '../src/shell';
 import { renderPlot } from '../src/plots/index';

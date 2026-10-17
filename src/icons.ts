@@ -2,8 +2,7 @@
 // so the pair reads without colour. Own drawings, stroke-only paths in a 24 x 24 box, drawn in currentColor.
 import type { ChipIcon, ChipKey } from './types';
 import { CHIP_TEXT, chipIcon } from './content';
-
-const SVG_NS = 'http://www.w3.org/2000/svg';
+import { SVG_NS } from './plots/svg';
 
 export const CHIP_ICON_PATHS: Readonly<Record<ChipIcon, string>> = {
   // two strands crossing twice, with three rungs

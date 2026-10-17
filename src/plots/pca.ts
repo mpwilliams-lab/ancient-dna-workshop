@@ -145,7 +145,9 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState, 
   const prev = prevFrameId === 'europe' || prevFrameId === 'britain' ? data.frames[prevFrameId] : undefined;
 
   svg.setAttribute('viewBox', `0 0 ${PCA_VIEW.width} ${PCA_VIEW.height}`);
-  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  // Top-anchored: the caption strip under the svg changes height from step to step, which changes the svg's free height,
+  // and a vertically centred plot would jump with it.
+  svg.setAttribute('preserveAspectRatio', 'xMidYMin meet');
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', PCA_CAPTION);
   svg.setAttribute('data-view', 'pca');
@@ -199,10 +201,12 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState, 
       if (c.clipped && !ghostsAllowed) continue;
       const q = pos(c);
       if (id === 'Today') {
+        // pointer-events all: an unfilled path takes the pointer only on its 1.5 px stroke, so without it a ring could
+        // not be hovered or tapped (the tip would almost never name it).
         layer.append(svgEl('path', {
           class: c.clipped ? 'pt today-ring clipped' : 'pt today-ring',
           d: shapePath('circle', q.x, q.y, TODAY_RING.r),
-          fill: 'none', stroke: TODAY_RING.stroke, 'stroke-width': TODAY_RING.strokeWidth,
+          fill: 'none', stroke: TODAY_RING.stroke, 'stroke-width': TODAY_RING.strokeWidth, 'pointer-events': 'all',
           ...(c.clipped ? { opacity: GHOST_OPACITY } : {}),
         }));
         continue;
@@ -337,6 +341,7 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState, 
       key: 'Today', tip: PERIOD_LABELS.Today, text: withN(PERIOD_LABELS.Today, nOf('Today')),
       mark: (x, y) => svgEl('path', {
         d: shapePath('circle', x, y, 5), fill: 'none', stroke: TODAY_RING.stroke, 'stroke-width': TODAY_RING.strokeWidth,
+        'pointer-events': 'all',
       }),
     });
   }
