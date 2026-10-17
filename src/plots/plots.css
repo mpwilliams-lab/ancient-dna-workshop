@@ -119,6 +119,9 @@
   display: block;
   width: 100%;
   height: auto;
+  /* The frame outline is a 1 px stroke centred on an edge that the viewBox touches, so half of it lies outside the box and an
+     svg's default overflow: hidden cut it off (Task 19 review). A window (MapSpec.view) is clipped by its own clipPath instead. */
+  overflow: visible;
 }
 .map-svg text {
   font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;

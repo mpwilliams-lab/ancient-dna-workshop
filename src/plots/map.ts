@@ -54,11 +54,16 @@ export type ArrowStyle = 'main' | 'minor' | 'idea';
 export interface MapArrow { waypoints: LatLon[]; style: ArrowStyle; wide?: boolean; dashed?: boolean; label?: { text: string; at: number; dx: number; dy: number } }
 export interface MapText extends LatLon { text: string; anchor?: 'start' | 'middle' | 'end' }
 export interface MapLink { from: LatLon; to: { ux: number; uy: number } }
+/** A window onto the 1000 x 700 map space, in viewBox units: the part of the frame a picture shows (see MapSpec.view). */
+export interface MapView { x: number; y: number; width: number; height: number }
 export interface MapSpec {
   id: MapId; frame: MapFrameId;
   points?: MapPoint[]; arrows?: MapArrow[]; texts?: MapText[]; links?: MapLink[];
   scaleMax?: number;
   sideList?: { label: string; display: string }[];   // drawn by the card (cardView), not in the svg
+  /** The window the svg shows (its viewBox). Default: the whole 1000 x 700 map space. Same projection and outline either way, so a
+   *  window moves nothing: it only leaves out the part of the frame the drawing does not use (src/maps.ts bandView, Task 20). */
+  view?: MapView;
 }
 
 export const DOT_MAX_RADIUS = 14;
@@ -67,6 +72,13 @@ export const MAP_LABEL_FONT_PX = 20;
 export const ZERO_RING_RADIUS = 3;
 export const ARROW_WIDTH: Readonly<Record<ArrowStyle, number>> = { main: 5, minor: 2.5, idea: 2.5 };
 export const WIDE_ARROW_WIDTH = 12;
+/** Arrowhead size in stroke widths (the marker is markerWidth x markerHeight of these, markerUnits strokeWidth). */
+export const ARROW_HEAD_SIZE = { normal: 3.2, wide: 1.8 } as const;
+
+/** The most an arrow paints beyond its own curve, in viewBox units: half the arrowhead's width (wider than the stroke). */
+export function arrowReach(a: MapArrow): number {
+  return ((a.wide ? WIDE_ARROW_WIDTH : ARROW_WIDTH[a.style]) * (a.wide ? ARROW_HEAD_SIZE.wide : ARROW_HEAD_SIZE.normal)) / 2;
+}
 export const MAP_COLOURS = {
   arrow: '#9B2226', ink: '#1A1A1A', halo: '#FFFFFF', trueDot: '#8C8C8C', geneticDot: '#0072B2', link: '#8C8C8C',
   ring: '#08519C', low: '#C6DBEF', high: '#08306B',
@@ -91,23 +103,37 @@ export function valueColour(value: number, scaleMax: number): string {
   return `#${[1, 3, 5].map((i) => mix(MAP_COLOURS.low, MAP_COLOURS.high, i).toString(16).padStart(2, '0')).join('').toUpperCase()}`;
 }
 
-/** A smooth Catmull–Rom curve through the points, as cubic Béziers ("M … C …"); two points give a straight line. */
-export function catmullRomPath(pts: readonly { x: number; y: number }[]): string {
-  if (pts.length === 0) return '';
-  const first = pts[0]!;
-  if (pts.length === 1) return `M${f1(first.x)} ${f1(first.y)}`;
-  if (pts.length === 2) return `M${f1(first.x)} ${f1(first.y)}L${f1(pts[1]!.x)} ${f1(pts[1]!.y)}`;
-  let d = `M${f1(first.x)} ${f1(first.y)}`;
+export interface XY { x: number; y: number }
+/** One cubic Bézier of a Catmull–Rom curve: from `from` to `to` with control points c1 and c2. */
+export interface CurveSegment { from: XY; c1: XY; c2: XY; to: XY }
+
+/** The cubic Béziers of the smooth Catmull–Rom curve through the points (none for fewer than two points). */
+export function catmullRomSegments(pts: readonly XY[]): CurveSegment[] {
+  const out: CurveSegment[] = [];
   for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[i - 1] ?? pts[i]!;
     const p1 = pts[i]!;
     const p2 = pts[i + 1]!;
     const p3 = pts[i + 2] ?? p2;
-    const c1x = p1.x + (p2.x - p0.x) / 6;
-    const c1y = p1.y + (p2.y - p0.y) / 6;
-    const c2x = p2.x - (p3.x - p1.x) / 6;
-    const c2y = p2.y - (p3.y - p1.y) / 6;
-    d += `C${f1(c1x)} ${f1(c1y)} ${f1(c2x)} ${f1(c2y)} ${f1(p2.x)} ${f1(p2.y)}`;
+    out.push({
+      from: p1,
+      c1: { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 },
+      c2: { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 },
+      to: p2,
+    });
+  }
+  return out;
+}
+
+/** A smooth Catmull–Rom curve through the points, as cubic Béziers ("M … C …"); two points give a straight line. */
+export function catmullRomPath(pts: readonly XY[]): string {
+  if (pts.length === 0) return '';
+  const first = pts[0]!;
+  if (pts.length === 1) return `M${f1(first.x)} ${f1(first.y)}`;
+  if (pts.length === 2) return `M${f1(first.x)} ${f1(first.y)}L${f1(pts[1]!.x)} ${f1(pts[1]!.y)}`;
+  let d = `M${f1(first.x)} ${f1(first.y)}`;
+  for (const s of catmullRomSegments(pts)) {
+    d += `C${f1(s.c1.x)} ${f1(s.c1.y)} ${f1(s.c2.x)} ${f1(s.c2.y)} ${f1(s.to.x)} ${f1(s.to.y)}`;
   }
   return d;
 }
@@ -131,13 +157,28 @@ function label(x: number, y: number, text: string, anchor: 'start' | 'middle' | 
   }, text);
 }
 
+/**
+ * The part of the frame's box that the view shows: the rect the frame outline is drawn on. The outline is a 1 px stroke centred on
+ * that rect's edge, and the viewBox (or a window) usually ends exactly on that edge, so half of the stroke lies outside it: every
+ * frame is height- or width-limited, so its box touches the viewBox on one axis, and the svg clipped that half (Task 19 review).
+ * The svg now lets it show (plots.css: .map-svg { overflow: visible }); in a window it is drawn outside the window's clip.
+ */
+export function frameOutline(c: MapProjectionConstants, boxW: number, boxH: number, view: MapView): MapView {
+  const left = Math.max(c.offX, view.x);
+  const top = Math.max(c.offY, view.y);
+  const right = Math.min(c.offX + boxW, view.x + view.width);
+  const bottom = Math.min(c.offY + boxH, view.y + view.height);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
 /** Spec §6 drawing: land var(--map-land), sea = card background, 0.6 px coast, no borders, labels with a halo. */
 export function renderMap(svg: SVGSVGElement, spec: MapSpec): void {
   const { land, projection: c } = mapBase(spec.frame);
   const f = MAP_FRAMES[spec.frame];
   const boxW = c.k * (f.lonMax - f.lonMin) * c.cosLat0;
   const boxH = c.k * (f.latMax - f.latMin);
-  svg.setAttribute('viewBox', `0 0 ${MAP_VIEW.width} ${MAP_VIEW.height}`);
+  const view = spec.view ?? { x: 0, y: 0, width: MAP_VIEW.width, height: MAP_VIEW.height };
+  svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   svg.classList.add('map-svg');
   svg.setAttribute('data-map', spec.id);
@@ -153,7 +194,7 @@ export function renderMap(svg: SVGSVGElement, spec: MapSpec): void {
     let id = markers.get(key);
     if (id === undefined) {
       id = `${prefix}-head-${key}`;
-      const size = a.wide ? 1.8 : 3.2;
+      const size = a.wide ? ARROW_HEAD_SIZE.wide : ARROW_HEAD_SIZE.normal;
       const m = svgEl('marker', { id, viewBox: '0 0 10 10', refX: 7, refY: 5, markerWidth: size, markerHeight: size, orient: 'auto', markerUnits: 'strokeWidth' });
       m.append(svgEl('path', { d: 'M0 0L10 5L0 10Z', fill: MAP_COLOURS.arrow }));
       defs.append(m);
@@ -165,7 +206,8 @@ export function renderMap(svg: SVGSVGElement, spec: MapSpec): void {
   const sea = svgEl('rect', { class: 'map-sea', x: c.offX, y: c.offY, width: boxW, height: boxH });
   const landG = svgEl('g', { class: 'map-land' });
   for (const d of land) landG.append(svgEl('path', { d, 'fill-rule': 'evenodd' }));
-  const frame = svgEl('rect', { class: 'map-frame', x: c.offX, y: c.offY, width: boxW, height: boxH, fill: 'none' });
+  const outline = frameOutline(c, boxW, boxH, view);
+  const frame = svgEl('rect', { class: 'map-frame', x: outline.x, y: outline.y, width: outline.width, height: outline.height, fill: 'none' });
 
   const linksG = svgEl('g', { class: 'map-links' });
   for (const l of spec.links ?? []) {
@@ -226,5 +268,18 @@ export function renderMap(svg: SVGSVGElement, spec: MapSpec): void {
   const labelsG = svgEl('g', { class: 'map-labels' });
   labelsG.append(...labels);
 
-  svg.append(defs, sea, landG, frame, linksG, arrowsG, dotsG, labelsG);
+  if (spec.view === undefined) {
+    svg.append(defs, sea, landG, frame, linksG, arrowsG, dotsG, labelsG);
+    return;
+  }
+  // A window: the svg's own box may be taller or wider than the window's shape (a card gives it whatever room is left), and an svg
+  // draws the whole of its box, not just its viewBox. The clip keeps the rest of the frame out of any such leftover room. The frame
+  // outline sits on the window's edge, so it is drawn above the clipped group, where its outer half is not cut off.
+  const clipId = `${prefix}-view`;
+  const clip = svgEl('clipPath', { id: clipId });
+  clip.append(svgEl('rect', { x: view.x, y: view.y, width: view.width, height: view.height }));
+  defs.append(clip);
+  const windowG = svgEl('g', { class: 'map-window', 'clip-path': `url(#${clipId})` });
+  windowG.append(sea, landG, linksG, arrowsG, dotsG, labelsG);
+  svg.append(defs, windowG, frame);
 }

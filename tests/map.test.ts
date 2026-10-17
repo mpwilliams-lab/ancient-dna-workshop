@@ -2,8 +2,9 @@
 // Spec §6 projection, drawing, points and arrows; CONTRACT §4.13 src/plots/map.ts.
 import { describe, expect, it } from 'vitest';
 import {
-  ARROW_WIDTH, DOT_MAX_RADIUS, MAP_FRAMES, MAP_VIEW, WIDE_ARROW_WIDTH, ZERO_RING_RADIUS, catmullRomPath, dotRadius,
-  makeProjection, mapBase, project, projectUnits, renderMap, roundsToZero, type MapFrameId, type MapSpec,
+  ARROW_WIDTH, DOT_MAX_RADIUS, MAP_FRAMES, MAP_VIEW, WIDE_ARROW_WIDTH, ZERO_RING_RADIUS, catmullRomPath,
+  catmullRomSegments, dotRadius, frameOutline, makeProjection, mapBase, project, projectUnits, renderMap, roundsToZero,
+  type MapFrameId, type MapSpec, type MapView,
 } from '../src/plots/map';
 import { EUROPE_LAND } from '../src/generated/map-europe';
 import { OLDWORLD_LAND } from '../src/generated/map-oldworld';
@@ -169,5 +170,88 @@ describe('renderMap (spec §6 drawing)', () => {
     renderMap(s, { id: 'E1', frame: 'europe' });
     expect(s.querySelectorAll('path.map-arrow, text.map-label, circle')).toHaveLength(0);
     expect(s.getAttribute('data-map')).toBe('E1');
+  });
+});
+
+describe('catmullRomSegments', () => {
+  it('gives one cubic per segment, joined end to end, and the same numbers catmullRomPath writes', () => {
+    const pts = [{ x: 0, y: 0 }, { x: 10, y: 5 }, { x: 20, y: 0 }, { x: 30, y: 5 }];
+    const segs = catmullRomSegments(pts);
+    expect(segs).toHaveLength(3);
+    segs.forEach((s, i) => {
+      expect(s.from).toEqual(pts[i]);
+      expect(s.to).toEqual(pts[i + 1]);
+    });
+    const round = (v: number): string => String(Math.round(v * 10) / 10);
+    const d = catmullRomPath(pts);
+    const fromSegments = `M${round(pts[0]!.x)} ${round(pts[0]!.y)}${segs.map((s) => `C${round(s.c1.x)} ${round(s.c1.y)} ${round(s.c2.x)} ${round(s.c2.y)} ${round(s.to.x)} ${round(s.to.y)}`).join('')}`;
+    expect(d).toBe(fromSegments);
+  });
+  it('gives none for fewer than two points', () => {
+    expect(catmullRomSegments([])).toEqual([]);
+    expect(catmullRomSegments([{ x: 1, y: 2 }])).toEqual([]);
+  });
+});
+
+describe('a window (MapSpec.view) and the frame outline (Task 20)', () => {
+  const FULL: MapView = { x: 0, y: 0, width: MAP_VIEW.width, height: MAP_VIEW.height };
+  const europe = makeProjection(MAP_FRAMES.europe);
+  const boxW = europe.k * (MAP_FRAMES.europe.lonMax - MAP_FRAMES.europe.lonMin) * europe.cosLat0;
+  const boxH = europe.k * (MAP_FRAMES.europe.latMax - MAP_FRAMES.europe.latMin);
+  const rect = (s: SVGSVGElement, selector: string): MapView => {
+    const r = s.querySelector(selector)!;
+    return { x: Number(r.getAttribute('x')), y: Number(r.getAttribute('y')), width: Number(r.getAttribute('width')), height: Number(r.getAttribute('height')) };
+  };
+
+  it('no view: the viewBox is the whole 1000 x 700 map space and nothing is clipped', () => {
+    const s = svg();
+    renderMap(s, { id: 'D1', frame: 'europe' });
+    expect(s.getAttribute('viewBox')).toBe('0 0 1000 700');
+    expect(s.querySelector('g.map-window')).toBeNull();
+    expect(s.querySelector('clipPath')).toBeNull();
+  });
+
+  it('a view becomes the viewBox, and everything drawn is clipped to it, so a box taller than the window never shows the rest of the frame', () => {
+    const s = svg();
+    const view: MapView = { x: 176.8, y: 250.4, width: 646.4, height: 227.8 };
+    renderMap(s, { id: 'E1', frame: 'europe', view, arrows: [{ waypoints: [{ lat: 50, lon: 2 }, { lat: 51, lon: 1 }], style: 'main' }], texts: [{ lat: 52, lon: 0, text: 'x' }] });
+    expect(s.getAttribute('viewBox')).toBe('176.8 250.4 646.4 227.8');
+    const clip = s.querySelector('clipPath')!;
+    const g = s.querySelector('g.map-window')!;
+    expect(g.getAttribute('clip-path')).toBe(`url(#${clip.id})`);
+    expect(clip.id).toBe('map-E1-view');
+    for (const sel of ['rect.map-sea', 'g.map-land', 'g.map-links', 'g.map-arrows', 'g.map-points', 'g.map-labels']) {
+      expect(g.querySelector(sel), sel).not.toBeNull();
+    }
+    expect(s.querySelectorAll('defs > marker').length).toBeGreaterThan(0);
+    expect(s.querySelector('defs')!.parentElement).toBe(s);
+  });
+
+  it('the clip is exactly the window, and the frame outline on the window\'s edge is drawn above it, so its outer half is not cut off', () => {
+    const s = svg();
+    const view: MapView = { x: 176.8, y: 250.4, width: 646.4, height: 227.8 };
+    renderMap(s, { id: 'E1', frame: 'europe', view });
+    expect(rect(s, 'clipPath rect')).toEqual(view);
+    const group = s.querySelector('g.map-window')!;
+    const outline = s.querySelector('rect.map-frame')!;
+    expect(outline.parentElement).toBe(s);
+    expect(group.contains(outline)).toBe(false);
+    expect(group.compareDocumentPosition(outline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // It lies on the window's own edge, not inside it.
+    expect(rect(s, 'rect.map-frame')).toEqual(view);
+  });
+
+  it('the frame outline is the frame\'s box where the view shows all of it, and the view\'s edge where it cuts through the box', () => {
+    const whole = frameOutline(europe, boxW, boxH, FULL);
+    expect([whole.x, whole.y, whole.width, whole.height]).toEqual([europe.offX, europe.offY, boxW, boxH]);
+    const band: MapView = { x: europe.offX, y: 250, width: boxW, height: 230 };
+    expect(frameOutline(europe, boxW, boxH, band)).toEqual(band);
+    const wide: MapView = { x: 100, y: 250, width: 800, height: 230 };
+    const w = frameOutline(europe, boxW, boxH, wide);
+    expect([w.x, w.width, w.y, w.height]).toEqual([europe.offX, boxW, 250, 230]);
+    const s = svg();
+    renderMap(s, { id: 'D1', frame: 'europe' });
+    const drawn = rect(s, 'rect.map-frame');
+    expect([drawn.x, drawn.y, drawn.width, drawn.height].map((v) => Math.round(v * 10) / 10)).toEqual([europe.offX, europe.offY, boxW, boxH].map((v) => Math.round(v * 10) / 10));
   });
 });
