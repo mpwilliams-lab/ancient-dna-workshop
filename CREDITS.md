@@ -7,7 +7,11 @@ An image is bundled into the app only after the instructor has checked it.
 
 ## Images
 
-No images are bundled yet.
+### Card B1
+
+- Plan drawn for this workshop
+  - Licence: drawn for this workshop
+  - Changes: none
 
 ## Data and maps
 
