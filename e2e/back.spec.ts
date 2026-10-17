@@ -6,7 +6,7 @@ import { NEXT_PREFIX, SCRIPT, SCRIPT_STEPS, hintText } from '../src/hints';
 import { formatCommand } from '../src/parser';
 import { derive, sessionBuildHash } from '../src/replay';
 import { screensOf, screenKey } from '../tests/helpers/script';
-import { APP_URL, CARD_KEY_GAP_MS, DATA, boxes, cardOpen, covers, freshStart, idle, installBoxes, run, screen, watch } from './helpers';
+import { APP_URL, CARD_KEY_GAP_MS, DATA, boxes, cardOpen, covers, freshStart, hintIndex, idle, installBoxes, prompt, run, screen, watch } from './helpers';
 
 // e2e asserts only the shipped flag set (spec §10.3).
 test.skip(!FEATURES.back, 'the back flag is off in the shipped set');
@@ -91,6 +91,25 @@ test('refresh with a card open after Back shows the same card; ?reset clears the
   expect(await screen(page)).toEqual({ step: 0, card: 0 });
   await expect(page.locator('#card')).toBeHidden();
   await expect(page.locator('#back')).toBeDisabled();
+  expect(w.errors).toEqual([]);
+});
+
+// ---- The disabled Back button (review fix round 1) ----
+
+test('a click on the disabled Back button at the first screen leaves the keyboard on the prompt, so typing still works', async ({ page }) => {
+  const w = watch(page);
+  await freshStart(page);
+  await expect(page.locator('#back')).toBeDisabled();
+  // A student clicks it. Chrome sends no mouse events to a disabled control, so the page's "a click puts the prompt back in focus"
+  // handler never ran and the keyboard fell to <body>; the button now takes no pointer events and the click reaches the header.
+  await page.locator('#back').click({ force: true });
+  await expect(prompt(page)).toBeFocused();
+  await page.keyboard.type(formatCommand(SCRIPT[0]!));
+  await page.keyboard.press('Enter');
+  await idle(page);
+  expect(await hintIndex(page)).toBe(1);
+  expect(await screen(page)).toEqual({ step: 1, card: 0 });
+  await expect(page.locator('#back')).toBeEnabled();
   expect(w.errors).toEqual([]);
 });
 

@@ -100,6 +100,9 @@ describe('the header Back button (Task 17, spec §4.3)', () => {
     expect(disabled.cursor).toBe('default');
     expect(Object.keys(disabled)).not.toContain('opacity');
   });
+  it('takes no pointer events, so a click on it reaches the header and the prompt gets the keyboard back (Chrome sends none to a disabled control)', () => {
+    expect(rule('#bar button:disabled')['pointer-events']).toBe('none');
+  });
 });
 
 describe('the plot is left to the plot code', () => {

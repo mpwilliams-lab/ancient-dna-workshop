@@ -656,9 +656,12 @@ body {
   margin-left: auto;
 }
 
-/* The disabled look is colour only: tests/shell-css.test.ts keeps opacity out of this stylesheet (the plots draw theirs as attributes). */
+/* The disabled look is colour only: tests/shell-css.test.ts keeps opacity out of this stylesheet (the plots draw theirs as attributes).
+   It takes no pointer events either: Chrome sends none to a disabled control, so a click on it never reached the page's "a click puts
+   the prompt back in focus" handler and the keyboard fell to <body>. The click now lands on the header, which that handler answers. */
 #bar button:disabled {
   color: var(--muted);
   border-color: var(--border);
   cursor: default;
+  pointer-events: none;
 }
