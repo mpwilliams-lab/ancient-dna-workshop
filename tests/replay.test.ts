@@ -10,6 +10,7 @@ import {
 } from '../src/replay';
 import { loadSession, visibleTranscript } from '../src/session';
 import { data, flushMicrotasks, rig, runSteps, type Rig, type ShownLine } from './helpers/controllerRig';
+import { mulberry32 } from './helpers/rng';
 
 const pca = (period: Extract<Command, { name: 'run_pca' }>['period']): Command => ({ name: 'run_pca', period });
 const fold = (cmds: Command[]): Derived => cmds.reduce((d, c) => applyCommand(d, c, data).derived, INITIAL_DERIVED);
@@ -140,18 +141,7 @@ describe('sessionBuildHash', () => {
   });
 });
 
-// ---------- spec §4.5 test 7 (P1 part; Task 17 adds Back actions) ----------
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
+// ---------- spec §4.5 test 7 (P1 part; the Back actions are further down, Task 17) ----------
 const POOL: string[] = [
   ...SCRIPT, ...EXTRAS,
   pca('all'), pca('Today'), pca('Europe'), pca('Viking'),
@@ -222,14 +212,12 @@ async function act(r: Rig, rng: () => number, clock: { t: number }): Promise<str
   return 'idle';
 }
 
-/** The lines the live terminal was really told to show since its last clear(), not what its transcript says it showed. */
+/**
+ * The lines the live terminal was really told to show since its last clear() or showLines() (a Back or a restore redraws it
+ * whole), not what its transcript says it showed.
+ */
 function liveScreen(r: Rig): ShownLine[] {
-  return r.events.slice(r.events.lastIndexOf('clear') + 1).flatMap((e): ShownLine[] => {
-    if (e.startsWith('echo:')) return [{ kind: 'input', text: e.slice(5) }];
-    if (e.startsWith('out:')) return [{ kind: 'output', text: e.slice(4) }];
-    if (e.startsWith('notice:')) return [{ kind: 'notice', text: e.slice(7) }];
-    return [];
-  });
+  return r.term.screen.map((l) => ({ ...l }));
 }
 
 /** A refreshed station (back) must equal the live one on everything a student can see or press. */
@@ -295,5 +283,101 @@ describe('spec §4.5 test 7: restore(serialize(session)) equals the live control
       await expectRestoreMatches(live, `start-anywhere run ${run} (end): ${trail.join(' | ')}`);
     }
     expect(JSON.stringify([SCRIPT, SCRIPT_STEPS, EXTRAS])).toBe(tables); // nothing above mutated the shared script tables
+  }, 180_000);
+});
+
+// ---- spec §4.5 test 7 with Back actions (Task 17) ----
+
+/** Every screen of a session, in the order a student meets them: the start, then per step its cards and its bare plot. */
+function screensOf(cardsFor: readonly (readonly CardId[])[]): { step: number; card: number }[] {
+  const all = [{ step: 0, card: 0 }];
+  cardsFor.forEach((cards, k) => {
+    for (let j = 0; j <= cards.length; j += 1) if (cards.length === 0 && j === 1) break; else all.push({ step: k + 1, card: j });
+  });
+  return all;
+}
+
+/** The screen a student is on: the open card, else the step's bare plot (a step whose after-cards wait for their log is on its bare plot). */
+function onScreen(r: Rig): { step: number; card: number } {
+  const { step, card } = r.c.screen;
+  if (r.c.cardOpen !== null) return { step, card };
+  return { step, card: r.c.derived.cardsFor[step - 1]?.length ?? 0 };
+}
+
+/**
+ * One random action, or a Back (about one in five). A Back is checked against a model that shares no code with back.ts: the
+ * session's screens as a list, and Back moves one place down it. Everything it rolls back is then compared with a refreshed
+ * station by expectRestoreMatches, as after any other action.
+ */
+async function actOrBack(r: Rig, rng: () => number, clock: { t: number }): Promise<string> {
+  if (rng() >= 0.2) return act(r, rng, clock);
+  clock.t += rng() < 0.2 ? 100 : 500;
+  const here = onScreen(r);
+  const list = screensOf(r.c.derived.cardsFor);
+  const at = list.findIndex((p) => p.step === here.step && p.card === here.card);
+  expect(at, `the screen ${JSON.stringify(here)} is one of the session's screens`).toBeGreaterThanOrEqual(0);
+  const before = r.c.session;
+  const triesBefore = r.c.badTries;
+  const promptBefore = r.term.prompt;
+  r.c.back();
+  const after = r.c.session;
+  const target = list[Math.max(0, at - 1)]!;
+  if (at === 0) {
+    // The start: Back is disabled there, so a stray call changes nothing at all (not even the prompt or the tries).
+    expect(after, 'Back at the start changes nothing').toEqual(before);
+    expect([r.c.badTries, r.term.prompt], 'Back at the start leaves the prompt and the tries alone').toEqual([triesBefore, promptBefore]);
+    return 'back (start)';
+  }
+  expect(r.c.screen, 'Back moves one place down the list of screens').toEqual(target);
+  expect(r.term.isPrinting(), 'Back flushes a running log').toBe(false);
+  expect(after.steps.length, 'the steps after the target screen are dropped').toBe(target.step);
+  expect(after.steps, 'what is left is a prefix of what there was').toEqual(before.steps.slice(0, target.step));
+  expect(after.history, 'Up/Down history is not rolled back').toEqual(before.history);
+  expect(after.nextSeq, 'the sequence counter is not rolled back').toBe(before.nextSeq);
+  expect(r.c.badTries, 'Back resets the three tries').toBe(0);
+  expect(r.term.prompt, 'Back clears the prompt').toBe('');
+  const cards = r.c.derived.cardsFor[target.step - 1] ?? [];
+  expect(r.c.cardOpen, 'a card screen has its card open, a bare plot none').toBe(target.card < cards.length ? cards[target.card] : null);
+  expect(r.cards.current, 'the card host shows exactly that card').toBe(r.c.cardOpen);
+  return `back -> ${target.step}.${target.card}`;
+}
+
+describe('spec §4.5 test 7 with Back actions: restore(serialize(session)) equals the live controller after every kind of action, Back included', () => {
+  it('holds at every checked point of 200 fixed-seed random sessions, and every Back lands one screen earlier', async () => {
+    let backs = 0;
+    for (let run = 0; run < 200; run += 1) {
+      const rng = mulberry32(0xb4c1 + run);
+      const clock = { t: 0 };
+      const live = rig({ now: () => clock.t });
+      if (run % 4 === 0) runSteps(live, 0, SCRIPT.length);
+      live.term.holdPrints = true;
+      const trail: string[] = [];
+      for (let k = 0; k < 40; k += 1) {
+        const did = await actOrBack(live, rng, clock);
+        if (did.startsWith('back ->')) backs += 1;
+        trail.push(did);
+        if (rng() < 0.5) await expectRestoreMatches(live, `back run ${run}: ${trail.join(' | ')}`);
+      }
+      await expectRestoreMatches(live, `back run ${run} (end): ${trail.join(' | ')}`);
+    }
+    expect(backs, 'the runs really pressed Back, and really moved').toBeGreaterThan(800);
+  }, 180_000);
+
+  it('also holds when the random actions begin at any point of the guided script, "before" card steps included', async () => {
+    const tables = JSON.stringify([SCRIPT, SCRIPT_STEPS, EXTRAS]);
+    for (let run = 0; run < 200; run += 1) {
+      const rng = mulberry32(0xcafe + run);
+      const clock = { t: 0 };
+      const live = rig({ now: () => clock.t });
+      runSteps(live, 0, Math.floor(rng() * (SCRIPT.length + 1)));
+      live.term.holdPrints = true;
+      const trail: string[] = [];
+      for (let k = 0; k < 40; k += 1) {
+        trail.push(await actOrBack(live, rng, clock));
+        if (rng() < 0.5) await expectRestoreMatches(live, `back start-anywhere run ${run}: ${trail.join(' | ')}`);
+      }
+      await expectRestoreMatches(live, `back start-anywhere run ${run} (end): ${trail.join(' | ')}`);
+    }
+    expect(JSON.stringify([SCRIPT, SCRIPT_STEPS, EXTRAS])).toBe(tables); // Back never mutates the shared script tables
   }, 180_000);
 });

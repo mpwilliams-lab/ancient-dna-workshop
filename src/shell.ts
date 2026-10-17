@@ -1,4 +1,4 @@
-// App shell: storage probe, ?reset, ?test, card view, guarded session restore + notice, wrap screen with QR, credits panel, prompt focus.
+// App shell: storage probe, ?reset, ?test, card view, header Back button, guarded session restore + notice, wrap screen with QR, credits panel, prompt focus.
 // The shell prints RESTORED_NOTICE exactly once, after the Controller is built on a restored session,
 // and only when that restore actually took effect. The Controller (Task 10) never prints it.
 import type { CardId, WorkshopData } from './types';
@@ -12,7 +12,8 @@ import { FEATURES, type Features } from './features';
 import { renderPlot } from './plots/index';
 import { clearSession, loadSession, type SessionStorageLike, type SessionV2 } from './session';
 import {
-  APP_TITLE, CREDITS_LINK, RESTORED_NOTICE, WRAP_BUTTON, WRAP_CLOSE, WRAP_CREDIT, WRAP_LINE, WRAP_QR_CAPTION,
+  APP_TITLE, BACK_BUTTON, BACK_BUTTON_LABEL, CREDITS_LINK, RESTORED_NOTICE, WRAP_BUTTON, WRAP_CLOSE, WRAP_CREDIT, WRAP_LINE,
+  WRAP_QR_CAPTION,
 } from './content';
 import { QR_SVG, QR_URL } from './generated/qr';
 
@@ -111,6 +112,17 @@ export function boot(env: BootEnv): Booted {
   let controller: Controller | null = null;
   let credits: CreditsView | null = null;
   const wrapScreen = el(doc, 'wrap');
+  const backBtn = features.back ? createBackButton(doc) : null;
+  /**
+   * Spec §4.3: both Back buttons (the header's and each card's) step back one screen and hand the keyboard back to the prompt.
+   * The credits panel and the wrap screen are modal. Shift+Tab can move focus from either one to a button behind it, and a Back
+   * pressed there must not change the screen under the dialog (the same rule as Esc, §5.2).
+   */
+  const goBack = (): void => {
+    if (credits?.isOpen() || !wrapScreen.hidden) return;
+    controller?.back();
+    focusPrompt(termRoot);
+  };
   const terminal = mountTerminal(termRoot, {
     onEnter: (line, key) => controller?.submit(line, key),
     onEsc: (key) => {
@@ -129,7 +141,7 @@ export function boot(env: BootEnv): Booted {
       controller?.continueCard();
       focusPrompt(termRoot);
     },
-    onBack: () => focusPrompt(termRoot),       // the Back action is wired in Task 17
+    onBack: goBack,
     onCredits: () => credits?.open(),          // the panel takes the keyboard (focus on its Close button) until it closes
   }, features, env.assets);
   const deps = {
@@ -137,6 +149,11 @@ export function boot(env: BootEnv): Booted {
     renderPlot: (p: Parameters<typeof renderPlot>[2], opts?: { animate?: boolean }) => renderPlot(plotHost, data, p, opts),
     cards: cardView,
     features,
+    // The header Back button is disabled on the first screen. The Controller reports every change of screen, its last
+    // statement included, so the button is right from the first paint, after a restore as well.
+    onScreen: (_s: { step: number; card: number }, canGoBack: boolean): void => {
+      if (backBtn) backBtn.disabled = !canGoBack;
+    },
     ...(env.now ? { now: env.now } : {}),
   };
 
@@ -160,6 +177,11 @@ export function boot(env: BootEnv): Booted {
   }
   // The one place the notice is printed. It goes to the terminal only, never into the saved transcript.
   if (restoredSession) terminal.notice(RESTORED_NOTICE);
+
+  if (backBtn) {
+    backBtn.addEventListener('click', goBack);
+    backBtn.disabled = !controller.canGoBack;
+  }
 
   setupWrap(doc, termRoot);
   credits = setupCredits(doc, termRoot, env.assets);
@@ -231,6 +253,18 @@ function setupWrap(doc: Document, termRoot: HTMLElement): void {
       hide();
     }
   });
+}
+
+/** Spec §4.3: the header Back button, left of "Take this home". Created only when the back flag is on; disabled until a step has run. */
+function createBackButton(doc: Document): HTMLButtonElement {
+  const btn = doc.createElement('button');
+  btn.id = 'back';
+  btn.type = 'button';
+  btn.textContent = BACK_BUTTON;
+  btn.setAttribute('aria-label', BACK_BUTTON_LABEL);
+  btn.disabled = true;
+  el(doc, 'bar').insertBefore(btn, el(doc, 'wrap-open'));
+  return btn;
 }
 
 /**

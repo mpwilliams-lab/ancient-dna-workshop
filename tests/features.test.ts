@@ -36,10 +36,17 @@ describe('the 23 flags (spec §10.3)', () => {
     expect(Object.isFrozen(ALL_OFF)).toBe(true);
   });
   it('withFeatures overrides only the named flags, on FEATURES by default or on a given base, and never mutates', () => {
-    const on = withFeatures({ back: true });
+    // Written so that it holds whichever flags the build ships: it flips `back` from whatever the shipped set has.
+    const shipped = FEATURES.back;
+    const flipped = withFeatures({ back: !shipped });
+    expect(flipped.back).toBe(!shipped);
+    expect({ ...flipped, back: shipped }).toEqual(FEATURES);
+    expect(FEATURES.back).toBe(shipped);
+    expect(withFeatures({})).toEqual(FEATURES);
+    const on = withFeatures({ back: true }, ALL_OFF);
     expect(on.back).toBe(true);
-    expect({ ...on, back: false }).toEqual(FEATURES);
-    expect(FEATURES.back).toBe(false);
+    expect({ ...on, back: false }).toEqual(ALL_OFF);
+    expect(ALL_OFF.back).toBe(false);
     const off = withFeatures({ 'map.A1': false }, ALL_ON);
     expect(off['map.A1']).toBe(false);
     expect(off.back).toBe(true);
@@ -85,5 +92,12 @@ describe('help() per flag (spec v3 §3.5; RF5: a cut flag leaves no trace in hel
         expect(ruleViolations(line), line).toEqual([]);
       }
     }
+  });
+});
+
+describe('back (Task 17) false path', () => {
+  it('the help text has no Back line without the flag, and has it with the flag', () => {
+    expect(helpLines(withFeatures({ back: false })).join('\n')).not.toContain('Back button');
+    expect(helpLines(withFeatures({ back: true }))).toContain('      Back button: step back one screen.');
   });
 });

@@ -650,3 +650,15 @@ body {
   color: #8a4b00;
   cursor: pointer;
 }
+
+/* ---- Back button (Task 17, spec §4.3): left of "Take this home"; the title keeps the left edge ---- */
+#back {
+  margin-left: auto;
+}
+
+/* The disabled look is colour only: tests/shell-css.test.ts keeps opacity out of this stylesheet (the plots draw theirs as attributes). */
+#bar button:disabled {
+  color: var(--muted);
+  border-color: var(--border);
+  cursor: default;
+}

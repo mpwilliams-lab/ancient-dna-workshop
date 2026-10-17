@@ -111,7 +111,7 @@ describe('cards open over the plot on the guided path', () => {
       expect(document.activeElement).toBe(input());
     }
   });
-  it('the prompt also gets the keyboard back after a click on Back (the Back action itself is wired in Task 17)', () => {
+  it('the prompt also gets the keyboard back after a click on the card\'s Back button (over the start it only closes a ?test card)', () => {
     const b = start(`${FILE_URL}?test`, store, withFeatures({ back: true }, ALL_OFF));
     makeTestHook(b).openCard!('A1');
     const back = card().querySelector<HTMLButtonElement>('.card-back')!;
@@ -119,7 +119,8 @@ describe('cards open over the plot on the guided path', () => {
     expect(document.activeElement).toBe(back);
     back.click();
     expect(document.activeElement).toBe(input());
-    expect(cardId()).toBe('A1');
+    expect(cardId()).toBeNull();                       // Task 17: Back closes the ?test card first (nothing to go back to here)
+    expect(b.controller.screen).toEqual({ step: 0, card: 0 });
   });
 });
 

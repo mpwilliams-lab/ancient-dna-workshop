@@ -88,6 +88,20 @@ describe('layout', () => {
   });
 });
 
+describe('the header Back button (Task 17, spec §4.3)', () => {
+  it('takes the free space of the header bar, so it sits beside "Take this home" and the title keeps the left edge', () => {
+    expect(rule('#back')['margin-left']).toBe('auto');
+    expect(rule('#bar').display).toBe('flex');
+  });
+  it('looks disabled by colour alone: muted text, the quiet border, the default cursor (no opacity: the plots draw theirs as attributes)', () => {
+    const disabled = rule('#bar button:disabled');
+    expect(disabled.color).toBe('var(--muted)');
+    expect(disabled['border-color']).toBe('var(--border)');
+    expect(disabled.cursor).toBe('default');
+    expect(Object.keys(disabled)).not.toContain('opacity');
+  });
+});
+
 describe('the plot is left to the plot code', () => {
   it('sets no fill, stroke or opacity anywhere (the plots draw those as attributes, and a CSS rule would override them)', () => {
     const props = allRules(css).flatMap((r) => Object.keys(decls(r.body)));

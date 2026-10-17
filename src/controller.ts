@@ -2,6 +2,7 @@
 // Live runs keep a Derived in memory and never replay; derive() is used only to restore a saved session (and, from
 // Task 17, for Back). Owns the three-tries counter, the Enter-mid-print ordering and the card repeat guard.
 import { CARD_IDS, type CardId, type WorkshopData } from './types';
+import { backSession } from './back';
 import { parse, formatCommand, completions, leadInOf, type ParseError, type ParseResult } from './parser';
 import { SCRIPT, hintCommand, hintText } from './hints';
 import type { PlotState } from './plotState';
@@ -289,6 +290,30 @@ export class Controller {
   continueCard(): void {
     if (this.closeTestCard()) return;
     if (this.cardOpen !== null) this.advanceCard();
+  }
+
+  /**
+   * Spec §4.1: one screen back, by replay. Whatever is in flight is settled first (a running log is flushed, a running finale
+   * animation jumps to its end), then restore() rebuilds plot, hint, cards and transcript for the previous screen, drawn with
+   * animate: false, and drops the interrupted step's held plot and held after-cards so that neither is drawn or opened for a
+   * screen that no longer exists. A step whose after-cards still wait for its log counts as standing on its bare plot (the
+   * typed-line rule of §4.4: the cards are skipped but stay screens), so Back from there goes to its last card. Back clears
+   * the prompt and resets the three-tries counter. A ?test card is closed first and is never part of the session. At the
+   * start it does nothing.
+   */
+  back(): void {
+    this.closeTestCard();
+    if (!this.canGoBack) return;
+    const here: Cursor = this.pendingAfterToken !== null
+      ? { step: this.cursor.step, card: this.currentCards().length }
+      : { ...this.cursor };
+    if (this.t.isPrinting()) this.t.flush();
+    if (this.animating()) this.finishAnimation();
+    const next = backSession({ ...this.session, cursor: here }, this.live.cardsFor);
+    if (next === null) return;
+    this.restore(next);
+    this.tries = 0;
+    this.t.fillPrompt('');
   }
 
   /**
