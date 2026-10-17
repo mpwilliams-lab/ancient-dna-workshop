@@ -22,6 +22,8 @@ export class FakeTerminal implements TerminalView {
   history: string[] = [];
   shownLines: ShownLine[] = [];
   holdPrints = false;
+  /** What a student would see: every line the controller told the terminal to show, after the last clear() or showLines(). */
+  screen: ShownLine[] = [];
   private printing: { lines: string[]; resolve: () => void } | null = null;
   constructor(readonly events: string[] = []) {}
   printLines(lines: string[], opts?: { stagger?: boolean }): Promise<void> {
@@ -31,21 +33,25 @@ export class FakeTerminal implements TerminalView {
         this.printing = { lines, resolve };
       });
     }
-    for (const l of lines) this.events.push(`out:${l}`);
+    for (const l of lines) this.show('output', l);
     return Promise.resolve();
+  }
+  private show(kind: ShownLine['kind'], text: string): void {
+    this.events.push(kind === 'input' ? `echo:${text}` : kind === 'notice' ? `notice:${text}` : `out:${text}`);
+    this.screen.push({ kind, text });
   }
   flush(): void {
     const p = this.printing;
     if (!p) return;
     this.printing = null;
-    for (const l of p.lines) this.events.push(`out:${l}`);
+    for (const l of p.lines) this.show('output', l);
     p.resolve();
   }
   isPrinting(): boolean {
     return this.printing !== null;
   }
   echoInput(text: string): void {
-    this.events.push(`echo:${text}`);
+    this.show('input', text);
   }
   setHint(text: string): void {
     this.hint = text;
@@ -55,9 +61,10 @@ export class FakeTerminal implements TerminalView {
   }
   clearScreen(): void {
     this.events.push('clear');
+    this.screen = [];
   }
   notice(text: string): void {
-    this.events.push(`notice:${text}`);
+    this.show('notice', text);
   }
   setHistory(lines: string[]): void {
     this.history = [...lines];
@@ -65,6 +72,7 @@ export class FakeTerminal implements TerminalView {
   showLines(lines: readonly ShownLine[]): void {
     this.events.push('showLines');
     this.shownLines = lines.map((l) => ({ kind: l.kind, text: l.text }));
+    this.screen = this.shownLines.map((l) => ({ ...l }));
   }
   get output(): string[] {
     return this.events.filter((e) => e.startsWith('out:')).map((e) => e.slice(4));
@@ -76,10 +84,13 @@ export interface CardOpenCall { id: CardId; index: number; count: number; placem
 export class FakeCards implements CardHost {
   current: CardId | null = null;
   opens: CardOpenCall[] = [];
-  constructor(readonly events: string[] = []) {}
+  /** What the hint line read at the moment each card was opened: the card view places the card against it (Task 17). */
+  hintsAtOpen: string[] = [];
+  constructor(readonly events: string[] = [], private readonly term?: FakeTerminal) {}
   open(id: CardId, index: number, count: number, placement: 'after' | 'before'): void {
     this.current = id;
     this.opens.push({ id, index, count, placement });
+    this.hintsAtOpen.push(this.term?.hint ?? '');
     this.events.push(`card:open:${id}`);
   }
   close(): void {
@@ -143,7 +154,7 @@ export function rig(o: RigOptions = {}): Rig {
   const renders: PlotState[] = [];
   const renderOpts: (RenderOpts | undefined)[] = [];
   const term = new FakeTerminal(events);
-  const cards = new FakeCards(events);
+  const cards = new FakeCards(events, term);
   const store = o.store === undefined ? memStore() : o.store;
   let tick = 0;
   const c = new Controller(

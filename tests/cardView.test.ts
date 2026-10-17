@@ -460,11 +460,11 @@ describe('mountCardView: isolation and geometry', () => {
     document.getElementById('terminal')!.append(hint);
     let hintTop = 700;
     hint.getBoundingClientRect = () => ({ top: hintTop }) as DOMRect;
-    v.open('E1', 0, 1, 'after');                                        // the controller opens the card first ...
+    v.open('E1', 0, 1, 'after');                                        // a host that opens the card first ...
     expect(observed).toHaveLength(1);
     expect(observed[0]).toBe(hint);
     expect(root().style.getPropertyValue('--card-bottom')).toBe('68px');
-    hintTop = 650;                                                      // ... and then setHint(CARD_HINT) makes the hint wrap
+    hintTop = 650;                                                      // ... and then makes the hint wrap
     hintChanged();
     expect(root().style.getPropertyValue('--card-bottom')).toBe('118px');
   });

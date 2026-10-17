@@ -300,8 +300,8 @@ export class Controller {
     if (!CARD_IDS.includes(id)) return;
     if (this.testCard === null && (this.cardOpen !== null || this.pendingAfterToken !== null)) return;
     this.testCard = id;
+    this.t.setHint(CARD_HINT);    // before the card opens: the card view places it against the hint line it finds
     this.hostOpen(id, 0, 1, 'after');
-    this.t.setHint(CARD_HINT);
   }
 
   /** Closes the ?test card. Returns true when one was open (the key press or click is then used up). */
@@ -340,16 +340,22 @@ export class Controller {
     return this.cursor.step > 0 ? this.live.cardsFor[this.cursor.step - 1] ?? [] : [];
   }
 
-  /** Makes the card host match the cursor, then refreshes the hint line and tells the shell. */
+  /**
+   * Refreshes the hint line, makes the card host match the cursor, and tells the shell. The hint goes first: it is one line
+   * as a step hint and two as CARD_HINT at the smallest lab screens, and the card view places the card's bottom edge against
+   * the hint line it finds when it opens. A hint that changed height after that would leave the card over it, by 15.6 px at
+   * 682 x 512: a ResizeObserver reports only a size that differs from the last one it reported, and a card closed and another
+   * opened inside one frame (Back through a bare plot does that) ends on the size it began with, so nothing refits it.
+   */
   private showCurrentCard(): void {
     const id = this.cardOpen;
+    this.refreshHint();
     if (id !== null) {
       this.lastCardEventAt = this.now();
       this.hostOpen(id, this.cursor.card, this.currentCards().length, cardPlacement(id));
     } else {
       this.hostClose();
     }
-    this.refreshHint();
     this.notifyScreen();
   }
 

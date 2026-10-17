@@ -138,9 +138,10 @@ for (const c of cases) {
 
 // ---- P1 card layout (spec §5.2, §5.4, §10.1 P1 item 7): every card, every viewport case. ----
 // Cards are opened through the ?test hook (window.__adw.openCard), which changes no session state. After each open and each
-// Continue the page gets two animation frames: the controller sets the hint line to CARD_HINT right after it opens the card, and
-// the card view re-places itself above the hint from its ResizeObserver, which reports at the next frame. A human cannot close a
-// card and open the next one inside a single frame (the repeat guard is 400 ms); a script can, and would read a stale position.
+// Continue the page gets two animation frames, so layout, the card view's ResizeObserver refit (its safety net for a window resize
+// or a late font) and the style recalculation have all run. The controller sets the hint line to CARD_HINT BEFORE it opens a card,
+// so the card is placed correctly at once; e2e/back.spec.ts reads the geometry with no settle at all, after a Back through two
+// bare plots and onto a card inside one task, which is where a card opened first and a hint changed after used to go wrong.
 
 interface Rect { top: number; bottom: number; left: number; right: number }
 interface CardGeometry {
@@ -250,9 +251,9 @@ for (const c of cases) {
   });
 }
 
-// A refresh with a card open restores it (spec §4.5). The restore opens the card before the controller sets CARD_HINT, so here the
-// card view's first ResizeObserver report, not a later change of the hint line, has to place it above the hint. The two cases are the
-// narrowest ones where the card covers both panes down to the hint line: a lab screen at 150% and the floor.
+// A refresh with a card open restores it (spec §4.5). The card opens while the page boots, so what places it above the hint line is
+// the hint set first and the card measured against the laid-out page, with the card view's first ResizeObserver report as its safety
+// net. The two cases are the narrowest ones where the card covers both panes down to the hint line: a lab screen at 150% and the floor.
 for (const c of cases.filter((k) => k.name.includes('CSS 682x512') || k.name.startsWith('floor'))) {
   test(`a card restored by a refresh sits above the hint line and the prompt: ${c.name}`, async ({ browser }) => {
     await withPage(browser, c, async (page) => {
@@ -272,6 +273,54 @@ for (const c of cases.filter((k) => k.name.includes('CSS 682x512') || k.name.sta
       expect(intersects(g.card!, g.prompt!), 'the restored card covers the prompt row').toBe(false);
       expect(g.hintHit && g.promptHit, 'hint line and prompt reachable').toBe(true);
       expect(g.sh, 'page height').toBeLessThanOrEqual(g.vh);
+      expect(w.errors).toEqual([]);
+    });
+  });
+}
+
+// A card opened in the same task that closed another (carry-forward from the Task 14 review). The hint line is one line as a step hint
+// and two as CARD_HINT at these two sizes (20 and 36 px). A card placed against the one-line hint and then followed by CARD_HINT sat
+// 15.6 px over it, and a ResizeObserver reports only a size that differs from the last one it reported: it had reported CARD_HINT's
+// before the close, so nothing refitted the card, and it stayed there. A human cannot get here (the repeat guard is 400 ms); a script
+// can, and so can Back through a bare plot (e2e/back.spec.ts). Read inside the same task, with no settle, and again after the page
+// has had its frames: the first says the card is placed right at once, the second that nothing moves it afterwards.
+for (const c of cases.filter((k) => k.name.includes('CSS 682x512') || k.name.startsWith('floor'))) {
+  test(`a card opened in the task that closed the one before it sits above the hint line and the prompt at once, and stays: ${c.name}`, async ({ browser }) => {
+    await withPage(browser, c, async (page) => {
+      const w = watch(page);
+      await page.goto(`${APP_URL}?test&reset`);
+      await expect(prompt(page)).toBeVisible();
+      await idle(page);
+      await page.evaluate(() => window.__adw!.openCard!('E1'));
+      await expect(page.locator('#card[data-card-id="E1"]')).toBeVisible();
+      await settle(page);   // the observer has now reported the hint's size with a card open
+      const covered = (): Promise<{ hint: boolean; prompt: boolean; hintH: number }> => page.evaluate(() => {
+        const rect = (q: string): DOMRect => document.querySelector(q)!.getBoundingClientRect();
+        const card = rect('#card');
+        const over = (b: DOMRect): boolean => Math.min(card.right, b.right) - Math.max(card.left, b.left) > 0.5 && Math.min(card.bottom, b.bottom) - Math.max(card.top, b.top) > 0.5;
+        return { hint: over(rect('#terminal .term-hint')), prompt: over(rect('#terminal .term-prompt')), hintH: rect('#terminal .term-hint').height };
+      });
+      const withCard = (await covered()).hintH;
+      for (const id of CARD_IDS.filter((x) => x !== 'E1')) {
+        const same = await page.evaluate((next) => {
+          (document.querySelector('#card .card-continue') as HTMLButtonElement).click();   // closes the card: the step hint, one line
+          const rect = (q: string): DOMRect => document.querySelector(q)!.getBoundingClientRect();
+          const stepHintH = rect('#terminal .term-hint').height;
+          window.__adw!.openCard!(next);                                                    // and opens the next one in the same task
+          const card = rect('#card');
+          const over = (b: DOMRect): boolean => Math.min(card.right, b.right) - Math.max(card.left, b.left) > 0.5 && Math.min(card.bottom, b.bottom) - Math.max(card.top, b.top) > 0.5;
+          return { hint: over(rect('#terminal .term-hint')), prompt: over(rect('#terminal .term-prompt')), stepHintH };
+        }, id);
+        expect(same.stepHintH, `${id}: the premise, the step hint is shorter than CARD_HINT here`).toBeLessThan(withCard);
+        expect(same.hint, `${id}: the card covers the hint line in the task that opened it`).toBe(false);
+        expect(same.prompt, `${id}: the card covers the prompt row in the task that opened it`).toBe(false);
+        await settle(page);
+        await page.waitForTimeout(150);
+        const later = await covered();
+        expect(later.hint, `${id}: the card covers the hint line after the page settled`).toBe(false);
+        expect(later.prompt, `${id}: the card covers the prompt row after the page settled`).toBe(false);
+      }
+      expect(w.requests).toEqual([]);
       expect(w.errors).toEqual([]);
     });
   });

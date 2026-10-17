@@ -266,9 +266,11 @@ export function mountCardView(
     root.style.setProperty('--card-bottom', `${gap}px`);
   };
 
-  // The hint line changes height when it switches to CARD_HINT and back, and the controller does that right after it opens a
-  // card, so the card's bottom edge has to follow it. This view may be mounted before the terminal, so the hint line may not
-  // exist yet: it is looked up again on every open, and the observer moves to it.
+  // The hint line changes height when it switches to CARD_HINT and back. The controller sets the hint just BEFORE it opens a
+  // card, so place() below already sees the height the line will keep; the observer follows every later change (a window
+  // resize, a font arriving, a restored card whose first layout comes after the open). It cannot replace that order: it
+  // reports only a size that differs from the last one it reported. This view may be mounted before the terminal, so the hint
+  // line may not exist yet: it is looked up again on every open, and the observer moves to it.
   const RO = doc.defaultView?.ResizeObserver;   // absent in jsdom: then only window resizes refit
   const ro = RO ? new RO(() => view.refit()) : null;
   let observed: HTMLElement | null = null;
