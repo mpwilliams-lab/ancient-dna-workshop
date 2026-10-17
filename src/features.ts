@@ -33,7 +33,7 @@ export const ALL_ON: Features = allFlags(true);
  * Every flag starts false (spec §10.3).
  */
 export const FEATURES: Features = Object.freeze({
-  back: false,
+  back: true,
   consumerBars: false,
   finaleAnimation: false,
   'map.A1': false,

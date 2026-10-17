@@ -1,8 +1,12 @@
 // Build-time feature flags (spec v3 §10.3, CONTRACT §1). Each flag task (16-30) adds its false-path test here.
 import { describe, expect, it } from 'vitest';
-import { ALL_OFF, ALL_ON, FEATURE_FLAGS, FEATURES, withFeatures } from '../src/features';
+import { ALL_OFF, ALL_ON, FEATURE_FLAGS, FEATURES, withFeatures, type FeatureFlag } from '../src/features';
 import { HELP_LINES, helpLines } from '../src/content';
 import { ruleViolations } from './contentRules';
+
+// The flags switched on so far, in landing order (spec §10.3). Each P2/P3 task appends its own flag(s) in its last commit;
+// the release task (31) removes any that are cut at the merge cutoff.
+const SHIPPED: readonly FeatureFlag[] = ['back'];
 
 const BACK_LINE = '      Back button: step back one screen.';
 const BARS_LINE = '      a consumer-style test: "me" or any period (bars)';
@@ -27,8 +31,8 @@ describe('the 23 flags (spec §10.3)', () => {
       expect(ALL_OFF[f], f).toBe(false);
     }
   });
-  it('every flag starts false (P1 ships with every card in text form)', () => {
-    expect(FEATURES).toEqual(ALL_OFF);
+  it('FEATURES is exactly the shipped set', () => {
+    for (const f of FEATURE_FLAGS) expect(FEATURES[f], f).toBe(SHIPPED.includes(f));
   });
   it('the flag objects are frozen: nothing at run time can change them', () => {
     expect(Object.isFrozen(FEATURES)).toBe(true);

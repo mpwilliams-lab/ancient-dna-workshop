@@ -449,6 +449,11 @@ describe('Back opens a card against the hint line it will have (carry-forward fr
   });
 });
 
+// restore() ends a print that is still in flight by three statements: it bumps printToken, drops pendingAfterToken (the held
+// after-cards) and drops pendingRender (the held plot). Back is what calls it with a print in flight. The two drops are pinned one by
+// one below: without the first, a step's last card does not open (cardOpen reads null while the flag is held); without the second,
+// the held plot is drawn by the next command that runs. The printToken bump is a third guard that no behaviour can see, because the two
+// drops already leave a stale callback nothing to draw or open: removing it alone changes nothing, and removing all three is caught.
 describe('Back while a step prints: nothing of the interrupted log acts afterwards (carry-forward from the Task 6 review)', () => {
   it('after-cards: the callback of the flushed log opens no second card and draws nothing; the plot is drawn once, without animation', async () => {
     const h = make();
