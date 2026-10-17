@@ -2,7 +2,8 @@
 // and the Enter-mid-print ordering (spec §4.2-§4.4, §7 persistence).
 import type { WorkshopData } from './types';
 import { parse, formatCommand, completions, leadInOf, type Command, type ParseError, type ParseResult } from './parser';
-import { execute, type CommandResult } from './commands';
+import { execute, type CommandResult, type ExecContext } from './commands';
+import { FEATURES } from './features';
 import { SCRIPT, advance, hintCommand, hintText } from './hints';
 import { INITIAL_PLOT, reducePlot, type PlotState } from './plotState';
 import { saveSession, type Session, type SessionStorageLike, type TranscriptLine } from './session';
@@ -146,7 +147,10 @@ export class Controller {
 
     let out: CommandResult;
     try {
-      out = execute(res.command, this.data);
+      // Europe and ADMIXTURE log lines depend on whether Britain today is already shown (CONTRACT §4.3).
+      // Interim until Task 6 replaces this method with applyCommand: read it from the current plot.
+      const ctx: ExecContext = { todayShown: this.plot.layers.includes('Today'), features: FEATURES };
+      out = execute(res.command, this.data, ctx);
     } catch (err) {
       console.error('command threw', err);
       this.print([INTERNAL_ERROR_LINE], false);

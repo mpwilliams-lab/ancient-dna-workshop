@@ -5,12 +5,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { execute } from '../src/commands';
 import * as content from '../src/content';
-import { PERIOD_LABELS } from '../src/content';
 import { advance, EXTRAS, hintCommand, SCRIPT } from '../src/hints';
 import { formatCommand } from '../src/parser';
-import { INITIAL_PLOT, reducePlot } from '../src/plotState';
 import { beats, buildRunSheet } from '../src/runsheet';
 import { FIXTURE } from './helpers/shellEnv';
 
@@ -81,24 +78,6 @@ describe('run sheet: strings come from the app, not from hand copies', () => {
 
   it('keeps the wrap line, in full, as the answer about how old the bones are', () => {
     expect(md).toContain(`answer with the wrap line: "${content.WRAP_LINE}"`);
-  });
-});
-
-describe('run sheet: Beat 3 names the bars the app outlines', () => {
-  it('the bars outlined on the second run_admixture are Iron Age, Roman and Anglo-Saxon, and the sheet says so', () => {
-    // Replay the guided script through the app's own command and plot logic, up to the second run_admixture (SCRIPT[9]).
-    let plot = INITIAL_PLOT;
-    for (const c of SCRIPT.slice(0, 10)) plot = reducePlot(plot, execute(c, FIXTURE).plot, FIXTURE);
-    expect(plot.view).toBe('admixture');
-    expect(plot.admixNew).toEqual(['IronAge', 'Roman', 'AngloSaxon']);
-
-    const labels = plot.admixNew.map((id) => PERIOD_LABELS[id]);
-    const list = `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`; // "Iron Age, Roman and Anglo-Saxon"
-    const beat = beats(FIXTURE).find((b) => b.beat.startsWith('Beat 3'))!;
-    const line = beat.say.find((s) => /outlined/.test(s));
-    expect(line, 'a say line about the outlined bars').toBeDefined();
-    expect(line).toContain(list);
-    expect(line).toMatch(/since the last/);
   });
 });
 

@@ -5,9 +5,11 @@
 // Error messages never echo the student's own text (keeps §6 rule 1 safe and long pastes short).
 import type { GeneId, PeriodId } from './types';
 
+/** run_pca values (spec v3 §2.2): the eight periods, 'all', and 'Europe' (run_pca only). */
+export type PcaPeriod = PeriodId | 'all' | 'Europe';
 export type Command =
   | { name: 'help' } | { name: 'load_genomes' } | { name: 'clear' }
-  | { name: 'run_pca'; period: PeriodId | 'all' }
+  | { name: 'run_pca'; period: PcaPeriod }
   | { name: 'run_admixture'; K: number; period?: PeriodId }
   | { name: 'allele_freq'; gene: GeneId }
   | { name: 'ancestry_test'; person: PeriodId | 'me' };
@@ -24,6 +26,11 @@ export const MAX_INPUT_LENGTH = 200;
 export const COMMAND_NAMES: readonly CommandName[] = ['help', 'load_genomes', 'run_pca', 'run_admixture', 'allele_freq', 'ancestry_test', 'clear'];
 /** Periods in the order of spec §4.1's run_pca row (Today first; types.ts PERIOD_IDS is time order, hence the distinct name). */
 export const PARSER_PERIOD_ORDER: readonly PeriodId[] = ['Today', 'FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking'];
+/** run_pca values in help/Tab/error-list order (spec v3 §3.5 help text): Europe first, Britain today last. */
+export const PARSER_PCA_ORDER: readonly (PeriodId | 'Europe')[] =
+  ['Europe', 'FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
+/** Spellings of the Europe value (spec v3 §2.2). Accepted by run_pca only: never by run_admixture or ancestry_test. */
+export const EUROPE_ALIASES: readonly string[] = ['Europe', 'europeans', 'continent'];
 /** Genes in the order of spec §4.1's allele_freq row. */
 export const PARSER_GENE_ORDER: readonly GeneId[] = ['LCT', 'SLC45A2', 'HERC2', 'TYK2', 'HLA-DQ2'];
 
@@ -102,7 +109,7 @@ function buildTable<T extends string>(aliases: Readonly<Partial<Record<T, readon
 }
 
 const PERIOD_TABLE = buildTable(PERIOD_ALIASES);
-const PCA_TABLE = buildTable<PeriodId | 'all'>(PERIOD_ALIASES, [['all', 'all']]);
+const PCA_TABLE = buildTable<PcaPeriod>(PERIOD_ALIASES, [['all', 'all'], ...EUROPE_ALIASES.map((a): [string, PcaPeriod] => [a, 'Europe'])]);
 const GENE_TABLE = buildTable(GENE_ALIASES);
 const PERSON_TABLE = buildTable<PeriodId | 'me'>(PERIOD_ALIASES, [['me', 'me'], ['myself', 'me']]);
 const CMD_TABLE = new Map<string, CommandName>(COMMAND_NAMES.map((c) => [normKey(c), c]));
@@ -141,7 +148,7 @@ export function formatCommand(c: Command): string {
 }
 
 // ---- on-screen text (never includes the student's input) ----
-const PCA_LIST = `${PARSER_PERIOD_ORDER.join(', ')}, all`;
+const PCA_LIST = `${PARSER_PCA_ORDER.join(', ')}, all`;
 export const PARSE_TEXT = {
   empty: 'Type a command and press Enter, or press Esc to fill in the hint.',
   tooLong: 'That is too long: commands are at most 200 characters.',
@@ -155,7 +162,7 @@ export const PARSE_TEXT = {
   takes: (n: CommandName) => `It takes ${PARAMS[n].join(', ')}.`,
   tooMany: (n: CommandName) => (n === 'run_admixture' ? 'run_admixture takes K and one period.' : `${n} takes one value at a time.`),
   badPeriod: 'That is not a period in this workshop.',
-  pcaList: `Periods: ${PCA_LIST}.`,
+  pcaPeriodList: `Periods: ${PCA_LIST}.`,
   periodList: `Periods: ${PARSER_PERIOD_ORDER.join(', ')}.`,
   badGene: 'That is not a gene in this workshop.',
   geneList: `Genes: ${PARSER_GENE_ORDER.join(', ')}.`,
@@ -218,7 +225,7 @@ function splitArgs(argText: string): RawArg[] {
 
 // ---- argument binding ----
 type Problem = { kind: ErrorKind; base: string; tail?: string; fixable: boolean };
-type ValueOf = { period?: PeriodId | 'all'; K?: number; gene?: GeneId; person?: PeriodId | 'me' };
+type ValueOf = { period?: PcaPeriod; K?: number; gene?: GeneId; person?: PeriodId | 'me' };
 interface Bound { values: ValueOf; problems: Problem[]; cross?: Command }
 
 const NUMBER_WORDS: Readonly<Record<string, number>> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
@@ -312,7 +319,7 @@ function bind(name: CommandName, args: RawArg[]): Bound {
       if (v) { values.period = v; continue; }
       const fix = closest(key, PCA_TABLE);
       if (fix) values.period = fix; else cross = crossCommand(key, name);
-      problems.push({ kind: 'unknown_value', base: PARSE_TEXT.badPeriod, tail: PARSE_TEXT.pcaList, fixable: fix !== undefined || cross !== undefined });
+      problems.push({ kind: 'unknown_value', base: PARSE_TEXT.badPeriod, tail: PARSE_TEXT.pcaPeriodList, fixable: fix !== undefined || cross !== undefined });
     } else {
       const v = PERIOD_TABLE.get(key);
       if (v) { values.period = v; continue; }
@@ -332,7 +339,8 @@ function build(name: CommandName, v: ValueOf): Command | undefined {
     case 'run_pca': return v.period ? { name, period: v.period } : undefined;
     case 'run_admixture': {
       if (v.K === undefined) return undefined;
-      return v.period && v.period !== 'all' ? { name, K: v.K, period: v.period } : { name, K: v.K };
+      // run_admixture's period comes from PERIOD_TABLE, so it is never 'all' or 'Europe'; the guard keeps the type exact.
+      return v.period && v.period !== 'all' && v.period !== 'Europe' ? { name, K: v.K, period: v.period } : { name, K: v.K };
     }
     case 'allele_freq': return v.gene ? { name, gene: v.gene } : undefined;
     case 'ancestry_test': return v.person ? { name, person: v.person } : undefined;
@@ -460,7 +468,7 @@ function completeValues(name: CommandName, inner: string): string[] {
   if (param === 'K') return '3'.startsWith(normKey(valuePart)) ? ['run_admixture(K = 3)'] : [];
   if (param === 'gene') return matchValues(valuePart, PARSER_GENE_ORDER, GENE_TABLE).map((gene) => formatCommand({ name: 'allele_freq', gene }));
   if (param === 'person') return matchValues<PeriodId | 'me'>(valuePart, ['me', ...PARSER_PERIOD_ORDER], PERSON_TABLE).map((person) => formatCommand({ name: 'ancestry_test', person }));
-  if (name === 'run_pca') return matchValues<PeriodId | 'all'>(valuePart, [...PARSER_PERIOD_ORDER, 'all'], PCA_TABLE).map((period) => formatCommand({ name: 'run_pca', period }));
+  if (name === 'run_pca') return matchValues<PcaPeriod>(valuePart, [...PARSER_PCA_ORDER, 'all'], PCA_TABLE).map((period) => formatCommand({ name: 'run_pca', period }));
   return matchValues(valuePart, PARSER_PERIOD_ORDER, PERIOD_TABLE).map((period) => formatCommand({ name: 'run_admixture', K: 3, period }));
 }
 

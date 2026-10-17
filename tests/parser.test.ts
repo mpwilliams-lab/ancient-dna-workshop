@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
-  COMMAND_NAMES, GENE_ALIASES, MAX_INPUT_LENGTH, PARSER_GENE_ORDER, PARSER_PERIOD_ORDER, PARSE_TEXT, PERIOD_ALIASES,
+  COMMAND_NAMES, EUROPE_ALIASES, GENE_ALIASES, MAX_INPUT_LENGTH, PARSER_GENE_ORDER, PARSER_PCA_ORDER, PARSER_PERIOD_ORDER, PARSE_TEXT, PERIOD_ALIASES,
   completions, completionsCore, editDistance, formatCommand, leadInOf, normKey, parse, parseCore,
   type Command, type ParseResult,
 } from '../src/parser';
@@ -280,7 +280,7 @@ describe('parse: errors and did-you-mean (RF1, spec §4.2)', () => {
   it('pins the exact friendly messages', () => {
     expect(parse('run_pca(period = "Neolithic")')).toEqual({
       ok: false, kind: 'unknown_value',
-      message: 'That is not a period in this workshop. Periods: Today, FirstFarmers, BellBeaker, BronzeAge, IronAge, Roman, AngloSaxon, Viking, all.',
+      message: 'That is not a period in this workshop. Periods: Europe, FirstFarmers, BellBeaker, BronzeAge, IronAge, Roman, AngloSaxon, Viking, Today, all.',
     });
     expect(parse('run_pca(period = "IronAg")')).toEqual({
       ok: false, kind: 'unknown_value',
@@ -403,13 +403,13 @@ describe('formatCommand', () => {
   it('round-trips every command the workshop can run', () => {
     const all: Command[] = [
       { name: 'help' }, { name: 'load_genomes' }, { name: 'clear' },
-      ...[...PARSER_PERIOD_ORDER, 'all' as const].map((period) => ({ name: 'run_pca', period }) as Command),
+      ...[...PARSER_PCA_ORDER, 'all' as const].map((period) => ({ name: 'run_pca', period }) as Command),
       { name: 'run_admixture', K: 3 },
       ...PARSER_PERIOD_ORDER.map((period) => ({ name: 'run_admixture', K: 3, period }) as Command),
       ...PARSER_GENE_ORDER.map((gene) => ({ name: 'allele_freq', gene }) as Command),
       ...['me' as const, ...PARSER_PERIOD_ORDER].map((person) => ({ name: 'ancestry_test', person }) as Command),
     ];
-    expect(all.length).toBe(35);
+    expect(all.length).toBe(36);
     for (const c of all) expect(parse(formatCommand(c))).toEqual(ok(c));
   });
 });
@@ -427,7 +427,11 @@ describe('completions (Tab)', () => {
     ['run_pca(period = "Ir', ['run_pca(period = "IronAge")']],
     ['run_pca(period = "b', ['run_pca(period = "BellBeaker")', 'run_pca(period = "BronzeAge")']],
     ['run_pca("ro', ['run_pca(period = "Roman")']],
-    ['run_pca(', ['run_pca(period = "Today")', 'run_pca(period = "FirstFarmers")', 'run_pca(period = "BellBeaker")', 'run_pca(period = "BronzeAge")', 'run_pca(period = "IronAge")', 'run_pca(period = "Roman")', 'run_pca(period = "AngloSaxon")', 'run_pca(period = "Viking")', 'run_pca(period = "all")']],
+    ['run_pca(', ['run_pca(period = "Europe")', 'run_pca(period = "FirstFarmers")', 'run_pca(period = "BellBeaker")', 'run_pca(period = "BronzeAge")', 'run_pca(period = "IronAge")', 'run_pca(period = "Roman")', 'run_pca(period = "AngloSaxon")', 'run_pca(period = "Viking")', 'run_pca(period = "Today")', 'run_pca(period = "all")']],
+    ['run_pca(period = "Eu', ['run_pca(period = "Europe")']],
+    ['run_pca(period = "con', ['run_pca(period = "Europe")']],
+    ['ancestry_test(person = "Eu', []],
+    ['run_admixture(K = 3, period = "Eu', []],
     ['run_pca ir', ['run_pca(period = "IronAge")']],
     ['run_pca(period = "sto', ['run_pca(period = "FirstFarmers")']],
     ['run_pca(period = "sax', ['run_pca(period = "AngloSaxon")']],
@@ -564,7 +568,7 @@ describe("did-you-mean never carries the student's own K", () => {
 // ---------- the section 6 content rules over the parser's own text ----------
 const WORKSHOP_COMMANDS: Command[] = [
   { name: 'help' }, { name: 'load_genomes' }, { name: 'clear' },
-  ...[...PARSER_PERIOD_ORDER, 'all' as const].map((period) => ({ name: 'run_pca', period }) as Command),
+  ...[...PARSER_PCA_ORDER, 'all' as const].map((period) => ({ name: 'run_pca', period }) as Command),
   { name: 'run_admixture', K: 3 },
   ...PARSER_PERIOD_ORDER.map((period) => ({ name: 'run_admixture', K: 3, period }) as Command),
   ...PARSER_GENE_ORDER.map((gene) => ({ name: 'allele_freq', gene }) as Command),
@@ -800,7 +804,7 @@ function checkAll(s: string, run: FuzzRun, constantMessages: ReadonlySet<string>
     if (!keys.includes('name') || keys.some((k) => !COMMAND_KEYS[c.name].includes(k))) bad(`unexpected shape ${JSON.stringify(c)}`);
     if (c.name === 'run_pca') {
       bump(run.pca, c.period);
-      if (!keys.includes('period') || ![...PARSER_PERIOD_ORDER, 'all'].includes(c.period)) bad(`bad run_pca ${JSON.stringify(c)}`);
+      if (!keys.includes('period') || ![...PARSER_PCA_ORDER, 'all'].includes(c.period)) bad(`bad run_pca ${JSON.stringify(c)}`);
     } else if (c.name === 'allele_freq') {
       bump(run.genes, c.gene);
       if (!keys.includes('gene') || !PARSER_GENE_ORDER.includes(c.gene)) bad(`bad allele_freq ${JSON.stringify(c)}`);
@@ -947,7 +951,7 @@ describe('lead-ins: copied prompts and the hint line labels are forgiven (RF1)',
   });
 
   it('every command the workshop can run still parses to itself behind every lead-in', () => {
-    expect(WORKSHOP_COMMANDS.length).toBe(35);
+    expect(WORKSHOP_COMMANDS.length).toBe(36);
     for (const lead of LEAD_INS) {
       for (const c of WORKSHOP_COMMANDS) expect(parseCore(lead + formatCommand(c)), JSON.stringify(lead + formatCommand(c))).toEqual(ok(c));
     }
@@ -1046,5 +1050,56 @@ describe('leadInOf (what a completion keeps in front of the command)', () => {
       const rest = line.slice(leadInOf(line).length);
       expect(parseCore(line)).toEqual(parseCore(rest));
     }
+  });
+});
+
+// ---------- v3: the Europe value (spec v3 §2.2, CONTRACT §4.2) ----------
+describe('run_pca(period = "Europe") (Task 4)', () => {
+  it('the run_pca order, the aliases and the period list text are the contract ones', () => {
+    expect(PARSER_PCA_ORDER).toEqual(['Europe', 'FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today']);
+    expect(EUROPE_ALIASES).toEqual(['Europe', 'europeans', 'continent']);
+    expect(PARSE_TEXT.pcaPeriodList).toBe('Periods: Europe, FirstFarmers, BellBeaker, BronzeAge, IronAge, Roman, AngloSaxon, Viking, Today, all.');
+    expect(PARSE_TEXT.periodList).toBe('Periods: Today, FirstFarmers, BellBeaker, BronzeAge, IronAge, Roman, AngloSaxon, Viking.');
+    expect('pcaList' in PARSE_TEXT).toBe(false);
+  });
+  it.each([
+    'run_pca(period = "Europe")', 'run_pca(period = "europe")', 'run_pca(period = "EUROPE")', 'run_pca(period = "europeans")',
+    'run_pca(period = "Europeans")', 'run_pca(period = "continent")', 'run_pca("Europe")', 'run_pca Europe', 'run pca europe',
+    'Next: run_pca(period = "Europe")', '> run_pca(period = europe)',
+  ])('%j runs run_pca Europe', (input) => {
+    expect(parse(input)).toEqual(ok({ name: 'run_pca', period: 'Europe' }));
+  });
+  it('formatCommand writes it the way the hint shows it, and parse reads it back', () => {
+    expect(formatCommand({ name: 'run_pca', period: 'Europe' })).toBe('run_pca(period = "Europe")');
+    expect(parse('run_pca(period = "Europe")')).toEqual(ok({ name: 'run_pca', period: 'Europe' }));
+  });
+  it('ancestry_test does not accept Europe (its values are "me" and the eight periods)', () => {
+    for (const v of EUROPE_ALIASES) {
+      const r = parse(`ancestry_test(person = "${v}")`);
+      expect(r.ok, v).toBe(false);
+      if (!r.ok) {
+        expect(r.kind).toBe('unknown_value');
+        expect(r.message).toContain(PARSE_TEXT.badPerson);
+        expect(r.message).not.toContain('Europe');
+      }
+    }
+  });
+  it('run_admixture does not accept Europe as a period; the did-you-mean, if any, is the run_pca command', () => {
+    for (const v of EUROPE_ALIASES) {
+      const r = parse(`run_admixture(K = 3, period = "${v}")`);
+      expect(r.ok, v).toBe(false);
+      if (!r.ok) {
+        expect(r.kind).toBe('unknown_value');
+        if (r.suggestion !== undefined) expect(r.suggestion).toBe('run_pca(period = "Europe")');
+      }
+    }
+  });
+  it('a bare "Europe" suggests run_pca(period = "Europe"), and a near-miss on run_pca offers it as the did-you-mean', () => {
+    expect(parse('Europe')).toMatchObject({ ok: false, suggestion: 'run_pca(period = "Europe")' });
+    expect(parse('run_pca(period = "Eurpoe")')).toMatchObject({ ok: false, suggestion: 'run_pca(period = "Europe")' });
+  });
+  it('the old periods and their spellings still resolve exactly as before', () => {
+    for (const p of PARSER_PERIOD_ORDER) expect(parse(`run_pca(period = "${p}")`)).toEqual(ok({ name: 'run_pca', period: p }));
+    expect(parse('run_pca(period = "all")')).toEqual(ok({ name: 'run_pca', period: 'all' }));
   });
 });

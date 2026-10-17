@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as C from '../src/content';
-import { PARSER_GENE_ORDER, PARSER_PERIOD_ORDER, parse } from '../src/parser';
+import { PARSER_GENE_ORDER, PARSER_PCA_ORDER, parse } from '../src/parser';
 import type { Trait, TraitPoint } from '../src/types';
 import { ALLOWED_AGE_PHRASES, ruleViolations } from './contentRules';
 import { cloneFixture, FIXTURE } from './fixtures/fixture';
@@ -333,7 +333,7 @@ describe('help() layout (a line over 60 characters wraps badly in the terminal p
 
   it('keeps every period, every gene and the keys that the old layout named', () => {
     const periods = describedAs('run_pca(period = "IronAge")');
-    for (const id of [...PARSER_PERIOD_ORDER, 'all']) expect(periods, id).toMatch(new RegExp(`(^|[^A-Za-z])${id}([^A-Za-z]|$)`));
+    for (const id of [...PARSER_PCA_ORDER, 'all']) expect(periods, id).toMatch(new RegExp(`(^|[^A-Za-z])${id}([^A-Za-z]|$)`));
     const genes = describedAs('allele_freq(gene = "LCT")');
     for (const id of PARSER_GENE_ORDER) expect(genes, id).toContain(id);
     expect(describedAs('ancestry_test(person = "me")')).toMatch(/"me"/);
@@ -451,5 +451,17 @@ describe('v3 captions, chips, callouts, buttons, hints and log lines are verbati
       expect(ALL, s).toContain(s);
       expect(ruleViolations(s), s).toEqual([]);
     }
+  });
+});
+
+describe('help(): the run_pca entry (v3 §3.5, Task 4)', () => {
+  it('is the four-line text of the spec, with Europe first and Britain today last', () => {
+    const i = C.HELP_LINES.indexOf('  run_pca(period = "IronAge")');
+    expect(C.HELP_LINES.slice(i, i + 4)).toEqual([
+      '  run_pca(period = "IronAge")',
+      '      map one period: Europe, FirstFarmers, BellBeaker,',
+      '      BronzeAge, IronAge, Roman, AngloSaxon, Viking,',
+      '      Today or all',
+    ]);
   });
 });

@@ -59,7 +59,38 @@ export const PERIOD_FRAME: Readonly<Record<PeriodId, FrameId>> = {
   Roman: 'britain', AngloSaxon: 'britain', Viking: 'britain', Today: 'europe',
 };
 
-// ---- v3 chip ids (Task 3; CONTRACT §3). Task 4 adds the step, card, image, map and diagram ids. ----
+// ---- v3 app ids (CONTRACT §3). Chips: Task 3. Steps, cards, images, maps, diagrams: Task 4. ----
 export type ChipKey = 'CHIP_DNA_CHANGED' | 'CHIP_CULTURE_CHANGED' | 'CHIP_DNA_SLIGHT' | 'CHIP_CULTURE_ONLY'
   | 'CHIP_ROMAN' | 'CHIP_DNA_CHANGED_EAST';
 export type ChipIcon = 'dna' | 'pot';
+
+/** The 19 guided steps of spec v3 §2.1, in script order (hints.ts SCRIPT_STEPS carries one per SCRIPT command). */
+export type StepId =
+  | 'hook' | 'load' | 'europe' | 'firstFarmers' | 'bellBeaker' | 'admix1' | 'bronzeAge' | 'ironAge' | 'consumerIA'
+  | 'revealPca' | 'revealAdmix' | 'roman' | 'angloSaxon' | 'finale' | 'lct' | 'slc45a2' | 'herc2' | 'tyk2' | 'hla';
+export const STEP_IDS: readonly StepId[] = [
+  'hook', 'load', 'europe', 'firstFarmers', 'bellBeaker', 'admix1', 'bronzeAge', 'ironAge', 'consumerIA',
+  'revealPca', 'revealAdmix', 'roman', 'angloSaxon', 'finale', 'lct', 'slc45a2', 'herc2', 'tyk2', 'hla',
+];
+
+/** The 23 cards of spec v3 §3, in script order. */
+export type CardId = 'A1' | 'B1' | 'C1' | 'D1' | 'D2' | 'E1' | 'E2' | 'E3' | 'F1' | 'G1' | 'G2'
+  | 'H1' | 'H2' | 'I1' | 'I2' | 'J1' | 'J2' | 'J3' | 'K1' | 'K2' | 'L1' | 'L2' | 'L3';
+export const CARD_IDS: readonly CardId[] = [
+  'A1', 'B1', 'C1', 'D1', 'D2', 'E1', 'E2', 'E3', 'F1', 'G1', 'G2',
+  'H1', 'H2', 'I1', 'I2', 'J1', 'J2', 'J3', 'K1', 'K2', 'L1', 'L2', 'L3',
+];
+
+export type ImageId =
+  | 'stonehenge' | 'avebury' | 'ring-of-brodgar' | 'thornborough-plan' | 'castlerigg'          // B1
+  | 'amesbury-archer' | 'round-barrow' | 'shrewton-beaker'                                     // C1
+  | 'roundhouse' | 'maiden-castle' | 'battersea-shield'                                        // E2
+  | 'hadrians-wall' | 'bignor-medusa' | 'hoxne-coins'                                          // F1
+  | 'sutton-hoo-helmet' | 'square-headed-brooch' | 'west-stow'                                 // G2
+  | 'milk' | 'cow'                                                                             // H1
+  | 'melanocyte'                                                                               // I1
+  | 'irises'                                                                                   // J1 (own SVG)
+  | 'lactase-scissors' | 'tb-relay' | 'wheat';                                                 // P3 cartoons (own SVG)
+export type MapId = 'A1' | 'D1' | 'E1' | 'G1' | 'H2' | 'I2' | 'J3' | 'K2' | 'L3' | 'F1inset';
+export type DiagramId = 'fatherMotherLines';
+export type DistributionId = GeneId;

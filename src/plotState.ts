@@ -33,6 +33,8 @@ export function reducePlot(s: PlotState, a: PlotAction, data: WorkshopData): Plo
       if (a.period === 'all') {
         return { ...s, view: 'pca', layers: inTimeOrder(data, known), frame: 'europe', showNorthSea: true };
       }
+      // Interim (Task 4): run_pca(period = "Europe") shows the Europe frame and keeps the layers. Task 5 adds focus.
+      if (a.period === 'Europe') return { ...s, view: 'pca', frame: 'europe' };
       const info = data.periods.find((p) => p.id === a.period);
       if (!info) return s;
       return {

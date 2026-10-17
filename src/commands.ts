@@ -1,15 +1,29 @@
 import type { WorkshopData, PeriodId, GeneId, ConsumerShare } from './types';
 import { PERIOD_IDS, GENE_IDS } from './types';
-import type { Command } from './parser';
+import type { Command, PcaPeriod } from './parser';
 import {
   PERIOD_LABELS, MAP_GROUP_LABELS, SOURCE_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION,
   CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_NOTE, ROMAN_LOG_LINE, K_REFUSAL, consumerTitle, traitSourceLabel,
+  europeProjectingLine, EUROPE_HELD_BACK, EUROPE_ALREADY_SHOWN, TODAY_PLACED, ALL_PROJECTING, ALL_TODAY_LAST,
+  ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN,
 } from './content';
+import { FEATURES, type Features } from './features';
 
 export type PlotAction =
-  | { kind: 'none' } | { kind: 'pca'; period: PeriodId | 'all' }
-  | { kind: 'admixture'; period?: PeriodId } | { kind: 'trait'; gene: GeneId };
+  | { kind: 'none' }
+  | { kind: 'pca'; period: PcaPeriod }
+  | { kind: 'admixture'; period?: PeriodId }
+  | { kind: 'trait'; gene: GeneId }
+  | { kind: 'consumer'; person: PeriodId | 'me' };   // declared now; emitted only with features.consumerBars (Task 18)
 export interface CommandResult { lines: string[]; plot: PlotAction; refused: boolean; clear: boolean }
+
+/**
+ * What a log line may depend on besides the command and the data (CONTRACT §4.3). todayShown is whether Britain today
+ * is already among the PCA layers BEFORE this command runs (plotState todayShown). Passing it in keeps execute pure, so a
+ * replayed session (Task 6) prints exactly the lines the live run printed.
+ */
+export interface ExecContext { todayShown: boolean; features: Features }
+export const DEFAULT_EXEC_CONTEXT: ExecContext = { todayShown: false, features: FEATURES };
 
 const NONE: PlotAction = { kind: 'none' };
 const LABEL_WIDTH = 36;     // longest period label is 35 characters
@@ -73,7 +87,7 @@ function loadGenomes(data: WorkshopData): CommandResult {
   ]);
 }
 
-function runPca(data: WorkshopData, period: PeriodId | 'all'): CommandResult {
+function runPca(data: WorkshopData, period: PcaPeriod, ctx: ExecContext): CommandResult {
   const L = data.logs;
   const head = [
     '$ smartpca -p britain.par',
@@ -81,19 +95,24 @@ function runPca(data: WorkshopData, period: PeriodId | 'all'): CommandResult {
     `Axes: ${formatCount(L.pca_samples_used)} present-day Europeans (Britain left out)`,
   ];
   let body: string[];
-  if (period === 'all') {
-    body = ['Projecting every period onto the axes:', ...PERIOD_IDS.map((id) => periodRow(PERIOD_LABELS[id], nPca(data, id)))];
+  if (period === 'Europe') {
+    // Spec v3 §3.5: the five continental map groups; Britain today is held back until run_pca(Today) or run_pca(all).
+    body = [
+      europeProjectingLine(data.map_groups.map((g) => MAP_GROUP_LABELS[g.id])),
+      ctx.todayShown ? EUROPE_ALREADY_SHOWN : EUROPE_HELD_BACK,
+    ];
+  } else if (period === 'all') {
+    // PERIOD_IDS is time order, so Britain today is the last row.
+    body = [ALL_PROJECTING, ...PERIOD_IDS.map((id) => periodRow(PERIOD_LABELS[id], nPca(data, id))), ALL_TODAY_LAST];
   } else {
     body = [`Projecting ${PERIOD_LABELS[period]} onto the axes: ${formatCount(nPca(data, period))} people`];
-    if (period === 'Today') {
-      body.push(`Map groups: ${data.map_groups.map((g) => `${MAP_GROUP_LABELS[g.id]} (${formatCount(g.n)})`).join(', ')}`);
-    }
+    if (period === 'Today') body.push(TODAY_PLACED);
     if (period === 'Roman') body.push(ROMAN_LOG_LINE); // spec v3 §3.5 (replaces the v2.1 Roman card), §6 rule 4
   }
   return ok([...head, ...body, 'Done: PC1 and PC2 written.'], { kind: 'pca', period });
 }
 
-function runAdmixture(data: WorkshopData, K: number, period: PeriodId | undefined): CommandResult {
+function runAdmixture(data: WorkshopData, K: number, period: PeriodId | undefined, ctx: ExecContext): CommandResult {
   if (K !== 3) return refuse([K_REFUSAL]);
   const L = data.logs;
   const lines = [
@@ -102,9 +121,10 @@ function runAdmixture(data: WorkshopData, K: number, period: PeriodId | undefine
     `Reference groups: ${SOURCE_LABELS.STEPPE}, ${SOURCE_LABELS.FARMER}, ${SOURCE_LABELS.WHG}`,
     'Estimating ancestry shares (mini-batch EM)...',
     'Converged.',
-    period === undefined
-      ? 'Drawing one average bar per period.'
-      : `Showing one bar per person: ${PERIOD_LABELS[period]} (${formatCount(nAdmix(data, period))} people in this ancestry run)`,
+    ...(period === undefined
+      // Spec v3 §3.5: the mean-bar view ends with whether Britain today is among the bars (replaces the bridge line).
+      ? ['Drawing one average bar per period.', ctx.todayShown ? ADMIX_TODAY_SHOWN : ADMIX_TODAY_HIDDEN]
+      : [`Showing one bar per person: ${PERIOD_LABELS[period]} (${formatCount(nAdmix(data, period))} people in this ancestry run)`]),
   ];
   return ok(lines, period === undefined ? { kind: 'admixture' } : { kind: 'admixture', period });
 }
@@ -142,18 +162,18 @@ function ancestryTest(data: WorkshopData, person: PeriodId | 'me'): CommandResul
   ]);
 }
 
-/** Runs one parsed command against the precomputed data. Never throws. */
-export function execute(c: Command, data: WorkshopData): CommandResult {
+/** Runs one parsed command against the precomputed data. Pure (reads only c, data and ctx). Never throws. */
+export function execute(c: Command, data: WorkshopData, ctx: ExecContext = DEFAULT_EXEC_CONTEXT): CommandResult {
   try {
     switch (c.name) {
       case 'help': return ok([...HELP_LINES]);
       case 'load_genomes': return loadGenomes(data);
       case 'clear': return { lines: [], plot: NONE, refused: false, clear: true };
       case 'run_pca':
-        if (c.period === 'all' || isPeriod(c.period)) return runPca(data, c.period);
+        if (c.period === 'all' || c.period === 'Europe' || isPeriod(c.period)) return runPca(data, c.period, ctx);
         break;
       case 'run_admixture':
-        if (c.period === undefined || isPeriod(c.period)) return runAdmixture(data, c.K, c.period);
+        if (c.period === undefined || isPeriod(c.period)) return runAdmixture(data, c.K, c.period, ctx);
         break;
       case 'allele_freq':
         if (isGene(c.gene)) return alleleFreq(data, c.gene);

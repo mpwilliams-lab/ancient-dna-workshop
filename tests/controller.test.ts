@@ -16,7 +16,9 @@ import { formatCommand } from '../src/parser';
 import { SCRIPT, EXTRAS } from '../src/hints';
 import { INITIAL_PLOT, type PlotState } from '../src/plotState';
 import { loadSession, type Session, type SessionStorageLike } from '../src/session';
-import { PREDICT_HINT, RESTORED_NOTICE } from '../src/content';
+import {
+  ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN, EUROPE_ALREADY_SHOWN, EUROPE_HELD_BACK, PREDICT_HINT, RESTORED_NOTICE, REVEAL_HINT,
+} from '../src/content';
 import { ruleViolations } from './contentRules';
 
 const data = fixtureJson as unknown as WorkshopData;
@@ -842,5 +844,33 @@ describe('with the real DOM terminal and fake timers', () => {
     type(w.input, 'help()');
     type(w.input, '', 'ArrowUp');
     expect(w.input.value).toBe('help()');
+  });
+});
+
+describe('v3 script wiring (Task 4)', () => {
+  it('passes whether Britain today is shown to execute: the Europe and ADMIXTURE lines follow the plot', () => {
+    const r = rig();
+    r.c.submit('run_pca(period = "Europe")');
+    r.c.submit('run_admixture(K = 3)');
+    expect(r.term.output).toContain(EUROPE_HELD_BACK);
+    expect(r.term.output).toContain(ADMIX_TODAY_HIDDEN);
+    expect(r.term.output).not.toContain(EUROPE_ALREADY_SHOWN);
+    r.c.submit('run_pca(period = "Today")');
+    r.c.submit('run_pca(period = "Europe")');
+    r.c.submit('run_admixture(K = 3)');
+    expect(r.term.output).toContain(EUROPE_ALREADY_SHOWN);
+    expect(r.term.output).toContain(ADMIX_TODAY_SHOWN);
+  });
+
+  it('the guided script runs to the end through the controller, with the Reveal line before run_pca(Today)', () => {
+    const r = rig();
+    for (let k = 0; k < 9; k++) r.c.submit(STEP(k));
+    expect(SCRIPT[8]).toEqual({ name: 'ancestry_test', person: 'IronAge' });
+    expect(r.term.hint).toBe(REVEAL_HINT);
+    r.c.escape();
+    expect(r.term.prompt).toBe('run_pca(period = "Today")');
+    for (let k = 9; k < SCRIPT.length; k++) r.c.submit(STEP(k));
+    expect(r.c.hintIndex).toBe(19);
+    expect(r.c.badTries).toBe(0);
   });
 });

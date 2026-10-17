@@ -43,14 +43,15 @@ test('the full guided script runs over file:// with zero network requests and no
     }
 
     if (step.name === 'run_pca') {
-      // Beat 3: the black-outlined eastern-England points are explained in the legend, from the real data's `east` flags,
-      // and only once the Anglo-Saxon layer is drawn (the last run_pca step of the script).
+      // Beat 3: the black-outlined eastern-England points are explained in the legend, from the real data's `east` flags.
+      // Before the Anglo-Saxon step there is no item. The v3 finale (run_pca(all), step 13) is not checked here: Task 8
+      // shows the item only while Anglo-Saxon is in focus, and Task 14 rewrites this spec for the v3 script.
       const item = page.locator('#plot .legend-item[data-legend="east"]');
       if (step.period === 'AngloSaxon') {
         await expect(item).toHaveCount(1);
         await expect(item).toHaveText(EAST_ENGLAND_LEGEND);
         expect(await page.locator('#plot .pt.east').count(), 'outlined points on the plot').toBeGreaterThan(0);
-      } else {
+      } else if (step.period !== 'all') {
         await expect(item, `after ${cmd}`).toHaveCount(0);
       }
     }
@@ -125,7 +126,7 @@ test('Enter while a log is printing keeps plot actions in command order', async 
 test('typing the hint line exactly as shown, label and all, runs that step: no unknown-command error, and the hint moves on', async ({ page }) => {
   const w = watch(page);
   await freshStart(page);
-  // The first three steps (hook, load, Today) show "Next: <command>"; the fourth onwards is covered at unit level for every
+  // The first three steps (hook, load, Europe) show "Next: <command>"; the fourth onwards is covered at unit level for every
   // step and every extra (tests/hints.test.ts), since the predict line replaces the hint after run_pca(FirstFarmers).
   for (let i = 0; i < 3; i++) {
     const shown = ((await page.locator('#terminal .term-hint').textContent()) ?? '').trim();

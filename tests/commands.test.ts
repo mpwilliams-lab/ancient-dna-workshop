@@ -2,11 +2,13 @@ import { describe, it, expect } from 'vitest';
 import fixtureRaw from './fixtures/data.fixture.json';
 import type { WorkshopData, PeriodId, GeneId, ConsumerShare } from '../src/types';
 import type { Command } from '../src/parser';
-import { execute, formatCount, roundPercents, asciiBar } from '../src/commands';
+import { execute, formatCount, roundPercents, asciiBar, DEFAULT_EXEC_CONTEXT, type ExecContext } from '../src/commands';
 import {
   PERIOD_LABELS, MAP_GROUP_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION, HOOK_NOTE, CONSUMER_NOTE, CONSUMER_TAKEAWAY,
-  ROMAN_LOG_LINE, K_REFUSAL, traitSourceLabel,
+  ROMAN_LOG_LINE, K_REFUSAL, traitSourceLabel, EUROPE_HELD_BACK, EUROPE_ALREADY_SHOWN, TODAY_PLACED, ALL_PROJECTING,
+  ALL_TODAY_LAST, ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN,
 } from '../src/content';
+import { FEATURES } from '../src/features';
 
 const fixture = fixtureRaw as unknown as WorkshopData;
 const PERIODS: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
@@ -35,6 +37,7 @@ const ALL_COMMANDS: Command[] = [
   { name: 'help' }, { name: 'load_genomes' }, { name: 'clear' },
   ...PERIODS.map((period): Command => ({ name: 'run_pca', period })),
   { name: 'run_pca', period: 'all' },
+  { name: 'run_pca', period: 'Europe' },
   { name: 'run_admixture', K: 3 },
   ...PERIODS.map((period): Command => ({ name: 'run_admixture', K: 3, period })),
   { name: 'run_admixture', K: 2 }, { name: 'run_admixture', K: 4, period: 'IronAge' },
@@ -42,6 +45,8 @@ const ALL_COMMANDS: Command[] = [
   { name: 'ancestry_test', person: 'me' },
   ...PERIODS.map((person): Command => ({ name: 'ancestry_test', person })),
 ];
+
+const formatCommandish = (c: Command): string => JSON.stringify(c);
 
 // Spec §6 rule 1 scan, applied to log output (stricter than for static content: no CE dates in logs).
 const ALLOWED_PHRASES = ['about 2,000 years ago', 'about 100 generations ago', 'over the last 4,000 years'];
@@ -97,7 +102,7 @@ describe('execute: plot actions', () => {
     expect(execute({ name: 'help' }, fixture).plot).toEqual({ kind: 'none' });
     expect(execute({ name: 'load_genomes' }, fixture).plot).toEqual({ kind: 'none' });
     expect(execute({ name: 'clear' }, fixture).plot).toEqual({ kind: 'none' });
-    for (const period of [...PERIODS, 'all' as const]) {
+    for (const period of [...PERIODS, 'all' as const, 'Europe' as const]) {
       expect(execute({ name: 'run_pca', period }, fixture).plot).toEqual({ kind: 'pca', period });
     }
     expect(execute({ name: 'run_admixture', K: 3 }, fixture).plot).toEqual({ kind: 'admixture' });
@@ -150,25 +155,38 @@ describe('execute: log templates', () => {
       expect(execute({ name: 'run_pca', period: p }, real).lines).not.toContain(ROMAN_LOG_LINE);
     }
   });
-  it('run_pca(Today) names the five map groups and their n', () => {
-    const ids = ['Sardinian', 'Spanish', 'ItalianNorth', 'French', 'Norwegian'] as const;
-    const ns = [27, 36, 12, 29, 11]; // synthetic counts for this test only
-    const d: WorkshopData = {
-      ...withN(real, 'Today', 107, 106),
-      map_groups: ids.map((id, k) => ({ id, n: ns[k]!, centre: { x: 0, y: 0 }, points: [] })),
-    };
-    const lines = execute({ name: 'run_pca', period: 'Today' }, d).lines;
-    expect(lines).toContain('Projecting Britain today onto the axes: 107 people');
-    expect(lines).toContain(
-      `Map groups: ${MAP_GROUP_LABELS.Sardinian} (27), ${MAP_GROUP_LABELS.Spanish} (36), ` +
-      `${MAP_GROUP_LABELS.ItalianNorth} (12), ${MAP_GROUP_LABELS.French} (29), ${MAP_GROUP_LABELS.Norwegian} (11)`,
-    );
+  it('run_pca(Today) projects Britain today with its n and says it is placed like the ancient Britons (v3 §3.5)', () => {
+    const lines = execute({ name: 'run_pca', period: 'Today' }, withN(real, 'Today', 107, 106)).lines;
+    expect(lines.slice(-3)).toEqual(['Projecting Britain today onto the axes: 107 people', TODAY_PLACED, 'Done: PC1 and PC2 written.']);
+    expect(lines.join('\n')).not.toContain('Map groups:');
   });
-  it('run_pca(all) lists every period with its n', () => {
+  it('run_pca(Europe) names the five map groups and holds Britain today back until it is shown (v3 §3.5)', () => {
+    const held = execute({ name: 'run_pca', period: 'Europe' }, real).lines;
+    expect(held.slice(-3)).toEqual([
+      `Projecting present-day Europeans onto the axes: 5 map groups (${MAP_GROUP_LABELS.Sardinian}, ${MAP_GROUP_LABELS.Spanish}, ` +
+        `${MAP_GROUP_LABELS.ItalianNorth}, ${MAP_GROUP_LABELS.French}, ${MAP_GROUP_LABELS.Norwegian})`,
+      EUROPE_HELD_BACK,
+      'Done: PC1 and PC2 written.',
+    ]);
+    expect(held[0]).toBe('$ smartpca -p britain.par');
+    const shown = execute({ name: 'run_pca', period: 'Europe' }, real, { todayShown: true, features: FEATURES }).lines;
+    expect(shown[shown.length - 2]).toBe(EUROPE_ALREADY_SHOWN);
+    expect(shown).not.toContain(EUROPE_HELD_BACK);
+  });
+  it('run_pca(all) projects every period oldest first, Britain today last, then says so (v3 §3.5)', () => {
     const lines = execute({ name: 'run_pca', period: 'all' }, withN(real, 'BellBeaker', 77, 70)).lines;
-    expect(lines).toContain('Projecting every period onto the axes:');
-    for (const p of PERIODS) expect(lines.some((l) => l.startsWith(`  ${PERIOD_LABELS[p]}`))).toBe(true);
+    const start = lines.indexOf(ALL_PROJECTING);
+    expect(start).toBeGreaterThan(0);
+    const rows = lines.slice(start + 1, start + 1 + PERIODS.length);
+    expect(rows.map((l) => l.slice(2, 38).trimEnd())).toEqual(PERIODS.map((p) => PERIOD_LABELS[p]));
+    expect(rows[rows.length - 1]!.startsWith(`  ${PERIOD_LABELS.Today}`)).toBe(true);
     expect(lines).toContain(`  ${PERIOD_LABELS.BellBeaker.padEnd(36)}77`);
+    expect(lines.slice(-2)).toEqual([ALL_TODAY_LAST, 'Done: PC1 and PC2 written.']);
+  });
+  it('execute defaults to DEFAULT_EXEC_CONTEXT: Britain today not shown, the shipped flags', () => {
+    expect(DEFAULT_EXEC_CONTEXT).toEqual({ todayShown: false, features: FEATURES });
+    const ctx: ExecContext = DEFAULT_EXEC_CONTEXT;
+    for (const c of ALL_COMMANDS) expect(execute(c, real, ctx)).toEqual(execute(c, real));
   });
   it('run_admixture(K = 3) prints a fastmixture-style log, and no bridge line (spec v3 §3.2)', () => {
     const lines = execute({ name: 'run_admixture', K: 3 }, real).lines;
@@ -177,6 +195,27 @@ describe('execute: log templates', () => {
     expect(lines).toContain('Reference groups: Steppe herders, Early farmers, Hunter-gatherers');
     expect(lines).toContain('Drawing one average bar per period.');
     expect(lines.join('\n')).not.toMatch(/not 90%|rises to/);
+  });
+  it('the mean-bar run_admixture ends with whether Britain today is among the bars (v3 §3.5)', () => {
+    const hidden = execute({ name: 'run_admixture', K: 3 }, real).lines;
+    expect(hidden.slice(-2)).toEqual(['Drawing one average bar per period.', ADMIX_TODAY_HIDDEN]);
+    const shown = execute({ name: 'run_admixture', K: 3 }, real, { todayShown: true, features: FEATURES }).lines;
+    expect(shown.slice(-2)).toEqual(['Drawing one average bar per period.', ADMIX_TODAY_SHOWN]);
+    // the per-person view ends with its own line whatever is shown
+    for (const todayShown of [false, true]) {
+      const per = execute({ name: 'run_admixture', K: 3, period: 'IronAge' }, real, { todayShown, features: FEATURES }).lines;
+      expect(per[per.length - 1]).toMatch(/^Showing one bar per person: Iron Age/);
+    }
+  });
+  it('todayShown changes only the Europe and mean-bar ADMIXTURE lines, never the plot action', () => {
+    for (const c of ALL_COMMANDS) {
+      const a = execute(c, real, { todayShown: false, features: FEATURES });
+      const b = execute(c, real, { todayShown: true, features: FEATURES });
+      expect(b.plot, formatCommandish(c)).toEqual(a.plot);
+      const depends = (c.name === 'run_pca' && c.period === 'Europe') || (c.name === 'run_admixture' && c.K === 3 && c.period === undefined);
+      if (!depends) expect(b.lines, formatCommandish(c)).toEqual(a.lines);
+      else expect(b.lines, formatCommandish(c)).not.toEqual(a.lines);
+    }
   });
   it('run_admixture with a period shows that period with its ADMIXTURE n (never called the PCA sample)', () => {
     const d = withN(real, 'BellBeaker', 77, 70);
@@ -324,7 +363,8 @@ describe('execute: spec §6 rule 1 holds for every log line of every period', ()
     it(`no ages, banned words, Group IDs, sample IDs or raw ids (${name})`, () => {
       const bad: string[] = [];
       for (const c of ALL_COMMANDS) {
-        for (const line of execute(c, d).lines) {
+        const lines = [...execute(c, d).lines, ...execute(c, d, { todayShown: true, features: FEATURES }).lines];
+        for (const line of lines) {
           bad.push(...rule1Violations(line));
           if (c.name !== 'help') bad.push(...rawIdViolations(line)); // help() may list argument values
         }

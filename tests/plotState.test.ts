@@ -156,13 +156,13 @@ describe('RF2: free-pacing sequences through execute -> reducePlot -> advance', 
     }
     return { i, plot };
   }
-  it('the full guided script ends on the last trait with every guided layer', () => {
+  it('the full guided script ends on the last trait with every layer (the finale ran all)', () => {
     const { i, plot } = play(SCRIPT);
-    expect(i).toBe(16);
+    expect(i).toBe(19);
     expect(plot.view).toBe('trait');
     expect(plot.gene).toBe('HLA-DQ2');
-    expect(plot.layers).toEqual(['FirstFarmers', 'BellBeaker', 'IronAge', 'Roman', 'AngloSaxon', 'Today']);
-    expect(plot.admixNew).toEqual(['IronAge', 'Roman', 'AngloSaxon']);
+    expect(plot.layers).toEqual(PERIODS);
+    expect(plot.admixNew).toEqual(['BronzeAge', 'IronAge']); // Task 5 makes this Bronze Age, Iron Age and Britain today
     expect(plot.showNorthSea).toBe(true);
   });
   it('a student who races ahead keeps every plot but the hint waits at the first unfinished step', () => {

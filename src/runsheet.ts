@@ -60,23 +60,22 @@ export function beats(data: WorkshopData): Beat[] {
       `${PERIOD_LABELS.BellBeaker}-period Britons land near modern Britons and Scandinavians.`,
       BEAKER_CALLOUT,
     ] },
-    { min: '13–16', beat: 'Beat 2: Romans (culture changed, people did not)', commands: [at(6), at(7)], say: [
+    { min: '13–16', beat: 'Beat 2: Romans (culture changed, people did not)', commands: [at(6), at(7), at(8), at(9), at(10), at(11)], say: [
       'The view zooms in on Britain.',
       `The ${PERIOD_LABELS.Roman} layer is small (n = ${n(data, 'Roman')}) and lands inside the ${PERIOD_LABELS.IronAge} cloud.`,
       ROMAN_LOG_LINE,
     ] },
-    { min: '16–20', beat: 'Beat 3: Anglo-Saxons (migration)', commands: [at(8), at(9)], say: [
+    { min: '16–20', beat: 'Beat 3: Anglo-Saxons (migration)', commands: [at(12), at(13)], say: [
       `${PERIOD_LABELS.AngloSaxon}-period Britons move toward the "${NORTH_SEA_LABEL}" marker. Eastern-England burials are furthest along (Gretzinger et al. 2022: up to 76% continental ancestry). On screen they are the triangles with a black outline, and the legend names them.`,
-      `Now the bars: the bars added since the last ADMIXTURE run are outlined: ${PERIOD_LABELS.IronAge}, ${PERIOD_LABELS.Roman} and ${PERIOD_LABELS.AngloSaxon}.`,
       `The ${PERIOD_LABELS.AngloSaxon} bar looks almost the same as the ${PERIOD_LABELS.IronAge} and ${PERIOD_LABELS.Roman} bars.`,
       ANGLO_SAXON_TAKEAWAY,
     ] },
-    { min: '20–22', beat: 'Beat 4: Today + consumer DNA', commands: [at(10)], say: [
+    { min: '20–22', beat: 'Beat 4: Today + consumer DNA', commands: [], say: [
       `If ${PERIOD_LABELS.IronAge} Britons took a consumer test, ${share(data.consumer.IronAge, 'British')}% would be called "British".`,
       'Consumer tests compare you only with living people, so only ancient DNA reveals the turnovers.',
       CONSUMER_NOTE,
     ] },
-    { min: '22–28', beat: 'Traits through time', commands: [at(11), at(12), at(13), at(14), at(15)],
+    { min: '22–28', beat: 'Traits through time', commands: [at(14), at(15), at(16), at(17), at(18)],
       say: ['LCT', 'SLC45A2', 'HERC2', 'TYK2', 'HLA-DQ2'].map((g) => {
         const t = trait(g);
         return t.source === 'text' ? `${g}: ${traitCaption(t)} (text card)` : `${g}: ${traitCaption(t)} [${traitSourceLabel(t)}]`;

@@ -68,7 +68,7 @@ describe('session persistence (RF4)', () => {
       JSON.stringify({ ...SAMPLE, history: [1, 2] }),
       JSON.stringify({ ...SAMPLE, transcript: [{ kind: 'shout', text: 'x' }] }),
       JSON.stringify({ ...SAMPLE, transcript: [{ kind: 'input' }] }),
-      JSON.stringify({ ...SAMPLE, hintIndex: 17 }),
+      JSON.stringify({ ...SAMPLE, hintIndex: 20 }),
       JSON.stringify({ ...SAMPLE, hintIndex: -1 }),
       JSON.stringify({ ...SAMPLE, hintIndex: 1.5 }),
       JSON.stringify({ ...SAMPLE, hintIndex: '3' }),
