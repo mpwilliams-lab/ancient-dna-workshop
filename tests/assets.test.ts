@@ -104,10 +104,22 @@ describe('assets/manifest.json (spec §7.1)', () => {
     }
     expect(commonsFilePage("Hadrian's Wall west of Housesteads 3.jpg")).toBe('https://commons.wikimedia.org/wiki/File:Hadrian%27s_Wall_west_of_Housesteads_3.jpg');
   });
-  it('only the Ring of Brodgar has a crop box (3:1 from its 900 x 356 thumbnail); every crop box needs the crop op', () => {
+  it('only the Ring of Brodgar (3:1 from its 900 x 356 thumbnail) and the Bignor Medusa panel have a crop box; every crop box needs the crop op', () => {
     expect(ASSET_MANIFEST.images.filter((e) => e.crop !== null).map((e) => [e.id, e.crop])).toEqual([
       ['ring-of-brodgar', { x: 0, y: 28, width: 900, height: 300 }],
+      // Task 21: the Medusa panel of the Bignor photo, a 4:3 box in the 900 x 675 frame that every manifest box is written for.
+      ['bignor-medusa', { x: 158, y: 150, width: 506, height: 380 }],
     ]);
+    for (const e of ASSET_MANIFEST.images.filter((x) => x.crop !== null)) expect(e.ops, e.id).toContain('crop');
+  });
+  it('the Bignor crop box is a 4:3 box inside its 900 x 675 frame, on a CC0 photo (never share-alike), and scales to a whole box on the 960 x 720 download', () => {
+    const e = entry('bignor-medusa');
+    expect(e.licence).toBe('CC0');
+    expect(cropFits(e.crop!, 900, 675)).toBe(true);
+    expect(e.crop!.width / e.crop!.height).toBeCloseTo(4 / 3, 2);
+    // What fetch-assets crops from the 960 x 720 file Commons sends for a 900 px request; the staged file is that box at 900 px
+    // wide, which is what keeps it within 160 KB at JPEG quality 50 (the whole photo is over the limit at quality 50).
+    expect(scaleCrop(e.crop!, 960 / 900, 960, 720)).toEqual({ x: 169, y: 160, width: 540, height: 405 });
   });
   it('rejects a cropped CC BY-SA image, a named checker, a stray crop box, a trailing slash and a missing map', () => {
     const bad: [string, (m: any) => void][] = [
