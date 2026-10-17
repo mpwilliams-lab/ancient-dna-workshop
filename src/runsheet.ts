@@ -207,7 +207,13 @@ function sayFor(id: StepId | 'wrap', data: WorkshopData): string[] {
     case 'load':
       return [`load_genomes() loads real ancient and modern genomes: ${data.logs.snps_used.toLocaleString('en-US')} DNA positions. The map's axes come from about ${round10(data.logs.pca_people_unique)} present-day Europeans; Britons are placed on it afterwards.`];
     case 'europe':
-      return ['Only present-day Europeans so far: Britain today is held back. The A1 card opens when the log ends.'];
+      return [
+        'Only present-day Europeans so far: Britain today is held back. The A1 card opens when the log ends.',
+        // A cue, not a say-line (those stay verbatim in SAY_LINES). The A1 card's words never name its two colours: its lead says each dot
+        // is a group placed by its DNA and a line joins it to where the group lives, so the instructor says which colour is which
+        // (tests/runsheet-content.test.ts pins the cue and that the card names no colour; scripts/preview-maps.ts tells him the same).
+        '*When the A1 card opens, say aloud: grey = where the group lives, blue = where its DNA places it. The card does not name the colours.*',
+      ];
     case 'firstFarmers':
       return [...(SAY_LINES.firstFarmers ?? []), `The hint line now reads "${PREDICT_HINT}". Ask the room to predict before anyone presses Enter.`];
     case 'bellBeaker':

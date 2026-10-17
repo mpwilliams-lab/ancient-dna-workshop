@@ -88,9 +88,12 @@ export function arrowReach(a: MapArrow): number {
 }
 /** `low` and `high` are the two ends of the value scale. Task 24 (same ruling): the light end was #C6DBEF, 1.1 : 1 against the land
  *  (--map-land in src/style.css), so a small number's dot all but vanished; #3182BD is 3.2 : 1 against the land and 4.0 : 1 against the
- *  card background, and every colour between it and #08306B is darker still (tests/map.test.ts pins 3 : 1 at every value). */
+ *  card background, and every colour between it and #08306B is darker still (tests/map.test.ts pins 3 : 1 at every value).
+ *  A1 (Task 23 review, done after Task 24): its grey, `trueDot` (where a group lives) and `link` (the line to the dot where its DNA places
+ *  it), was #8C8C8C, 2.6 : 1 against the land, so the lines and the small dots faded into it. #707070 is 3.8 : 1 against the land and
+ *  4.7 : 1 against the card background; the blue `geneticDot` is unchanged (4.0 : 1 and 5.0 : 1). */
 export const MAP_COLOURS = {
-  arrow: '#9B2226', ink: '#1A1A1A', halo: '#FFFFFF', trueDot: '#8C8C8C', geneticDot: '#0072B2', link: '#8C8C8C',
+  arrow: '#9B2226', ink: '#1A1A1A', halo: '#FFFFFF', trueDot: '#707070', geneticDot: '#0072B2', link: '#707070',
   ring: '#08519C', low: '#3182BD', high: '#08306B',
 } as const;
 

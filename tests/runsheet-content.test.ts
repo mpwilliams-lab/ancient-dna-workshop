@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { distributionRows } from '../src/cards';
+import { CARDS, distributionRows } from '../src/cards';
 import { execute } from '../src/commands';
 import * as content from '../src/content';
 import { allRenderableStrings, PERIOD_LABELS } from '../src/content';
@@ -100,6 +100,16 @@ describe('say-lines: spec §3.6, verbatim, instructor only', () => {
     const log = execute({ name: 'run_pca', period: 'all' }, FIXTURE).lines;
     expect(Math.round(((log.length - 1) * staggerDelay(log.length)) / 1000)).toBe(3);
     expect(Math.round(finaleTotalMs() / 1000)).toBe(5);
+  });
+  it('the Europe step carries a cue, not a say-line: the A1 card never names its two colours, so the instructor says what they mean aloud', () => {
+    const say = beats(FIXTURE).find((b) => b.id === 'europe')!.say;
+    const cue = '*When the A1 card opens, say aloud: grey = where the group lives, blue = where its DNA places it. The card does not name the colours.*';
+    expect(say).toEqual(['Only present-day Europeans so far: Britain today is held back. The A1 card opens when the log ends.', cue]);
+    expect(allSay()).not.toContain(cue);   // the spec §3.6 say-lines stay exactly as they are
+    expect(md).toContain(`- ${cue}`);
+    // The cue's premise: not a word the A1 card shows (its lead, three bullets and source line) names a colour.
+    const a1 = CARDS.A1;
+    expect([a1.lead ?? '', ...a1.bullets.map((b) => b.text), a1.source ?? ''].join(' ')).not.toMatch(/\b(?:gr[ae]y|blue)\b/i);
   });
   it('never reaches the screen: not in allRenderableStrings(), no app module imports runsheet.ts, not in the built page', () => {
     const screen = allRenderableStrings();

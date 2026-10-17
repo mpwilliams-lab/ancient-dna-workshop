@@ -28,7 +28,7 @@ const escapeHtml = (s: string): string =>
 /** What the instructor should see on each map (spec §3.1, §3.2, §3.3, §6). Plain words for the person checking; never shown to students. */
 const SHOULD_SHOW: Readonly<Record<string, readonly string[]>> = {
   A1: [
-    '26 pairs of dots, each pair joined by a thin grey line: a grey dot where a group of people lives today and a blue dot where their DNA places them (the card says so in its first lines). The blue dots are the map of the DNA, turned and scaled to fit the real map as closely as possible.',
+    '26 pairs of dots, each pair joined by a thin grey line: a grey dot where a group of people lives today and a blue dot where their DNA places them. The words on the card explain the dots and the line but do not name the colours, so say aloud: grey = where the group lives, blue = where its DNA places it. The blue dots are the map of the DNA, turned and scaled to fit the real map as closely as possible.',
     'Grey dots in the right countries, from Norway in the north to Crete in the south and from Spain in the west to Russia in the east. Blue dots near them, in the same order: north groups at the top, south groups at the bottom (north and south agree well), east and west only roughly. Lines short and readable; the longest (Norway, North Spain, Iberia, Russia) are the groups furthest from where the DNA puts them.',
     'Nine groups are left off on purpose (isolated groups such as Basque, Saami and Sardinian people; the card says why). Nothing on the map names a group by an ID or a code.',
   ],

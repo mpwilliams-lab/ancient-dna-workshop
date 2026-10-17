@@ -466,6 +466,10 @@ describe('mapSpec(A1): genes mirror geography (Task 23, spec §3.1, §6, §8)', 
       expect(g.querySelectorAll('circle.map-dot--true')).toHaveLength(1);
       expect(g.querySelectorAll('circle.map-dot--genetic')).toHaveLength(1);
       expect(g.querySelector('line')!.getAttribute('stroke-width')).toBe('1');
+      // Where a group lives (dot and line) is the darkened grey (3:1 against the land: tests/map.test.ts), where its DNA places it the blue.
+      expect(g.querySelector('line')!.getAttribute('stroke')).toBe('#707070');
+      expect(g.querySelector('circle.map-dot--true')!.getAttribute('fill')).toBe('#707070');
+      expect(g.querySelector('circle.map-dot--genetic')!.getAttribute('fill')).toBe('#0072B2');
     }
     expect(svg.querySelectorAll('circle.map-dot--value, circle.map-dot--zero, path.map-arrow')).toHaveLength(0);
     // The window and the label placer keep A1_DOT_R clear round every dot: the renderer must not draw a dot bigger than that.

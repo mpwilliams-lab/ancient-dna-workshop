@@ -160,9 +160,9 @@ describe('the dot rule: a value that does not round to 0 is never drawn smaller 
     expect(reach(dots[0]!)).toBeGreaterThan(reach(dots[1]!));
   });
 
-  it('MAP_COLOURS holds the map colours (spec §6), with the light end of the value scale darkened for land (Task 24)', () => {
+  it('MAP_COLOURS holds the map colours (spec §6), with the light end of the value scale and the grey of A1\'s "where the group lives" dots and lines darkened for land (Task 24)', () => {
     expect(MAP_COLOURS).toEqual({
-      arrow: '#9B2226', ink: '#1A1A1A', halo: '#FFFFFF', trueDot: '#8C8C8C', geneticDot: '#0072B2', link: '#8C8C8C',
+      arrow: '#9B2226', ink: '#1A1A1A', halo: '#FFFFFF', trueDot: '#707070', geneticDot: '#0072B2', link: '#707070',
       ring: '#08519C', low: '#3182BD', high: '#08306B',
     });
   });
@@ -195,6 +195,28 @@ describe('the dot rule: a value that does not round to 0 is never drawn smaller 
 
   it('the check bites: the pale blue the scale started from was 1.1:1 against the land', () => {
     expect(contrast('#C6DBEF', token('map-land'))).toBeLessThan(1.2);
+  });
+
+  // Task 23 review, done after Task 24: A1's grey "where the group lives" dots and link lines were #8C8C8C, 2.6:1 against the land, so
+  // the lines and the small dots faded into it at projector size. #707070 is 3.8:1 against the land and 4.7:1 against the card background.
+  it('A1\'s grey dots and link lines, as drawn, are #707070: at least 3:1 against the land and against the card background; the blue DNA dots are unchanged', () => {
+    const land = token('map-land');
+    const sea = token('card-bg');
+    const s = svg();
+    renderMap(s, { id: 'A1', frame: 'europe', links: [{ from: { lat: 60, lon: 10 }, to: { ux: 0, uy: 50 } }] });
+    const grey = s.querySelector('g.map-link circle.map-dot--true')!.getAttribute('fill')!;
+    const line = s.querySelector('g.map-link line')!.getAttribute('stroke')!;
+    const blue = s.querySelector('g.map-link circle.map-dot--genetic')!.getAttribute('fill')!;
+    expect([grey, line, blue]).toEqual(['#707070', '#707070', '#0072B2']);
+    for (const [what, colour] of [['grey dot', grey], ['link line', line], ['blue DNA dot', blue]] as const) {
+      expect(contrast(colour, land), `${what} ${colour} on the land`).toBeGreaterThanOrEqual(3);
+      expect(contrast(colour, sea), `${what} ${colour} on the sea`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('the check bites: the grey the dots and lines started from (#8C8C8C) was 2.6:1 against the land', () => {
+    expect(contrast('#8C8C8C', token('map-land'))).toBeLessThan(3);
+    expect(contrast('#8C8C8C', token('map-land'))).toBeGreaterThan(2.5);
   });
 });
 

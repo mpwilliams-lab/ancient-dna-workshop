@@ -1,12 +1,14 @@
 // A scratch build of the app with chosen map flags forced ON and those maps recorded as checked, for the layout proof of the map cards
-// (Task 20) and for the instructor's preview of them. Until the instructor has checked a map (npm run visual-check -- D1 E1 G1) its
-// shipped flag stays false and the committed manifest stays null, so the shipped dist/index.html draws the card's text form and cannot
-// show how the map form fits.
+// (A1, D1, E1, G1, H2, I2 and J3 so far: MAP_CARD_IDS) and for the instructor's preview of them. Until the instructor has checked a map
+// (npm run visual-check -- A1 D1 E1 G1 H2 I2 J3) its shipped flag stays false and the committed manifest stays null, so the shipped
+// dist/index.html draws the card's text form and cannot show how the map form fits.
 //
-// This is a test seam, not a feature switch: the two changes are made IN MEMORY while Vite reads src/features.ts and
-// assets/manifest.json, into a fresh temporary directory outside the repo. No file in the repo is written, the committed flags and
-// the committed visual_check entries are untouched, and the shipped build is never built this way. The check stamped into the
-// scratch manifest is a stand-in with a fixed date, never an instructor's check.
+// This is a test seam, not a feature switch: the changes are made IN MEMORY, while Vite reads three modules, into a fresh temporary
+// directory outside the repo: src/features.ts (the map flags go true), assets/manifest.json (the maps are recorded as checked) and, only
+// when the caller passes options.a1Labels, src/maps.ts (A1_CONFIRMED_LABELS is filled, so A1 is drawn with its eight names before the
+// instructor has confirmed them; the repo's list stays empty). No file in the repo is written, the committed flags, the committed
+// visual_check entries and the committed A1 label list are untouched, and the shipped build is never built this way. The check stamped
+// into the scratch manifest is a stand-in with a fixed date, never an instructor's check.
 //
 // Written in the subset of TypeScript that Node 24 runs as it is (type stripping), so scripts/preview-maps.ts and plain .mjs scripts
 // can import it too: relative imports carry their .ts extension and nothing here needs more than types erased.

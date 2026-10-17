@@ -75,6 +75,10 @@ describe('npm run preview-maps', () => {
     const eight = ['Estonian', 'Lithuanian', 'Czech', 'Hungarian', 'Romanian', 'Serbian', 'South Italian', 'Sicilian'];
     expect(text).toContain('<section id="A1">');
     expect(text).toContain('26 pairs of dots');
+    // The card's words never name the two colours (tests/runsheet-content.test.ts pins that), so the page tells him to say them aloud, as the
+    // run sheet's Europe step does, and no longer says the card does.
+    expect(text).toContain('say aloud: grey = where the group lives, blue = where its DNA places it');
+    expect(text).not.toContain('the card says so');
     expect(text).toContain(`npm run visual-check -- A1</code>`);
     // Eight labels in each of the two lab-screen drawings that carry them, none in the unlabelled ones.
     expect(text.match(/class="map-label"/g) ?? []).toHaveLength(16);
