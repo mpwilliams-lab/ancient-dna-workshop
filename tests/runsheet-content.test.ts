@@ -9,6 +9,7 @@ import * as content from '../src/content';
 import { allRenderableStrings, PERIOD_LABELS } from '../src/content';
 import { validateData } from '../src/data';
 import { advance, EXTRAS, hintCommand, SCRIPT } from '../src/hints';
+import { A1_CONFIRMED_LABELS } from '../src/maps';
 import { formatCommand } from '../src/parser';
 import { finaleTotalMs } from '../src/plots/pca';
 import {
@@ -171,14 +172,21 @@ describe('open checks (spec §11)', () => {
     expect(OPEN_CHECKS[13]!.check).toMatch(/A1 map labels/);
     expect(OPEN_CHECKS[14]!.ifFails).toBe('Line 3 becomes "The next plot follows this letter across all of West Eurasia."');
   });
-  it('check 14: the Europe data run is done; what is open is the instructor\'s confirmation of the eight names, and the map ships unlabelled until then', () => {
+  // The sheet is what the instructor reads on the day, so its status for check 14 follows the code: open while A1_CONFIRMED_LABELS is empty
+  // (the map ships unlabelled), passed once his eight names are in it. Filling the list and the status go in one commit.
+  it('check 14 follows the A1 label list: open and "ships unlabelled" while it is empty, "Passes" once the instructor\'s names are in it', () => {
     const c = OPEN_CHECKS[13]!;
     expect(c.n).toBe(14);
-    expect(c.status).not.toMatch(/Open until the europe_pops run/);
-    expect(c.status).toContain('Data run done');
-    expect(c.status).toContain('confirms the eight names');
-    expect(c.status).toContain('ships unlabelled');
+    expect(c.status).not.toMatch(/Open until the europe_pops run/);   // the Europe data run is done
     expect(c.ifFails).toBe('The map ships unlabelled');
+    if (A1_CONFIRMED_LABELS.length === 0) {
+      expect(c.status).toContain('Data run done');
+      expect(c.status).toContain('Open until the instructor confirms the eight names');
+      expect(c.status).toContain('ships unlabelled');
+    } else {
+      expect(c.status).toMatch(/^Passes/);
+      expect(c.status).not.toMatch(/Open until|ships unlabelled/);
+    }
   });
   // O1 (settled): the build writes 1000 Genomes Britain as 5 copies = 0.02747, so card K2 shows 2.7. The spec §11 line still
   // has the pre-O1 value (0.0275, which would round to 2.8).
