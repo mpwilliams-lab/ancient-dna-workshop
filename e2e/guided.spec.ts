@@ -4,14 +4,14 @@ import { formatCommand, PARSE_TEXT } from '../src/parser';
 import { CARDS } from '../src/cards';
 import { FEATURES } from '../src/features';
 import {
-  BEAKER_CALLOUT, CARD_HINT, cardCounter, CONSUMER_BARS_LOG, EAST_ENGLAND_LEGEND, EUROPE_HELD_BACK, HLA_REVEAL_LINE, HLA_TEXT_CARD,
-  ME_RESULT, PERIOD_LABELS, PREDICT_HINT, REVEAL_CALLOUT, REVEAL_HINT, ROMAN_LOG_LINE, TODAY_PLACED,
+  BEAKER_CALLOUT, CARD_HINT, cardCounter, CONSUMER_BARS_LOG, EAST_ENGLAND_LEGEND, EUROPE_HELD_BACK, FINALE_CAPTION, HLA_REVEAL_LINE,
+  HLA_TEXT_CARD, ME_RESULT, PERIOD_LABELS, PREDICT_HINT, REVEAL_CALLOUT, REVEAL_HINT, ROMAN_LOG_LINE, TODAY_PLACED,
 } from '../src/content';
 import { consumerRows } from '../src/plots/consumer';
 import { PERIOD_IDS, type PeriodId } from '../src/types';
 import {
-  cardOpen, centreOf, closeCardWithEnter, consumerBarsShown, DATA, focusLayer, freshStart, hintIndex, idle, layersShown, plotSettled, run,
-  screenViolations, terminalBars, watch,
+  cardOpen, centreOf, closeCardWithEnter, consumerBarsShown, DATA, focusLayer, freshStart, hintIndex, idle, layersShown, plotSettled,
+  prompt, run, screenViolations, terminalBars, watch,
 } from './helpers';
 
 const REVEAL_PCA = SCRIPT_STEPS.findIndex((s) => s.id === 'revealPca');
@@ -224,4 +224,105 @@ test('typing the hint line exactly as shown, label and all, runs that step (step
   await expect(page.locator('#terminal')).not.toContainText(PARSE_TEXT.unknownCommand);
   expect(w.requests).toEqual([]);
   expect(w.errors).toEqual([]);
+});
+
+test('finale: run_pca(period = "all") under the shipped flag set (animated, or static when the flag is off)', async ({ page }) => {
+  const w = watch(page);
+  await freshStart(page);
+  await run(page, 'run_pca(period = "IronAge")');
+  await run(page, 'run_pca(period = "all")');
+  const svg = page.locator('#plot svg.plot-svg[data-view="pca"]');
+  const caption = page.locator('#plot p.pca-caption[data-caption="FINALE_CAPTION"]');
+  await expect(page.locator('#plot g.layer.period')).toHaveCount(8);
+  if (FEATURES.finaleAnimation) {
+    await expect(svg).toHaveAttribute('data-animating', 'true');
+    await expect(caption).toBeHidden();
+    // Spec §4.4: a blank Enter jumps to the final frame.
+    await prompt(page).press('Enter');
+    await expect(svg).not.toHaveAttribute('data-animating', 'true');
+    await expect(caption).toBeVisible();
+    await expect(caption).toHaveText(FINALE_CAPTION);
+    // Left alone, it ends by itself in about 5.5 s.
+    await run(page, 'run_pca(period = "all")');
+    await expect(svg).toHaveAttribute('data-animating', 'true');
+    await expect(caption).toBeVisible({ timeout: 10_000 });
+    await expect(svg).not.toHaveAttribute('data-animating', 'true');
+  } else {
+    await expect(caption).toBeVisible();
+    expect(await svg.getAttribute('data-animating')).toBeNull();
+  }
+  // Restore draws the final frame directly.
+  await page.reload();
+  await idle(page);
+  await expect(caption).toBeVisible();
+  expect(await svg.getAttribute('data-animating')).toBeNull();
+  expect(await page.evaluate(() => document.getElementById('plot')!.getAnimations({ subtree: true }).length)).toBe(0);
+  expect(w.requests).toEqual([]);
+  expect(w.errors).toEqual([]);
+});
+
+test('finale: Back and a typed command during the animation end it (spec §4.4, §4.5 test 6)', async ({ page }) => {
+  test.skip(!FEATURES.finaleAnimation || !FEATURES.back, 'the finale or Back is off in the shipped set');
+  const w = watch(page);
+  await freshStart(page);
+  await run(page, 'run_pca(period = "IronAge")');
+  const svg = page.locator('#plot svg.plot-svg[data-view="pca"]');
+  const running = (): Promise<number> => page.evaluate(() => document.getElementById('plot')!.getAnimations({ subtree: true }).length);
+
+  // Back: the finale jumps to its end at once, and the earlier screen is drawn directly, with nothing left running.
+  await run(page, 'run_pca(period = "all")');
+  await expect(svg).toHaveAttribute('data-animating', 'true');
+  await page.locator('#back').click();
+  await expect(svg).toHaveAttribute('data-focus', 'IronAge');
+  expect(await svg.getAttribute('data-animating')).toBeNull();
+  await expect(page.locator('#plot g.layer.period')).toHaveCount(1);
+  await expect(page.locator('#plot p.pca-caption[data-caption="FINALE_CAPTION"]')).toHaveCount(0);
+  expect(await running()).toBe(0);
+  await expect(prompt(page)).toBeFocused();
+
+  // A command typed during the finale ends it first: the new plot is drawn whole, with no half-played finale in it.
+  await run(page, 'run_pca(period = "all")');
+  await expect(svg).toHaveAttribute('data-animating', 'true');
+  await run(page, 'run_pca(period = "Viking")');
+  await expect(svg).toHaveAttribute('data-focus', 'Viking');
+  expect(await svg.getAttribute('data-animating')).toBeNull();
+  await plotSettled(page);
+  expect(await running()).toBe(0);
+  expect(w.requests).toEqual([]);
+  expect(w.errors).toEqual([]);
+});
+
+test('finale: with prefers-reduced-motion it is the static plot with its caption at once', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const w = watch(page);
+  await freshStart(page);
+  await run(page, 'run_pca(period = "IronAge")');
+  await run(page, 'run_pca(period = "all")');
+  const caption = page.locator('#plot p.pca-caption[data-caption="FINALE_CAPTION"]');
+  await expect(page.locator('#plot g.layer.period')).toHaveCount(8);
+  await expect(caption).toBeVisible();
+  await expect(caption).toHaveText(FINALE_CAPTION);
+  expect(await page.locator('#plot svg.plot-svg').getAttribute('data-animating')).toBeNull();
+  await expect(page.locator('#plot circle.finale-pulse')).toHaveCount(0);
+  expect(await page.evaluate(() => document.getElementById('plot')!.getAnimations({ subtree: true }).length)).toBe(0);
+  expect(w.requests).toEqual([]);
+  expect(w.errors).toEqual([]);
+});
+
+test('finale: the plot keeps its size while the caption waits and when it appears (640 x 360, the smallest screen)', async ({ page }) => {
+  test.skip(!FEATURES.finaleAnimation, 'the finale is off in the shipped set');
+  await page.setViewportSize({ width: 640, height: 360 });
+  await freshStart(page);
+  await run(page, 'run_pca(period = "all")');
+  const svg = page.locator('#plot svg.plot-svg[data-view="pca"]');
+  const caption = page.locator('#plot p.pca-caption[data-caption="FINALE_CAPTION"]');
+  await expect(svg).toHaveAttribute('data-animating', 'true');
+  await expect(caption).toBeHidden();
+  const waiting = await svg.boundingBox();
+  await prompt(page).press('Enter');
+  await expect(caption).toBeVisible();
+  const shown = await svg.boundingBox();
+  // A caption that took its room only when it appeared would shrink the svg, and the whole plot with it, in a short window.
+  expect(shown!.height).toBeCloseTo(waiting!.height, 0);
+  expect(shown!.width).toBeCloseTo(waiting!.width, 0);
 });

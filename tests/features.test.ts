@@ -16,7 +16,7 @@ import { installFakeAnimate } from './helpers/fakeAnimation';
 
 // The flags switched on so far, in landing order (spec §10.3). Each P2/P3 task appends its own flag(s) in its last commit;
 // the release task (31) removes any that are cut at the merge cutoff.
-const SHIPPED: readonly FeatureFlag[] = ['back', 'consumerBars'];
+const SHIPPED: readonly FeatureFlag[] = ['back', 'consumerBars', 'finaleAnimation'];
 
 const BACK_LINE = '      Back button: step back one screen.';
 const BARS_LINE = '      a consumer-style test: "me" or any period (bars)';
