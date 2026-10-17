@@ -20,8 +20,8 @@ import { IMAGE_MAX_BYTES, IMAGES_TOTAL_MAX_BYTES } from '../src/release';
 import { CARD_IDS, type CardId, type ImageId } from '../src/types';
 import * as script from '../scripts/fetch-assets.mjs';
 import {
-  COMMONS_API, PORTRAIT_HEIGHT, THUMB_PREFIX, THUMB_WIDTH, UPLOAD_PREFIX, cropFits, parseSipsSize, scaleCrop, sipsSteps, thumbApiUrl,
-  thumbFromApi, titleOf, useFallback,
+  COMMONS_API, PORTRAIT_HEIGHT, THUMB_PREFIX, THUMB_WIDTH, UPLOAD_PREFIX, cropExceedsTarget, cropFits, parseSipsSize, scaleCrop, sipsSteps,
+  thumbApiUrl, thumbFromApi, titleOf, useFallback,
 } from '../scripts/fetch-assets.mjs';
 import { checkedManifest, fakeUrls, uncheckedManifest } from './helpers/assetEnv';
 
@@ -117,9 +117,10 @@ describe('assets/manifest.json (spec §7.1)', () => {
     expect(e.licence).toBe('CC0');
     expect(cropFits(e.crop!, 900, 675)).toBe(true);
     expect(e.crop!.width / e.crop!.height).toBeCloseTo(4 / 3, 2);
-    // What fetch-assets crops from the 960 x 720 file Commons sends for a 900 px request; the staged file is that box at 900 px
-    // wide, which is what keeps it within 160 KB at JPEG quality 50 (the whole photo is over the limit at quality 50).
+    // What fetch-assets crops from the 960 x 720 file Commons sends for a 900 px request. The staged file is that box at its own
+    // size, 540 x 405: a pixel crop is never enlarged (the whole photo is over 160 KB at JPEG quality 50; the box is not).
     expect(scaleCrop(e.crop!, 960 / 900, 960, 720)).toEqual({ x: 169, y: 160, width: 540, height: 405 });
+    expect(cropExceedsTarget(scaleCrop(e.crop!, 960 / 900, 960, 720), 'landscape'), 'so it is not resampled').toBe(false);
   });
   it('rejects a cropped CC BY-SA image, a named checker, a stray crop box, a trailing slash and a missing map', () => {
     const bad: [string, (m: any) => void][] = [
@@ -381,6 +382,31 @@ describe('scripts/fetch-assets.mjs helpers', () => {
     expect(crop[0]).toEqual(['-s', 'format', 'png', '-c', '300', '900', '--cropOffset', '28', '0', 'raw/c.jpg', '--out', 'staged/c.crop.png']);
     expect(crop[1]!.at(-3)).toBe('staged/c.crop.png');
   });
+  it('a pixel crop is never enlarged: one within the target keeps its own size (no -Z, no --resampleHeight), one over it is shrunk (Task 21)', () => {
+    const last = (entry: { orientation: 'landscape' | 'portrait'; crop: { x: number; y: number; width: number; height: number } }) =>
+      sipsSteps({ id: 'k', ...entry }, 'raw/k.jpg', 'staged/k.jpg', 70).at(-1)!;
+    const keeps = ['-s', 'format', 'jpeg', '-s', 'formatOptions', '70', 'staged/k.crop.png', '--out', 'staged/k.jpg'];
+    // Bignor's box on the 960 x 720 download: 540 x 405, far inside 900, so no resize flag at all.
+    expect(last({ orientation: 'landscape', crop: { x: 169, y: 160, width: 540, height: 405 } })).toEqual(keeps);
+    // Exactly the target, and a tall crop whose longer side is within it: not touched either.
+    expect(last({ orientation: 'landscape', crop: { x: 0, y: 28, width: 900, height: 300 } })).toEqual(keeps);
+    expect(last({ orientation: 'landscape', crop: { x: 0, y: 0, width: 400, height: 700 } })).toEqual(keeps);
+    // The Ring of Brodgar's 960 x 320 on the 960 px download is over 900: shrunk with -Z 900, as before.
+    expect(last({ orientation: 'landscape', crop: { x: 0, y: 30, width: 960, height: 320 } }))
+      .toEqual(['-s', 'format', 'jpeg', '-s', 'formatOptions', '70', '-Z', String(THUMB_WIDTH), 'staged/k.crop.png', '--out', 'staged/k.jpg']);
+    // Portrait: the height is the target. At most 600 tall keeps its size; taller is cut down to 600.
+    expect(last({ orientation: 'portrait', crop: { x: 0, y: 0, width: 800, height: 500 } })).toEqual(keeps);
+    expect(last({ orientation: 'portrait', crop: { x: 0, y: 0, width: 800, height: 700 } }))
+      .toEqual(['-s', 'format', 'jpeg', '-s', 'formatOptions', '70', '--resampleHeight', String(PORTRAIT_HEIGHT), 'staged/k.crop.png', '--out', 'staged/k.jpg']);
+    expect(cropExceedsTarget({ x: 0, y: 0, width: 901, height: 10 }, 'landscape')).toBe(true);
+    expect(cropExceedsTarget({ x: 0, y: 0, width: 900, height: 900 }, 'landscape')).toBe(false);
+    expect(cropExceedsTarget({ x: 0, y: 0, width: 10, height: 601 }, 'portrait')).toBe(true);
+    expect(cropExceedsTarget({ x: 0, y: 0, width: 5000, height: 600 }, 'portrait')).toBe(false);
+  });
+  it('an uncropped picture is still always resampled to the target (only a crop is exempt)', () => {
+    expect(sipsSteps({ id: 'u', orientation: 'landscape', crop: null }, 'raw/u.jpg', 'staged/u.jpg', 70).at(-1)).toContain('-Z');
+    expect(sipsSteps({ id: 'v', orientation: 'portrait', crop: null }, 'raw/v.jpg', 'staged/v.jpg', 70).at(-1)).toContain('--resampleHeight');
+  });
   it('checks a crop box against the thumbnail size', () => {
     expect(cropFits({ x: 0, y: 28, width: 900, height: 300 }, 900, 356)).toBe(true);
     expect(cropFits({ x: 0, y: 60, width: 900, height: 300 }, 900, 356)).toBe(false);
@@ -536,6 +562,25 @@ describe.skipIf(!HAS_SIPS)('stageImage through the real sips (macOS)', () => {
     const r = script.stageImage({ id: 'c', orientation: 'landscape', crop: { x: 0, y: 30, width: 960, height: 320 } }, join(d.raw, 'c.png'), d.staged);
     expect(sizeOf(r.staged)).toEqual({ width: 900, height: 300 });
     expect(readdirSync(d.staged)).toEqual(['c.jpg']);
+  });
+  it('does not enlarge a pixel crop: the 540 x 405 Bignor box cut from a 960 x 720 picture stays 540 x 405, a JPEG at quality 70 (Task 21)', () => {
+    const d = dirsOf();
+    mkdirSync(d.raw, { recursive: true });
+    writeFileSync(join(d.raw, 'm.png'), drawPng(960, 720));
+    const r = script.stageImage({ id: 'm', orientation: 'landscape', crop: { x: 169, y: 160, width: 540, height: 405 } }, join(d.raw, 'm.png'), d.staged);
+    expect(sizeOf(r.staged)).toEqual({ width: 540, height: 405 });
+    expect(r.quality).toBe(70);
+    expect(readFileSync(r.staged).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(readdirSync(d.staged)).toEqual(['m.jpg']);
+  });
+  it('a portrait crop within 600 px tall keeps its size, one taller is cut down to 600 (Task 21)', () => {
+    const d = dirsOf();
+    mkdirSync(d.raw, { recursive: true });
+    writeFileSync(join(d.raw, 'q.png'), drawPng(800, 1600));
+    expect(sizeOf(script.stageImage({ id: 'q', orientation: 'portrait', crop: { x: 100, y: 100, width: 300, height: 450 } }, join(d.raw, 'q.png'), d.staged).staged))
+      .toEqual({ width: 300, height: 450 });
+    expect(sizeOf(script.stageImage({ id: 't', orientation: 'portrait', crop: { x: 0, y: 0, width: 400, height: 1200 } }, join(d.raw, 'q.png'), d.staged).staged))
+      .toEqual({ width: 200, height: 600 });
   });
   it('steps the quality down for a detailed image, and refuses (leaving nothing behind) one that is still over 160 KB at quality 50', () => {
     const d = dirsOf();

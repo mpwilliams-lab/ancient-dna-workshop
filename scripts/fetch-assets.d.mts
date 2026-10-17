@@ -38,6 +38,7 @@ export function imageSize(path: string): { width: number; height: number };
 export function orientationOf(width: number, height: number): 'landscape' | 'portrait';
 export function scaleCrop(crop: CropBox, factor: number, width: number, height: number): CropBox;
 export function cropFits(crop: CropBox, width: number, height: number): boolean;
+export function cropExceedsTarget(crop: CropBox, orientation: 'landscape' | 'portrait'): boolean;
 export function sipsSteps(entry: StageEntry, rawPath: string, stagedPath: string, quality: number): string[][];
 export function titleOf(commonsFile: string): string;
 export function commonsFilePage(name: string): string;

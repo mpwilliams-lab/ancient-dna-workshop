@@ -224,7 +224,7 @@ describe('CREDITS.md (spec §7.2)', () => {
   it('says the photos are shown whole and what "cropped and resized" means', () => {
     const text = readFileSync(resolve(__dirname, '../CREDITS.md'), 'utf8');
     expect(text).toContain('Photos are shown whole in the app.');
-    expect(text).toContain('"cropped and resized" names a photo that was cropped before it was resized; every other photo was only resized.');
+    expect(text).toContain('"cropped and resized" names a photo that was cropped before it was resized; every other photo was not cropped.');
   });
   it('the Changes line says "cropped and resized" only where a crop box is applied, "resized" for every other photo, "none" for a drawing (Task 21)', () => {
     // The real script in a throw-away repository: it reads assets/manifest.json and the files bundled under src/assets/.
@@ -249,13 +249,19 @@ describe('CREDITS.md (spec §7.2)', () => {
         if (line.startsWith('- ')) credit = line.slice(2);
         else if (line.startsWith('  - Changes: ')) changes[credit] = line.slice('  - Changes: '.length);
       }
-      const of = (needle: string): string | undefined => Object.entries(changes).find(([c]) => c.includes(needle))?.[1];
-      expect(of('Libasstref'), 'the Ring of Brodgar (CC0), pixel-cropped to 3:1').toBe('cropped and resized');
-      expect(of('Gary Todd'), 'Stonehenge (CC0): cropping allowed, no box').toBe('resized');
-      expect(of('Tim Sheerman-Chase'), 'the roundhouse with a box in this copy (CC BY)').toBe('cropped and resized');
-      expect(of('Mike Peel'), 'Castlerigg (CC BY-SA)').toBe('resized');
-      expect(of('BruceBlaus'), 'the melanocyte (CC BY, PNG converted)').toBe('resized, converted to JPEG');
-      expect(of('Plan drawn for this workshop'), 'an own drawing').toBe('none');
+      // By image id: the credit is found through the author the manifest copy gives that id (exactly one credit may carry it).
+      const changesOf = (id: string): string | undefined => {
+        const author = manifest.images.find((e: { id: string }) => e.id === id).author as string;
+        const hits = Object.entries(changes).filter(([c]) => c.includes(author));
+        expect(hits.map(([c]) => c), `${id}: one credit carries the author "${author}"`).toHaveLength(1);
+        return hits[0]?.[1];
+      };
+      expect(changesOf('ring-of-brodgar'), 'the Ring of Brodgar (CC0), pixel-cropped to 3:1').toBe('cropped and resized');
+      expect(changesOf('stonehenge'), 'Stonehenge (CC0): cropping allowed, no box').toBe('resized');
+      expect(changesOf('roundhouse'), 'the roundhouse with a box in this copy (CC BY)').toBe('cropped and resized');
+      expect(changesOf('castlerigg'), 'Castlerigg (CC BY-SA)').toBe('resized');
+      expect(changesOf('melanocyte'), 'the melanocyte (CC BY, PNG converted)').toBe('resized, converted to JPEG');
+      expect(changesOf('thornborough-plan'), 'an own drawing').toBe('none');
       expect(Object.keys(changes)).toHaveLength(6);
       expect(readFileSync(join(root, 'CREDITS.md'), 'utf8')).not.toContain('may be shown cropped');
     } finally {

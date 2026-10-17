@@ -3,7 +3,8 @@
 //       Downloads each Commons thumbnail into a freshly created, empty assets/raw/ (git-ignored), records its SHA-256 and
 //       size-derived orientation in assets/manifest.json, and re-encodes it with macOS sips into assets/staged/<id>.jpg
 //       (git-ignored): landscape at most 900 px wide, portrait 600 px tall, JPEG quality 70 (60 or 50 only if needed for the
-//       160 KB limit), PNG converted to JPEG, cropped only where the manifest has a crop box.
+//       160 KB limit), PNG converted to JPEG, cropped only where the manifest has a crop box. A crop is never enlarged: one that
+//       is already within the target size keeps its own size.
 //   npm run fetch-assets -- --use-fallback <id>
 //       After the instructor rejects an image: switches that manifest entry to its §7.1 fallback (new file, author and
 //       licence; check reset) and deletes that image's old promoted file src/assets/img/<id>.jpg, which the new entry has not
@@ -110,7 +111,19 @@ export function cropFits(crop, width, height) {
   return crop.width > 0 && crop.height > 0 && crop.x >= 0 && crop.y >= 0 && crop.x + crop.width <= width && crop.y + crop.height <= height;
 }
 
-/** The sips argument lists for one image: an optional crop to a temporary PNG, then the resize and JPEG re-encode. */
+/**
+ * Whether a pixel crop of this size is larger than the target size of its orientation (landscape: its longer side over THUMB_WIDTH;
+ * portrait: its height over PORTRAIT_HEIGHT), so that resampling it would shrink it. sips -Z and --resampleHeight also scale UP, and
+ * a crop is never enlarged: one that already fits keeps its own size.
+ */
+export function cropExceedsTarget(crop, orientation) {
+  return orientation === 'portrait' ? crop.height > PORTRAIT_HEIGHT : Math.max(crop.width, crop.height) > THUMB_WIDTH;
+}
+
+/**
+ * The sips argument lists for one image: an optional crop to a temporary PNG, then the resize and JPEG re-encode. A crop that is
+ * already within the target size is not resized at all (never enlarged); an uncropped picture is always resampled to the target.
+ */
 export function sipsSteps(entry, rawPath, stagedPath, quality) {
   const steps = [];
   let src = rawPath;
@@ -121,7 +134,8 @@ export function sipsSteps(entry, rawPath, stagedPath, quality) {
     src = tmp;
   }
   const size = entry.orientation === 'portrait' ? ['--resampleHeight', String(PORTRAIT_HEIGHT)] : ['-Z', String(THUMB_WIDTH)];
-  steps.push(['-s', 'format', 'jpeg', '-s', 'formatOptions', String(quality), ...size, src, '--out', stagedPath]);
+  const resample = !entry.crop || cropExceedsTarget(entry.crop, entry.orientation);
+  steps.push(['-s', 'format', 'jpeg', '-s', 'formatOptions', String(quality), ...(resample ? size : []), src, '--out', stagedPath]);
   return steps;
 }
 

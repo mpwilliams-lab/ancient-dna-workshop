@@ -12,6 +12,7 @@ import {
   BACK_BUTTON, BACK_BUTTON_LABEL, CARD_CONTINUE, CARD_CONTINUE_DONE, CARD_CONTINUE_TO_PLOT, CHIP_TEXT, cardCounter, CREDITS_LINK,
   IRELAND_FOOTNOTE, MAP_SOURCE_SUFFIX,
 } from '../src/content';
+import { HIDDEN_WHEN_SHOWN } from '../src/assetManifest';
 import { validateData } from '../src/data';
 import { ALL_OFF, ALL_ON, withFeatures, type Features } from '../src/features';
 import { CARD_IDS, GENE_IDS, type CardId, type WorkshopData } from '../src/types';
@@ -547,10 +548,14 @@ describe('card image tiles (Task 15, spec §5.2 and §7.2)', () => {
       expect(el.dataset.form, card).toBe('images');
       for (const img of el.querySelectorAll('img')) shown[img.closest('figure')!.getAttribute('data-image')!] = img.className;
     }
-    expect(Object.keys(shown).sort()).toEqual([
-      'amesbury-archer', 'avebury', 'battersea-shield', 'bignor-medusa', 'castlerigg', 'hadrians-wall', 'hoxne-coins', 'maiden-castle',
-      'ring-of-brodgar', 'round-barrow', 'roundhouse', 'square-headed-brooch', 'stonehenge', 'sutton-hoo-helmet', 'thornborough-plan', 'west-stow',
-    ]);
+    // The pictures that must be on screen: every tile of the five photo cards except one that hides beside another (Shrewton, beside
+    // the Archer). Derived from the cards, so dropping a tile (G2's West Stow) needs no edit here.
+    const expected = (['B1', 'C1', 'E2', 'F1', 'G2'] as const)
+      .flatMap((card) => CARDS[card].tiles!.map((t) => t.image))
+      .filter((id) => !(id in HIDDEN_WHEN_SHOWN))
+      .sort();
+    expect(expected.length, 'five cards, so at least fifteen pictures even with a tile dropped').toBeGreaterThanOrEqual(15);
+    expect(Object.keys(shown).sort()).toEqual(expected);
     for (const [id, cls] of Object.entries(shown)) expect(cls, id).toBe('tile-img tile-img--contain');
   });
   it('flag on: each tile keeps its name and line under the image, and only the Thornborough tile has an image caption', () => {
