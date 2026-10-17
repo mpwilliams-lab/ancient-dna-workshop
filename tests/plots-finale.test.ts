@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 // Spec §2.3 run_pca(period = "all") finale (P2, flag finaleAnimation) and §4.4 "blank line during the animation".
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FINALE_CAPTION } from '../src/content';
 import { withFeatures } from '../src/features';
 import { INITIAL_PLOT, reducePlot, type PlotState } from '../src/plotState';
 import { finaleWanted, finishPlotAnimations, plotIsAnimating, renderPlot } from '../src/plots/index';
-import { FINALE_PULSE, FINALE_TIMING, TODAY_RING, finaleSchedule, finaleTotalMs, makeScale } from '../src/plots/pca';
-import { f1 } from '../src/plots/svg';
+import { FINALE_PULSE, FINALE_TIMING, animateFinale, finaleSchedule, finaleTotalMs, makeScale } from '../src/plots/pca';
+import { INK, f1 } from '../src/plots/svg';
 import { FIXTURE } from './fixtures/fixture';
 import { installFakeAnimate, type FakeAnimate, type FakeAnimation } from './helpers/fakeAnimation';
 
@@ -117,26 +119,88 @@ describe('renderPlot: the live finale', () => {
     expect(caption().hidden).toBe(false);
   });
 
-  it('the pulse ring sits on Britain today, on top of the plot, takes no pointer events and is a single 600 ms pulse', () => {
+  it('a finale whose last animation is cancelled ends like a finished one: marker gone, caption shown', () => {
     renderPlot(host, FIXTURE, ALL, { features: ON });
-    const [pulse] = pulseAnims();
-    const ring = pulse!.target;
+    const last = fake.created.at(-1)!;
+    expect(last.target.matches('circle.finale-pulse')).toBe(true); // the run listens to the animation that ends last: the ring
+    last.cancel();
+    expect(last.playState).toBe('idle');
+    expect(plotIsAnimating(host)).toBe(false);
+    expect(svg().hasAttribute('data-animating')).toBe(false);
+    expect(caption().hidden).toBe(false);
+    expect(() => finishPlotAnimations(host)).not.toThrow();
+  });
+
+  it('the pulse is a dark ring on a white halo, both on Britain today and on top of the plot, quiet to the pointer, one 600 ms pulse', () => {
+    renderPlot(host, FIXTURE, ALL, { features: ON });
     const today = FIXTURE.periods.find((p) => p.id === 'Today')!.centre;
     const sc = makeScale(FIXTURE.frames.europe);
     const world = svg().querySelector('g.world')!;
-    expect(ring.parentElement).toBe(world);
-    expect(world.lastElementChild).toBe(ring);
-    expect(ring.getAttribute('cx')).toBe(f1(sc.toX(today.x)));
-    expect(ring.getAttribute('cy')).toBe(f1(sc.toY(today.y)));
-    expect(ring.getAttribute('r')).toBe(String(FINALE_PULSE.r));
-    expect(ring.getAttribute('stroke')).toBe(TODAY_RING.stroke);
+    const halo = world.querySelector('circle.finale-pulse-halo')!;
+    const ring = world.querySelector('circle.finale-pulse')!;
+    expect(host.querySelectorAll('circle.finale-pulse')).toHaveLength(1);       // the halo has its own class: the ring's matcher stays exact
+    expect(host.querySelectorAll('circle.finale-pulse-halo')).toHaveLength(1);
+    expect([...world.children].slice(-2)).toEqual([halo, ring]);                // the halo under the ring, both over everything else
+    for (const c of [halo, ring]) {
+      expect(c.getAttribute('cx')).toBe(f1(sc.toX(today.x)));
+      expect(c.getAttribute('cy')).toBe(f1(sc.toY(today.y)));
+      expect(c.getAttribute('r')).toBe(String(FINALE_PULSE.r));
+      expect(c.getAttribute('fill')).toBe('none');
+      expect(c.getAttribute('pointer-events')).toBe('none');
+      expect(c.getAttribute('opacity')).toBe('0');                              // invisible before, after and after finish()
+      // The ring keeps its on-screen width while it scales: Britain today lies inside the dense Iron Age cloud, where a 0.5 px line at
+      // the start of the pulse is lost.
+      expect(c.getAttribute('style')).toContain('vector-effect: non-scaling-stroke');
+      expect(c.getAttribute('style')).toContain('transform-box: fill-box');
+    }
+    expect(ring.getAttribute('stroke')).toBe(INK);
     expect(ring.getAttribute('stroke-width')).toBe(String(FINALE_PULSE.strokeWidth));
-    expect(ring.getAttribute('fill')).toBe('none');
-    expect(ring.getAttribute('pointer-events')).toBe('none');
-    expect(pulse!.options).toMatchObject({ duration: FINALE_PULSE.ms, delay: 4750 });
-    expect(pulse!.options.iterations ?? 1).toBe(1);
-    expect(pulse!.keyframes).toEqual([{ opacity: 0.9, transform: 'scale(0.2)' }, { opacity: 0, transform: 'scale(1)' }]);
-    expect(host.querySelectorAll('circle.finale-pulse')).toHaveLength(1);
+    expect(halo.getAttribute('stroke')).toBe('#FFFFFF');
+    expect(halo.getAttribute('stroke-width')).toBe(String(FINALE_PULSE.haloWidth));
+    expect(FINALE_PULSE.haloWidth).toBeGreaterThan(FINALE_PULSE.strokeWidth);   // the halo shows on both sides of the ring
+    // Both are one pulse, from the same moment: opacity 1 to 0 while scaling from 20% to full size. The ring is the last animation
+    // created, because the run ends with the animation that ends last.
+    const pulses = fake.created.filter((a) => a.target === halo || a.target === ring);
+    expect(pulses.map((a) => a.target)).toEqual([halo, ring]);
+    for (const a of pulses) {
+      expect(a.options).toMatchObject({ duration: FINALE_PULSE.ms, delay: 4750, easing: 'ease-out' });
+      expect(a.options.iterations ?? 1).toBe(1);
+      expect(a.keyframes).toEqual([{ opacity: 1, transform: 'scale(0.2)' }, { opacity: 0, transform: 'scale(1)' }]);
+    }
+    expect(fake.created.at(-1)!.target).toBe(ring);
+  });
+
+  it('the pulse numbers are the ones checked in a browser: a final radius of 100 clears the dense Iron Age cloud (about 140 px across at 1366 x 768)', () => {
+    expect(FINALE_PULSE).toEqual({ ms: 600, r: 100, strokeWidth: 3, haloWidth: 8 });
+  });
+
+  it('each legend item fades in with its layer, so the legend never lists a period before the plot shows it', () => {
+    renderPlot(host, FIXTURE, ALL, { features: ON });
+    const items = fake.created.filter((a) => a.target.matches('g.legend-item'));
+    expect(items.map((a) => a.target.getAttribute('data-legend'))).toEqual(ORDER);
+    for (const [i, a] of items.entries()) {
+      expect(a.options.delay, ORDER[i]).toBe(finaleSchedule()[i].delay);
+      expect(a.options.duration).toBe(FINALE_TIMING.fadeMs);
+      expect(a.options.fill).toBe('backwards');
+      expect(a.keyframes).toEqual([{ opacity: 0 }, { opacity: 1 }]);
+    }
+    // the headings and the continental groups are in the legend from the start
+    const animated = new Set(items.map((a) => a.target));
+    const resting = [...svg().querySelectorAll('g.legend-item')].filter((g) => !animated.has(g));
+    expect(resting.length).toBeGreaterThan(0);
+    for (const g of resting) expect(ORDER).not.toContain(g.getAttribute('data-legend'));
+    expect(svg().querySelectorAll('text.legend-heading')).toHaveLength(2);
+    expect(fake.created.some((a) => a.target.matches('.legend-heading, g.legend-group, g.legend'))).toBe(false);
+  });
+
+  it('a layer whose legend item is missing still fades in (the legend is a courtesy, not a requirement)', () => {
+    renderPlot(host, FIXTURE, ALL, { animate: false, features: ON }); // static: nothing animated yet
+    expect(fake.created).toHaveLength(0);
+    for (const g of [...svg().querySelectorAll('g.legend-item')]) g.remove();
+    expect(() => animateFinale(svg(), FIXTURE)).not.toThrow();
+    expect(layerAnims().map((a) => a.target.getAttribute('data-layer'))).toEqual(ORDER);
+    expect(fake.created.filter((a) => a.target.matches('g.legend-item'))).toHaveLength(0);
+    expect(pulseAnims()).toHaveLength(1);
   });
 });
 
@@ -236,5 +300,34 @@ describe('the browser fires finish events later, not inside finish()', () => {
     expect(plotIsAnimating(host)).toBe(false);
     expect(svg().hasAttribute('data-animating')).toBe(false);
     expect(caption().hidden).toBe(false);
+  });
+});
+
+// jsdom does not apply plots.css, so what the finale needs from it is pinned in the text of the file (an e2e test checks the
+// computed styles in a real browser).
+describe('the finale rules in plots.css', () => {
+  const css = readFileSync(resolve(__dirname, '../src/plots/plots.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const squash = (s: string): string => s.replace(/\s+/g, ' ').trim();
+  /** property -> value of the rule whose selector list is exactly `selector`. */
+  function rule(selector: string): Record<string, string> {
+    for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (squash(m[1]!) !== squash(selector)) continue;
+      const out: Record<string, string> = {};
+      for (const d of m[2]!.split(';')) {
+        const k = d.indexOf(':');
+        if (k > 0) out[d.slice(0, k).trim()] = d.slice(k + 1).trim();
+      }
+      return out;
+    }
+    throw new Error(`plots.css has no rule for "${selector}"`);
+  }
+
+  it('the caption that waits keeps its room, so the plot does not rescale when it appears', () => {
+    expect(rule('.pca-caption[hidden]')).toEqual({ display: 'block', visibility: 'hidden' });
+  });
+
+  it('while the finale plays, the period points and the legend items take no pointer events: no tip names a period early', () => {
+    expect(rule('.plot-svg[data-animating="true"] g.layer.period .pt, .plot-svg[data-animating="true"] g.legend-item'))
+      .toEqual({ 'pointer-events': 'none' });
   });
 });

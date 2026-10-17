@@ -391,14 +391,17 @@ export function renderPcaCaptions(doc: Document, items: PcaCaptionItem[]): HTMLD
 
 // ---- Finale (spec §2.3, P2 flag finaleAnimation): run_pca(period = "all") played live ----
 export const FINALE_TIMING = { fadeMs: 250, stepMs: 600, pauseMs: 900 } as const;
-/** Britain today's single pulse ring: grows from 20% to full radius while it fades out. */
-export const FINALE_PULSE = { ms: 600, r: 60, strokeWidth: 3 } as const;
-const FINALE_ANCIENT: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking'];
+/**
+ * Britain today's single pulse ring: grows from 20% to full radius while it fades out. Britain today lands on the dense Iron Age
+ * cloud (about 140 px across at 1366 x 768), so the ring is a dark line on a white halo, keeps its on-screen width (non-scaling
+ * stroke) and ends wider than the cloud; a thin dark ring of radius 60 never leaves the cloud and cannot be seen.
+ */
+export const FINALE_PULSE = { ms: 600, r: 100, strokeWidth: 3, haloWidth: 8 } as const;
 
 /** When each period layer starts to fade in (ms after the plot is drawn): oldest first, Britain today last. */
 export function finaleSchedule(): { layer: PeriodId; delay: number }[] {
-  const steps = FINALE_ANCIENT.map((layer, i) => ({ layer, delay: i * FINALE_TIMING.stepMs }));
-  const lastEnd = (FINALE_ANCIENT.length - 1) * FINALE_TIMING.stepMs + FINALE_TIMING.fadeMs;
+  const steps = ANCIENT.map((layer, i) => ({ layer, delay: i * FINALE_TIMING.stepMs }));
+  const lastEnd = (ANCIENT.length - 1) * FINALE_TIMING.stepMs + FINALE_TIMING.fadeMs;
   steps.push({ layer: 'Today', delay: lastEnd + FINALE_TIMING.pauseMs });
   return steps;
 }
@@ -410,32 +413,42 @@ export function finaleTotalMs(): number {
 }
 
 /**
- * Starts the finale on an svg that renderPca has just drawn for focus 'all'. Returns the animations in schedule
- * order with the pulse ring last (it ends last). Only Web Animations are used: finish() lands on the final frame,
- * and no timer is ever started. Returns [] when the browser cannot animate.
+ * Starts the finale on an svg that renderPca has just drawn for focus 'all'. Returns the animations in schedule order, each period
+ * layer followed by its legend item (so the legend never lists a period before the plot shows it), then the pulse's white halo and
+ * its dark ring last (the ring ends last). Only Web Animations are used: finish() lands on the final frame, and no timer is ever
+ * started. Returns [] when the browser cannot animate.
  */
 export function animateFinale(svg: SVGSVGElement, data: WorkshopData): Animation[] {
   const out: Animation[] = [];
   const schedule = finaleSchedule();
-  for (const { layer, delay } of schedule) {
-    const g = svg.querySelector<SVGGElement>(`g.layer.period[data-layer="${layer}"]`);
-    if (!g || typeof g.animate !== 'function') continue;
-    out.push(g.animate([{ opacity: 0 }, { opacity: 1 }], {
+  /** Invisible until its turn (fill: backwards), then in over fadeMs; back to the element's own opacity once it is over. */
+  const fadeIn = (el: Element | null, delay: number): void => {
+    if (!el || typeof el.animate !== 'function') return;
+    out.push(el.animate([{ opacity: 0 }, { opacity: 1 }], {
       duration: FINALE_TIMING.fadeMs, delay, fill: 'backwards', easing: 'ease-out',
     }));
+  };
+  for (const { layer, delay } of schedule) {
+    fadeIn(svg.querySelector(`g.layer.period[data-layer="${layer}"]`), delay);
+    fadeIn(svg.querySelector(`g.legend-item[data-legend="${layer}"]`), delay);
   }
   const today = data.periods.find((pi) => pi.id === 'Today')?.centre;
   if (today && out.length > 0) {
     const sc = makeScale(data.frames.europe); // focus 'all' always uses the Europe frame
-    const ring = svgEl('circle', {
-      class: 'finale-pulse', cx: sc.toX(today.x), cy: sc.toY(today.y), r: FINALE_PULSE.r,
-      fill: 'none', stroke: TODAY_RING.stroke, 'stroke-width': FINALE_PULSE.strokeWidth,
-      opacity: '0', 'pointer-events': 'none', style: 'transform-box: fill-box; transform-origin: center',
+    const circle = (cls: string, stroke: string, width: number): SVGCircleElement => svgEl('circle', {
+      class: cls, cx: sc.toX(today.x), cy: sc.toY(today.y), r: FINALE_PULSE.r,
+      fill: 'none', stroke, 'stroke-width': width, opacity: '0', 'pointer-events': 'none',
+      style: 'transform-box: fill-box; transform-origin: center; vector-effect: non-scaling-stroke',
     });
-    (svg.querySelector('g.world') ?? svg).append(ring);
-    if (typeof ring.animate === 'function') {
-      out.push(ring.animate(
-        [{ opacity: 0.9, transform: 'scale(0.2)' }, { opacity: 0, transform: 'scale(1)' }],
+    // The halo has its own class, so `circle.finale-pulse` still names the ring alone. It lies under the ring and shows on both
+    // sides of it, so the dark line reads over the dark markers of the cloud.
+    const halo = circle('finale-pulse-halo', '#FFFFFF', FINALE_PULSE.haloWidth);
+    const ring = circle('finale-pulse', INK, FINALE_PULSE.strokeWidth);
+    (svg.querySelector('g.world') ?? svg).append(halo, ring);
+    for (const el of [halo, ring]) {
+      if (typeof el.animate !== 'function') continue;
+      out.push(el.animate(
+        [{ opacity: 1, transform: 'scale(0.2)' }, { opacity: 0, transform: 'scale(1)' }],
         { duration: FINALE_PULSE.ms, delay: schedule[schedule.length - 1]!.delay, easing: 'ease-out' },
       ));
     }

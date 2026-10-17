@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { NEXT_PREFIX, SCRIPT, SCRIPT_STEPS } from '../src/hints';
 import { formatCommand, PARSE_TEXT } from '../src/parser';
 import { CARDS } from '../src/cards';
@@ -226,6 +226,27 @@ test('typing the hint line exactly as shown, label and all, runs that step (step
   expect(w.errors).toEqual([]);
 });
 
+/**
+ * A finale that is over, jumped to or run out, leaves nothing behind (computed styles, so a fade that was never undone shows):
+ * every period layer and every legend item at full opacity, the pulse ring and its halo invisible, nothing still running.
+ */
+async function expectFinaleOver(page: Page, when: string): Promise<void> {
+  const state = await page.evaluate(() => {
+    const opacities = (sel: string): string[] => [...document.querySelectorAll(sel)].map((e) => getComputedStyle(e).opacity);
+    return {
+      layers: opacities('#plot g.layer.period'),
+      legend: opacities('#plot g.legend-item'),
+      pulse: opacities('#plot circle.finale-pulse-halo, #plot circle.finale-pulse'),
+      running: document.getElementById('plot')!.getAnimations({ subtree: true }).length,
+    };
+  });
+  expect(state.layers, `${when}: every period layer is fully in`).toEqual(Array(8).fill('1'));
+  expect(state.legend.length, `${when}: the legend is there`).toBeGreaterThanOrEqual(8);
+  expect(new Set(state.legend), `${when}: every legend item is fully in`).toEqual(new Set(['1']));
+  expect(state.pulse, `${when}: the pulse (halo, ring) is invisible`).toEqual(['0', '0']);
+  expect(state.running, `${when}: nothing is still running`).toBe(0);
+}
+
 test('finale: run_pca(period = "all") under the shipped flag set (animated, or static when the flag is off)', async ({ page }) => {
   const w = watch(page);
   await freshStart(page);
@@ -242,11 +263,13 @@ test('finale: run_pca(period = "all") under the shipped flag set (animated, or s
     await expect(svg).not.toHaveAttribute('data-animating', 'true');
     await expect(caption).toBeVisible();
     await expect(caption).toHaveText(FINALE_CAPTION);
+    await expectFinaleOver(page, 'after the jump');
     // Left alone, it ends by itself in about 5.5 s.
     await run(page, 'run_pca(period = "all")');
     await expect(svg).toHaveAttribute('data-animating', 'true');
     await expect(caption).toBeVisible({ timeout: 10_000 });
     await expect(svg).not.toHaveAttribute('data-animating', 'true');
+    await expectFinaleOver(page, 'after it ran out');
   } else {
     await expect(caption).toBeVisible();
     expect(await svg.getAttribute('data-animating')).toBeNull();
@@ -325,4 +348,68 @@ test('finale: the plot keeps its size while the caption waits and when it appear
   // A caption that took its room only when it appeared would shrink the svg, and the whole plot with it, in a short window.
   expect(shown!.height).toBeCloseTo(waiting!.height, 0);
   expect(shown!.width).toBeCloseTo(waiting!.width, 0);
+});
+
+test('finale: no period is listed in the legend or named by a tooltip before it appears', async ({ page }) => {
+  test.skip(!FEATURES.finaleAnimation, 'the finale is off in the shipped set');
+  const w = watch(page);
+  await freshStart(page);
+  const svg = page.locator('#plot svg.plot-svg[data-view="pca"]');
+  const tip = page.locator('#plot .plot-tip');
+
+  // Jump to the end once, to find a Britain today ring that is on top at its own centre: that spot names Britain today when hovered.
+  await run(page, 'run_pca(period = "all")');
+  await expect(svg).toHaveAttribute('data-animating', 'true');
+  await prompt(page).press('Enter');
+  await expect(svg).not.toHaveAttribute('data-animating', 'true');
+  const probe = await page.evaluate(() => {
+    for (const ring of document.querySelectorAll('#plot g.layer.period[data-layer="Today"] .pt')) {
+      const b = ring.getBoundingClientRect();
+      const x = b.x + b.width / 2;
+      const y = b.y + b.height / 2;
+      if (document.elementFromPoint(x, y) === ring) return { x, y };
+    }
+    return null;
+  });
+  expect(probe, 'a Britain today ring on top at its own centre').not.toBeNull();
+  await page.mouse.move(probe!.x, probe!.y);
+  await expect(tip).toHaveText(PERIOD_LABELS.Today);
+  await page.mouse.move(2, 2); // out of the plot: the tip clears
+  await expect(tip).toHaveText('');
+
+  // Run it again. While it plays that same spot answers nothing, the period points and legend items take no pointer at all, and
+  // Britain today is not in the legend yet (it fades in with its rings, 4.75 s in).
+  await run(page, 'run_pca(period = "all")');
+  await expect(svg).toHaveAttribute('data-animating', 'true');
+  const playing = await page.evaluate(({ x, y }) => {
+    const pointer = (sel: string): string[] => [...document.querySelectorAll(sel)].map((e) => getComputedStyle(e).pointerEvents);
+    return {
+      points: pointer('#plot g.layer.period .pt'),
+      legend: pointer('#plot g.legend-item'),
+      hit: document.elementFromPoint(x, y)?.closest('g.layer.period')?.getAttribute('data-layer') ?? null,
+      todayLegend: getComputedStyle(document.querySelector('#plot g.legend-item[data-legend="Today"]')!).opacity,
+    };
+  }, probe!);
+  expect(new Set(playing.points)).toEqual(new Set(['none']));
+  expect(new Set(playing.legend)).toEqual(new Set(['none']));
+  expect(playing.hit, 'what lies under the spot while it plays').toBeNull();
+  expect(Number(playing.todayLegend), 'Britain today in the legend before its turn').toBeLessThan(1);
+  await page.mouse.move(probe!.x, probe!.y);
+  await expect(tip).not.toHaveText(PERIOD_LABELS.Today);
+
+  // The jump gives the pointer back, and the legend is whole.
+  await page.mouse.move(2, 2);
+  await prompt(page).press('Enter');
+  await expect(svg).not.toHaveAttribute('data-animating', 'true');
+  const over = await page.evaluate(() => {
+    const pointer = (sel: string): string[] => [...document.querySelectorAll(sel)].map((e) => getComputedStyle(e).pointerEvents);
+    return { points: pointer('#plot g.layer.period .pt'), legend: pointer('#plot g.legend-item') };
+  });
+  expect(over.points).not.toContain('none');
+  expect(over.legend).not.toContain('none');
+  await expectFinaleOver(page, 'after the second jump');
+  await page.mouse.move(probe!.x, probe!.y);
+  await expect(tip).toHaveText(PERIOD_LABELS.Today);
+  expect(w.requests).toEqual([]);
+  expect(w.errors).toEqual([]);
 });

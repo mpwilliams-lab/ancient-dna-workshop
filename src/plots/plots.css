@@ -86,6 +86,12 @@
   display: block;
   visibility: hidden;
 }
+/* While the finale plays (the svg carries data-animating), a period that has not faded in yet must not answer the pointer: its
+   tip would name it early. The legend items fade in with their layers, so they stay quiet too. The marker goes with the run. */
+.plot-svg[data-animating="true"] g.layer.period .pt,
+.plot-svg[data-animating="true"] g.legend-item {
+  pointer-events: none;
+}
 /* Chips (spec §3.5): a pill with its icon; the stem and icon carry the meaning, the colour only helps. */
 .chip {
   display: inline-flex;
