@@ -26,7 +26,7 @@ describe('shell static files', () => {
     expect(css).toMatch(/#terminal \.term-out\s*\{[^}]*overflow-y:\s*auto/);
   });
   it('has every element the shell wires up', () => {
-    for (const id of ['app', 'bar', 'app-title', 'wrap-open', 'panes', 'terminal', 'plot', 'wrap', 'wrap-line', 'wrap-caption', 'wrap-qr', 'wrap-url', 'wrap-org', 'wrap-close']) {
+    for (const id of ['app', 'bar', 'app-title', 'wrap-open', 'panes', 'terminal', 'plot', 'card', 'wrap', 'wrap-line', 'wrap-caption', 'wrap-qr', 'wrap-url', 'wrap-org', 'wrap-close']) {
       expect(html).toContain(`id="${id}"`);
     }
   });

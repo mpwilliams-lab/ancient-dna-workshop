@@ -126,3 +126,55 @@ describe('the restore notice', () => {
     expect(output.matches(selector)).toBe(false);
   });
 });
+
+describe('card overlay (spec §5.2, CONTRACT §4.11)', () => {
+  const nested = (prelude: string): Rule[] => {
+    const media = rules(css).find((r) => r.prelude === prelude);
+    if (!media) throw new Error(`style.css has no "${prelude}" block`);
+    return rules(media.body);
+  };
+  it('defines the card tokens on :root', () => {
+    const root = rule(':root');
+    for (const t of ['--card-bg', '--card-fg', '--map-land']) expect(root[t], t).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(contrast(root['--card-fg']!, root['--card-bg']!)).toBeGreaterThanOrEqual(7);
+  });
+  it('places #card over the plot column at >= 1100 px: absolute in #panes, opaque, the body font clamp', () => {
+    const card = rule('#card');
+    expect(card.position).toBe('absolute');
+    expect(card.left).toBe('calc(100% * 5 / 11)');
+    expect([card.top, card.right, card.bottom]).toEqual(['0', '0', '0']);
+    expect(card.background).toBe('var(--card-bg)');
+    expect(card['font-size']).toBe('clamp(14px, 1.15vw + 0.5vh, 19px)');
+    expect(rule('#card[hidden]').display).toBe('none');
+    const panes = rules(css).filter((r) => r.prelude === '#panes').map((r) => decls(r.body));
+    expect(panes.some((d) => d.position === 'relative')).toBe(true);
+  });
+  it('below 1100 px it covers both panes down to the hint line', () => {
+    const r = decls(nested('@media (max-width: 1099px)').find((x) => x.prelude === '#card')!.body);
+    expect(r.left).toBe('0');
+    expect(r.bottom).toBe('var(--card-bottom, 0px)');
+  });
+  it('in the stacked layout it covers the plot pane only, and that rule comes after the 1100 px one', () => {
+    const blocks = rules(css).filter((r) => r.prelude.startsWith('@media'));
+    const stackedCard = blocks.findIndex((b) => b.prelude === '@media (max-width: 599px), (max-aspect-ratio: 3/4)' && /#card\s*\{/.test(b.body));
+    const narrow = blocks.findIndex((b) => b.prelude === '@media (max-width: 1099px)');
+    expect(stackedCard).toBeGreaterThan(narrow);
+    const r = decls(rules(blocks[stackedCard]!.body).find((x) => x.prelude === '#card')!.body);
+    expect([r.left, r.top, r.bottom]).toEqual(['0', '50%', '0']);
+  });
+  it('keeps the footer outside the scrolling body; only .scroll lets the body scroll', () => {
+    expect(rule('#card .card-body').overflow).toBe('hidden');
+    expect(rule('#card.scroll .card-body')['overflow-y']).toBe('auto');
+    expect(rule('#card .card-footer').flex).toBe('0 0 auto');
+  });
+  it('dense shrinks the font; compact hides leads, tile images and optional tiles, and splits value lists', () => {
+    expect(rule('#card.dense')['font-size']).toBe('calc(clamp(14px, 1.15vw + 0.5vh, 19px) * 0.9)');
+    expect(rule('#card.compact .card-lead, #card.compact .card-tile img, #card.compact .card-tile.is-optional').display).toBe('none');
+    expect(rule('#card.compact .card-values').columns).toBe('2');
+    expect(rule('#card .card-values[data-long]').columns).toBe('2 14em');
+  });
+  it('images and maps keep the §5.2 height caps', () => {
+    expect(rule('#card .card-tile img')['max-height']).toBe('min(26vh, 230px)');
+    expect(rule('#card .card-map')['max-height']).toBe('min(52vh, 460px)');
+  });
+});

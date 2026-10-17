@@ -12,6 +12,16 @@
   --ui: "Segoe UI", system-ui, -apple-system, sans-serif;
   --term-size: clamp(12px, calc(0.75vw + 0.55vh), 18px);
   --bar-h: clamp(28px, 5vh, 40px);
+  /* Cards (spec §5.2): opaque, light like the plot, so a "before" card hides the trajectory. */
+  --card-bg: #fbfaf7;
+  --card-fg: #1b1f23;
+  --card-muted: #4a5560;
+  --card-accent: #8a4b00;
+  --card-panel: #f1ece2;
+  --card-track: #e6e1d6;
+  --card-highlight: #fff1cc;
+  --card-rule: #d9d3c7;
+  --map-land: #e8e2d4;
 }
 
 *,
@@ -77,6 +87,7 @@ body {
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   min-width: 0;
+  position: relative;
 }
 
 #terminal {
@@ -220,4 +231,322 @@ body {
 .wrap-card button {
   color: #8a4b00;
   border-color: #8a4b00;
+}
+
+/* ---- Cards (Task 11, spec §5.2): over the plot column, never scrolling the page ---- */
+#card {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: calc(100% * 5 / 11);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--card-bg);
+  color: var(--card-fg);
+  border-left: 1px solid var(--border);
+  font-family: var(--ui);
+  font-size: clamp(14px, 1.15vw + 0.5vh, 19px);
+  line-height: 1.35;
+}
+
+#card[hidden] {
+  display: none;
+}
+
+#card .card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  padding: 0.8em 1.1em 0.4em;
+}
+
+#card.scroll .card-body {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+#card .card-title {
+  margin: 0;
+  font-size: 1.3em;
+  line-height: 1.2;
+  font-weight: 650;
+}
+
+#card .card-lead,
+#card .card-side-note,
+#card .card-source {
+  margin: 0;
+  color: var(--card-muted);
+}
+
+#card .card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+}
+
+#card .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.1em 0.65em;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+#card .chip--dna {
+  color: #1f5f99;
+}
+
+#card .chip--pot {
+  color: #8a4b00;
+}
+
+#card .chip-icon {
+  flex: 0 0 auto;
+  width: 1.1em;
+  height: 1.1em;
+}
+
+#card .card-tiles {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.5em 0.8em;
+}
+
+#card .card-tile {
+  grid-column: span 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  margin: 0;
+  min-width: 0;
+}
+
+#card .card-tiles[data-count="1"] .card-tile {
+  grid-column: span 6;
+}
+
+#card .card-tiles[data-count="2"] .card-tile,
+#card .card-tiles[data-count="5"] .card-tile:nth-child(n + 4) {
+  grid-column: span 3;
+}
+
+#card .card-tile img {
+  display: block;
+  width: 100%;
+  max-height: min(26vh, 230px);
+  object-fit: contain;
+}
+
+#card .card-tile figcaption {
+  font-size: 0.85em;
+  color: var(--card-muted);
+}
+
+#card .tile-name {
+  display: block;
+  font-weight: 650;
+  color: var(--card-fg);
+}
+
+#card .card-map {
+  max-height: min(52vh, 460px);
+}
+
+#card .card-diagram svg {
+  display: block;
+  width: 100%;
+  max-height: min(22vh, 190px);
+}
+
+#card .card-bullets,
+#card .card-column ul {
+  display: grid;
+  gap: 0.35em;
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+#card .card-lines {
+  display: grid;
+  gap: 0.3em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#card .card-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 1em;
+}
+
+#card .card-column h3,
+#card .card-panel h3 {
+  margin: 0 0 0.25em;
+  font-size: 1em;
+}
+
+#card .card-column p,
+#card .card-panel p {
+  margin: 0;
+}
+
+#card .card-panel {
+  padding: 0.45em 0.8em;
+  border-left: 4px solid var(--card-accent);
+  background: var(--card-panel);
+}
+
+#card .card-values {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9em;
+}
+
+#card .card-values[data-long] {
+  columns: 2 14em;
+  column-gap: 1.6em;
+}
+
+#card .value-row {
+  display: grid;
+  grid-template-columns: minmax(6.5em, 9.5em) minmax(3em, 1fr) 2.6em;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.06em 0;
+  break-inside: avoid;
+}
+
+#card .value-bar {
+  position: relative;
+  height: 0.7em;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--card-track);
+}
+
+#card .value-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(var(--v, 0) * 100%);
+  background: var(--card-accent);
+}
+
+#card .value-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#card .card-side-note {
+  font-size: 0.85em;
+}
+
+#card .card-puzzle {
+  margin: 0;
+  padding: 0.4em 0.7em;
+  border-radius: 6px;
+  background: var(--card-highlight);
+  font-weight: 700;
+}
+
+#card .card-source {
+  margin-top: auto;
+  font-size: 0.78em;
+}
+
+#card .card-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.45em 1.1em 0.6em;
+  border-top: 1px solid var(--card-rule);
+}
+
+#card .card-counter {
+  margin-right: auto;
+  color: var(--card-muted);
+  font-size: 0.9em;
+}
+
+#card .card-footer button {
+  font: inherit;
+  font-size: 0.95em;
+  padding: 0.2em 0.9em;
+  border: 1px solid var(--card-accent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--card-accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#card .card-footer .card-continue {
+  background: var(--card-accent);
+  color: var(--card-bg);
+}
+
+/* Fit level 1 (dense): 10% smaller type, tighter spacing. */
+#card.dense {
+  font-size: calc(clamp(14px, 1.15vw + 0.5vh, 19px) * 0.9);
+}
+
+#card.dense .card-body {
+  gap: 0.35em;
+  padding-top: 0.6em;
+}
+
+#card.dense .card-bullets,
+#card.dense .card-column ul,
+#card.dense .card-lines {
+  gap: 0.2em;
+}
+
+/* Fit level 2 (compact): no leads, no tile images, no optional tiles; value lists in two columns. */
+#card.compact .card-lead,
+#card.compact .card-tile img,
+#card.compact .card-tile.is-optional {
+  display: none;
+}
+
+#card.compact .card-values {
+  columns: 2;
+  column-gap: 1.2em;
+}
+
+/* Below 1100 CSS px the card covers both panes, down to the top of the hint line (shell keeps --card-bottom current). */
+@media (max-width: 1099px) {
+  #card {
+    left: 0;
+    bottom: var(--card-bottom, 0px);
+    border-left: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+/* Stacked layout (terminal above plot): the card covers the plot pane only. Must come after the 1100 px block. */
+@media (max-width: 599px), (max-aspect-ratio: 3/4) {
+  #card {
+    left: 0;
+    top: 50%;
+    bottom: 0;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
 }
