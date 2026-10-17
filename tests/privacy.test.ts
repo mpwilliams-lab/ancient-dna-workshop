@@ -1,21 +1,31 @@
 // @vitest-environment node
 // Public repo (plan Global Constraints, RF5): no machine path, account name, e-mail address or personal name of this computer's
-// user in any tracked file or commit message.
+// user in anything a push publishes.
 //
-// What to look for is read from this machine when the test runs: the home directory, the account name, the git e-mail and the
-// real name (git's user.name, plus the operating system's own record of the account holder where it has one). So this file names
-// nobody, and cannot trip itself. The test is skipped where there is no such person: a CI runner has the generic account "runner"
-// and no git identity, and "runner" is an ordinary word in the sources, so looking for it there would only produce false alarms.
-// The commit that goes to the public repo is made on the author's own machine, where the test runs for real.
+// What is scanned, and where it is read from. tests/helpers/gitScan.ts asks git; it never reads the working tree, so a file
+// edited after its commit cannot hide a leak that is about to go public:
+//   - every blob of the HEAD commit (and its file name),
+//   - the added lines of `git log -p -U0 origin/main..HEAD`: the commits a push would publish, even a line that a later commit
+//     removes again (that part is skipped only where the ref origin/main does not exist),
+//   - every commit message, on any branch or tag.
+//
+// Two groups of tests:
+//   1. This machine's own strings (home directory, account name, git e-mail, real name). They are read from the machine when the
+//      test runs, so this file names nobody and cannot trip itself. A CI runner has the generic account "runner" and no git
+//      identity, and "runner" is an ordinary word in the sources: the group is skipped when CI is set, and ONLY then. A machine
+//      without a git identity does not skip it: it fails, because git cannot commit there either.
+//   2. Machine-independent rules, run everywhere (CI included, where group 1 is skipped): any user directory under /Users/ or
+//      /home/ other than the lab PCs' shared account, and any e-mail address other than a noreply trailer.
+// The commit that goes to the public repo is made on the author's own machine, where both groups run for real.
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
-import { basename, join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { devNull, homedir, tmpdir, userInfo } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
+import { addedChunks, commitMessages, headBlobs, unpushedRange } from './helpers/gitScan';
 
 const ROOT = resolve(__dirname, '..');
-/** Tracked files read as bytes, not text. Only the longer needles are looked for in them (a short one could occur in compressed data by chance). */
-const BINARY = /\.(jpe?g|png|gif|webp|ico|woff2?|ttf|otf|pdf)$/i;
+/** Only the longer needles are looked for in binary files (a short one could occur in compressed data by chance). */
 const BINARY_MIN_NEEDLE = 6;
 
 const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -30,9 +40,6 @@ function lenient(cmd: string, args: string[]): string {
     return '';
   }
 }
-
-/** A git command that must work: a failure fails the test instead of looking like a clean repo. */
-const git = (...args: string[]): string => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 
 interface Needle { label: string; sample: string; re: RegExp }
 
@@ -86,8 +93,72 @@ function hitsIn(text: string, binary = false): string[] {
   return N.filter((n) => (!binary || n.sample.length >= BINARY_MIN_NEEDLE) && n.re.test(clean)).map((n) => n.label);
 }
 
-describe.skipIf(ON_CI || !HAS_PERSON)('public-repo privacy (skipped on CI and wherever git has no identity)', () => {
+// ---- Machine-independent rules ----
+
+/** The lab PCs' shared Windows account: C:\Users\lab\Desktop is named in the test fixtures on purpose. Every other user directory is somebody's. */
+const ALLOWED_HOME_USERS: ReadonlySet<string> = new Set(['lab']);
+const HOME_PATH = /\/(?:Users|home)\/([^/\s"'`<>()[\]{}|\\]+)\//gi;
+/** Bounded quantifiers: a long run of letters with no "@" in it cannot make the scan slow. */
+const EMAIL = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,24}/g;
+/** The only addresses that may appear: the commit trailer's, and the ones GitHub itself writes. */
+const NOREPLY = /^(?:noreply@anthropic\.com|noreply@github\.com|[A-Za-z0-9._+-]*@users\.noreply\.github\.com)$/i;
+
+/** Every "/Users/<name>/" or "/home/<name>/" in `text` (either slash style) whose <name> is not the lab account's. */
+function foreignHomePaths(text: string): string[] {
+  const out: string[] = [];
+  for (const m of slashes(text).matchAll(HOME_PATH)) if (!ALLOWED_HOME_USERS.has(m[1]!.toLowerCase())) out.push(m[0]);
+  return out;
+}
+
+/** Every e-mail address in `text` except a noreply one. */
+function strayEmails(text: string): string[] {
+  return (text.match(EMAIL) ?? []).filter((e) => !NOREPLY.test(e));
+}
+
+/** Both machine-independent checks, as one list of findings. */
+const stray = (text: string): string[] => [...foreignHomePaths(text), ...strayEmails(text)];
+
+// Sample leaks are put together at run time, so this file never contains one itself.
+const SAMPLE_HOME = ['', 'Users', 'someone'].join('/');
+const SAMPLE_LINUX_HOME = ['', 'home', 'someone'].join('/');
+const SAMPLE_WINDOWS_HOME = ['C:', 'Users', 'SOMEONE', 'Desktop', 'x'].join('\\');
+const SAMPLE_MAIL = ['someone', 'example.org'].join('@');
+
+// ---- A throw-away repository, to prove where the scanners read from ----
+
+const tempDirs: string[] = [];
+afterAll(() => {
+  for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
+});
+
+/** A git repository in a temp folder, with a fixed fake identity and none of this machine's git configuration. */
+function tempRepo(): { dir: string; run: (...args: string[]) => void; write: (file: string, text: string) => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'privacy-scan-'));
+  tempDirs.push(dir);
+  const fake = ['tester', 'example.invalid'].join('@');
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'tester',
+    GIT_AUTHOR_EMAIL: fake,
+    GIT_COMMITTER_NAME: 'tester',
+    GIT_COMMITTER_EMAIL: fake,
+  };
+  const run = (...args: string[]): void => {
+    execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: dir, env, stdio: 'ignore' });
+  };
+  const write = (file: string, text: string): void => {
+    mkdirSync(dirname(join(dir, file)), { recursive: true });
+    writeFileSync(join(dir, file), text, 'latin1');
+  };
+  run('init', '-q', '-b', 'main');
+  return { dir, run, write };
+}
+
+describe.skipIf(ON_CI)('public-repo privacy: this machine\'s own strings (skipped only on CI)', () => {
   it('looks for this machine\'s home directory, account name, git e-mail and the instructor\'s first and last name', () => {
+    expect(HAS_PERSON, 'git has no user.name or user.email on this machine, so the test cannot know whose name to look for: set them with git config').toBe(true);
     const labels = N.map((n) => n.label);
     expect(labels).toContain('home directory');
     expect(labels).toContain('account name');
@@ -114,23 +185,116 @@ describe.skipIf(ON_CI || !HAS_PERSON)('public-repo privacy (skipped on CI and wh
     for (const n of N) expect(hitsIn(`\u0000${n.sample}\u0000`, true).includes(n.label), n.label).toBe(n.sample.length >= BINARY_MIN_NEEDLE);
   });
 
-  it('no tracked file contains any of them', () => {
+  it('no file of the HEAD commit, and no file name, contains any of them', () => {
     const hits: string[] = [];
-    for (const f of git('ls-files', '-z').split('\0').filter(Boolean)) {
-      const binary = BINARY.test(f);
-      let text: string;
-      try {
-        text = readFileSync(join(ROOT, f), binary ? 'latin1' : 'utf8');
-      } catch {
-        continue; // tracked, but deleted in the working tree
-      }
-      for (const label of hitsIn(text, binary)) hits.push(`${f}: ${label}`);
+    for (const f of headBlobs(ROOT)) {
+      for (const label of hitsIn(f.path)) hits.push(`${f.path}: ${label} (in the file name)`);
+      for (const label of hitsIn(f.text, f.binary)) hits.push(`${f.path}: ${label}`);
     }
-    expect(hits, 'remove the personal string from each file listed (never weaken this test)').toEqual([]);
-  });
+    expect(hits, 'remove the personal string from each file listed, in a new commit (never weaken this test)').toEqual([]);
+  }, 30_000);
+
+  it('no line added by an unpushed commit contains any of them, even one a later commit removes again', () => {
+    const range = unpushedRange(ROOT);
+    const hits: string[] = [];
+    for (const c of range === null ? [] : addedChunks(ROOT, range)) {
+      for (const label of [...hitsIn(c.path), ...hitsIn(c.text)]) hits.push(`${c.commit} ${c.path}: ${label}`);
+    }
+    expect(hits, 'the commit is not pushed yet: fix it (amend, or rebase -i) before any push').toEqual([]);
+  }, 30_000);
 
   it('no commit message, on any branch or tag, contains any of them', () => {
-    const log = git('log', '--all', '--format=%B%x00');
-    expect(hitsIn(log), 'a hit in an old commit message cannot be fixed without rewriting public history: tell the instructor').toEqual([]);
+    expect(hitsIn(commitMessages(ROOT, '--all')), 'a hit in an old commit message cannot be fixed without rewriting public history: tell the instructor').toEqual([]);
+  }, 30_000);
+});
+
+describe('public-repo privacy: rules that need no knowledge of this machine (run everywhere, CI included)', () => {
+  it('finds a user directory under /Users/ or /home/ and an e-mail address, but passes the lab account and noreply trailers', () => {
+    expect(foreignHomePaths(`${SAMPLE_HOME}/project/file.ts`)).toEqual([`${SAMPLE_HOME}/`]);
+    expect(foreignHomePaths(`path = '${SAMPLE_LINUX_HOME}/work'`)).toEqual([`${SAMPLE_LINUX_HOME}/`]);
+    expect(foreignHomePaths(SAMPLE_WINDOWS_HOME), 'Windows spelling, any letter case').toEqual([`${['', 'Users', 'SOMEONE'].join('/')}/`]);
+    expect(foreignHomePaths('file:///C:/Users/lab/Desktop/ancient-dna-workshop.html'), 'the lab PCs\' shared account').toEqual([]);
+    expect(foreignHomePaths('C:\\Users\\lab\\Desktop\\x'), 'the lab account with backslashes').toEqual([]);
+    expect(foreignHomePaths('the /Users folder and a /home page'), 'words, not user directories').toEqual([]);
+    expect(strayEmails(`write to ${SAMPLE_MAIL} today`)).toEqual([SAMPLE_MAIL]);
+    expect(strayEmails(SAMPLE_MAIL.toUpperCase()), 'any letter case').toHaveLength(1);
+    expect(strayEmails('Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'), 'the commit trailer').toEqual([]);
+    expect(strayEmails('12345+name@users.noreply.github.com and noreply@github.com'), 'GitHub\'s own noreply addresses').toEqual([]);
+    expect(strayEmails('"@types/node": "24.13.6", vite@8.3.1, a@b, @vitest-environment node'), 'package names, versions and pragmas are not addresses').toEqual([]);
+    expect(stray(`${SAMPLE_HOME}/x and ${SAMPLE_MAIL}`)).toHaveLength(2);
   });
+
+  it('reads the HEAD commit and the unpushed commits from git, not from the working tree', () => {
+    const { dir, run, write } = tempRepo();
+    write('clean.txt', 'nothing personal here\n');
+    run('add', 'clean.txt');
+    run('commit', '-q', '-m', 'first');
+    run('update-ref', 'refs/remotes/origin/main', 'HEAD');     // what a push has already published
+    expect(unpushedRange(dir)).toBe('origin/main..HEAD');
+    expect(addedChunks(dir, 'origin/main..HEAD'), 'nothing is unpushed yet').toEqual([]);
+
+    // A leak added by one unpushed commit and removed by the next: the push would still publish it.
+    write('leak.txt', `see ${SAMPLE_HOME}/notes and ${SAMPLE_MAIL}\nsecond line\n`);
+    run('add', 'leak.txt');
+    run('commit', '-q', '-m', 'adds a leak');
+    run('rm', '-q', 'leak.txt');
+    run('commit', '-q', '-m', 'removes it again');
+    // A committed leak that the working tree no longer shows, and a clean commit that the working tree now spoils.
+    write('drift.txt', `${SAMPLE_HOME}/x\n`);
+    run('add', 'drift.txt');
+    run('commit', '-q', '-m', 'adds drift.txt');
+    write('drift.txt', 'clean in the working tree\n');
+    write('clean.txt', `${SAMPLE_MAIL}\n`);
+
+    // git log lists the newest commit first; the commit that removes leak.txt adds no line.
+    const added = addedChunks(dir, 'origin/main..HEAD').filter((c) => c.text !== '');
+    expect(added.map((c) => c.path)).toEqual(['drift.txt', 'leak.txt']);
+    const leak = added.find((c) => c.path === 'leak.txt')!;
+    expect(leak.text, 'the added lines, nothing else').toBe(`see ${SAMPLE_HOME}/notes and ${SAMPLE_MAIL}\nsecond line\n`);
+    expect(stray(leak.text)).toHaveLength(2);
+
+    const blobs = headBlobs(dir);
+    expect(blobs.map((b) => b.path).sort()).toEqual(['clean.txt', 'drift.txt']);
+    expect(blobs.find((b) => b.path === 'drift.txt')!.text, 'the committed text, not the file on disk').toBe(`${SAMPLE_HOME}/x\n`);
+    expect(blobs.find((b) => b.path === 'clean.txt')!.text, 'an uncommitted edit is not a HEAD blob').toBe('nothing personal here\n');
+
+    expect(commitMessages(dir, 'origin/main..HEAD')).toContain('adds a leak');
+    expect(commitMessages(dir, '--all')).toContain('first');
+  });
+
+  it('skips the unpushed-commit scan, without failing, where origin/main does not exist', () => {
+    const { dir, run, write } = tempRepo();
+    write('a.txt', 'a\n');
+    run('add', 'a.txt');
+    run('commit', '-q', '-m', 'only commit');
+    expect(unpushedRange(dir)).toBeNull();
+  });
+
+  it('returns a binary file as bytes (latin1) and a text file as UTF-8', () => {
+    const { dir, run, write } = tempRepo();
+    write('t.txt', 'caf\u00e9\n');
+    write('i.png', '\u0089PNG\u0000\u00ff');
+    run('add', 't.txt', 'i.png');
+    run('commit', '-q', '-m', 'files');
+    const byPath = new Map(headBlobs(dir).map((b) => [b.path, b]));
+    expect(byPath.get('i.png')).toMatchObject({ binary: true, text: '\u0089PNG\u0000\u00ff' });
+    expect(byPath.get('t.txt')!.binary).toBe(false);
+  });
+
+  it('no file of the HEAD commit holds a user directory other than the lab account\'s, or an e-mail address', () => {
+    const hits: string[] = [];
+    for (const f of headBlobs(ROOT)) if (!f.binary) for (const s of stray(f.text)) hits.push(`${f.path}: ${s}`);
+    expect(hits, 'remove the path or address from each file listed, in a new commit (never weaken this test)').toEqual([]);
+  }, 30_000);
+
+  it('no line added by an unpushed commit does', () => {
+    const range = unpushedRange(ROOT);
+    const hits: string[] = [];
+    for (const c of range === null ? [] : addedChunks(ROOT, range)) for (const s of stray(c.text)) hits.push(`${c.commit} ${c.path}: ${s}`);
+    expect(hits, 'the commit is not pushed yet: fix it (amend, or rebase -i) before any push').toEqual([]);
+  }, 30_000);
+
+  it('no commit message, on any branch or tag, does', () => {
+    expect(stray(commitMessages(ROOT, '--all')), 'a hit in an old commit message cannot be fixed without rewriting public history: tell the instructor').toEqual([]);
+  }, 30_000);
 });
