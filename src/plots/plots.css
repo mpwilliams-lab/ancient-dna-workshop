@@ -113,3 +113,30 @@
   line-height: 1.35;
   font-style: italic;
 }
+
+/* Maps (Task 19, spec §6): land var(--map-land), sea = card background, 0.6 px coast, no country borders, labels with a halo. */
+.map-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.map-svg text {
+  font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+}
+.map-svg .map-sea {
+  fill: var(--card-bg, #ffffff);
+}
+.map-svg .map-land path {
+  fill: var(--map-land, #e4e0d4);
+  stroke: #7f7f7f;
+  stroke-width: 0.6px;
+  vector-effect: non-scaling-stroke;
+}
+.map-svg .map-frame {
+  stroke: #bdbdbd;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.map-svg .map-label {
+  stroke: var(--card-bg, #ffffff);
+}

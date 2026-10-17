@@ -25,7 +25,8 @@
     "promote-assets": "node scripts/fetch-assets.mjs --promote",
     "credits": "node scripts/make-credits.mjs",
     "check-release": "vite build --ssr scripts/check-release.ts --outDir .release-check --emptyOutDir && node .release-check/check-release.js",
-    "visual-check": "node scripts/visual-check.mjs"
+    "visual-check": "node scripts/visual-check.mjs",
+    "make-map": "node scripts/make-map.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
