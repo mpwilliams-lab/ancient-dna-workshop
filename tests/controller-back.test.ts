@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { backSession, prevScreen } from '../src/back';
 import { AUTOFILL_NOTE, MAX_BAD_TRIES } from '../src/controller';
-import { CARD_HINT, BACK_BUTTON, BACK_BUTTON_LABEL } from '../src/content';
+import { CARD_HINT, BACK_BUTTON, BACK_BUTTON_LABEL, PREDICT_HINT, REVEAL_HINT } from '../src/content';
 import { Controller, type CardHost, type ControllerDeps } from '../src/controller';
 import { ALL_OFF, withFeatures } from '../src/features';
 import { EXTRAS, EXTRA_PREFIX, NEXT_PREFIX, SCRIPT, SCRIPT_STEPS } from '../src/hints';
@@ -26,6 +26,8 @@ class FakeTerm implements TerminalView {
   prompt = '';
   flushes = 0;
   history: string[] = [];
+  /** What the hint line read each time the log was drawn whole (showLines scrolls it to its end): the log's box has its final height then or not. */
+  hintAtShowLines: string[] = [];
   private pending: (() => void) | null = null;
   printLines(lines: string[], opts?: { stagger?: boolean }): Promise<void> {
     for (const text of lines) this.lines.push({ kind: 'output', text });
@@ -54,7 +56,10 @@ class FakeTerm implements TerminalView {
   clearScreen(): void { this.lines = []; }
   notice(text: string): void { this.lines.push({ kind: 'notice', text }); }
   setHistory(lines: string[]): void { this.history = [...lines]; }
-  showLines(lines: readonly Line[]): void { this.lines = lines.map((l) => ({ kind: l.kind, text: l.text })); }
+  showLines(lines: readonly Line[]): void {
+    this.hintAtShowLines.push(this.hint);
+    this.lines = lines.map((l) => ({ kind: l.kind, text: l.text }));
+  }
 }
 
 class FakeCards implements CardHost {
@@ -454,6 +459,45 @@ describe('Back opens a card against the hint line it will have (carry-forward fr
 // one below: without the first, a step's last card does not open (cardOpen reads null while the flag is held); without the second,
 // the held plot is drawn by the next command that runs. The printToken bump is a third guard that no behaviour can see, because the two
 // drops already leave a stale callback nothing to draw or open: removing it alone changes nothing, and removing all three is caught.
+describe('the hint line is final before the log is drawn (review fix round 1: a taller hint after the log had scrolled hid its last line)', () => {
+  // The log is drawn by showLines, which scrolls it to its end. The hint line is two lines (the Predict and Reveal hints) or one (CARD_HINT,
+  // the step hints) at the lab sizes, and the log is the box above it: a hint that changes height AFTER the log scrolled leaves up to 33 px
+  // of its last line below the box. Measured in Chromium and Edge: a log whose box shrinks in a later task stays pinned to its end, one
+  // whose lines and hint change in the same task does not, and that is how Back and a refresh draw it. The layout is measured in
+  // e2e/back.spec.ts; here the order of the two calls.
+  it('Back, at every screen of the guided script: the hint the terminal holds when the log is drawn is the hint of the screen Back lands on', async () => {
+    const h = make();
+    await forwardRun(headless(h), () => undefined);
+    const keys = screenKeys();
+    const drawn = h.term.hintAtShowLines.length;
+    for (let at = keys.length - 2; at >= 0; at--) {
+      h.c.back();
+      expect(h.term.hintAtShowLines.at(-1), `Back to ${keys[at]}`).toBe(h.term.hint);
+    }
+    expect(h.term.hintAtShowLines.length - drawn, 'the log is drawn once per Back').toBe(keys.length - 1);
+  });
+  it('a refresh, at the Predict and Reveal bare plots and at a card: the same', async () => {
+    const afterFirstFarmers = make();
+    await guided(afterFirstFarmers, 4);                    // through firstFarmers, B1 closed: the Predict hint
+    const predict = make(loadSession(afterFirstFarmers.store), afterFirstFarmers.store);
+    expect(predict.term.hint).toBe(PREDICT_HINT);
+    expect(predict.term.hintAtShowLines).toEqual([PREDICT_HINT]);
+
+    const afterIronAgeTest = make();
+    await guided(afterIronAgeTest, 9);                     // through the Iron Age test: the Reveal hint
+    const reveal = make(loadSession(afterIronAgeTest.store), afterIronAgeTest.store);
+    expect(reveal.term.hint).toBe(REVEAL_HINT);
+    expect(reveal.term.hintAtShowLines).toEqual([REVEAL_HINT]);
+
+    const onCard = make();
+    await guided(onCard, 8);
+    onCard.c.back();                                       // E3, a card
+    const card = make(loadSession(onCard.store), onCard.store);
+    expect(card.c.cardOpen).toBe('E3');
+    expect(card.term.hintAtShowLines).toEqual([CARD_HINT]);
+  });
+});
+
 describe('Back while a step prints: nothing of the interrupted log acts afterwards (carry-forward from the Task 6 review)', () => {
   it('after-cards: the callback of the flushed log opens no second card and draws nothing; the plot is drawn once, without animation', async () => {
     const h = make();

@@ -567,9 +567,13 @@ export class Controller {
   }
 
   /**
-   * Spec §4.2: replay the log to cursor.step, draw the visible transcript at once, render without animation, reopen the
-   * card, then save. The one routine for refresh-restore (constructor) and, from Task 17, for Back. Bumping printToken
-   * and dropping the held render/after-cards stops a stale print callback drawing or opening anything afterwards.
+   * Spec §4.2: replay the log to cursor.step, set the hint line, draw the visible transcript at once, render without
+   * animation, reopen the card, then save. The one routine for refresh-restore (constructor) and, from Task 17, for Back.
+   * Bumping printToken and dropping the held render/after-cards stops a stale print callback drawing or opening anything
+   * afterwards. The hint goes BEFORE the log: showLines scrolls the log to its end, the log is the box above the hint line, and
+   * a hint that grows afterwards (Predict and Reveal are two lines where CARD_HINT and the step hints are one) shrinks that box
+   * after the scroll and leaves up to 33 px of its last line below it. Measured in Chromium and Edge: a log whose box shrinks in a
+   * later task stays pinned to its end, one whose lines and hint change in the same task does not.
    */
   private restore(s: SessionV2): void {
     const d = derive(this.data, s.steps, s.cursor.step, this.features);
@@ -579,7 +583,6 @@ export class Controller {
     const transcript = s.transcript.slice(-MAX_TRANSCRIPT).map((e) => ({ ...e }));
     const visible = visibleTranscript(transcript, Infinity).flatMap((e) =>
       e.kind === 'clear' ? [] : [{ kind: e.kind as ShownKind, text: e.text }]);
-    this.t.showLines(visible);
     const cards = s.cursor.step > 0 ? d.cardsFor[s.cursor.step - 1] ?? [] : [];
     this.hist = s.history.filter((h) => typeof h === 'string').slice(-MAX_HISTORY);
     this.transcript = transcript;
@@ -587,6 +590,8 @@ export class Controller {
     this.steps = s.steps.map((st) => ({ cmd: st.cmd, endSeq: st.endSeq }));
     this.live = d;
     this.cursor = { step: s.cursor.step, card: Math.min(Math.max(0, s.cursor.card), cards.length) };
+    this.refreshHint();
+    this.t.showLines(visible);
     this.t.setHistory?.(this.hist);
     this.safeRender(d.plot, { animate: false });
     this.showCurrentCard();

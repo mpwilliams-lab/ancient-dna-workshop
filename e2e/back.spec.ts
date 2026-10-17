@@ -5,6 +5,7 @@ import { FEATURES } from '../src/features';
 import { NEXT_PREFIX, SCRIPT, SCRIPT_STEPS, hintText } from '../src/hints';
 import { formatCommand } from '../src/parser';
 import { derive, sessionBuildHash } from '../src/replay';
+import { screensOf, screenKey } from '../tests/helpers/script';
 import { APP_URL, CARD_KEY_GAP_MS, DATA, boxes, cardOpen, covers, freshStart, idle, installBoxes, run, screen, watch } from './helpers';
 
 // e2e asserts only the shipped flag set (spec §10.3).
@@ -156,6 +157,9 @@ test('Back while a step without cards prints drops its log and its plot; the nex
   expect(w.errors).toEqual([]);
 });
 
+/** The screens of the whole script in the order a student meets them: the start, then each step's cards and its bare plot. */
+const SCREENS = screensOf(SCRIPT_STEPS.map((st) => st.cards?.ids ?? []));
+
 // ---- Cards opened by Back sit above the hint line (carry-forward from the Task 14 review) ----
 
 const KEY = 'adna-workshop-session-v2';
@@ -283,11 +287,7 @@ test('Back walks every screen of the whole script, from a session saved at its e
   await installBoxes(page);
   await loadSeeded(page, SCRIPT.length);                    // as after a refresh at the end of step 19
   const steps = SCRIPT.map((c) => ({ cmd: formatCommand(c) }));
-  const screens = [{ step: 0, card: 0 }];                   // in the order a student meets them
-  SCRIPT_STEPS.forEach((st, i) => {
-    const n = st.cards?.ids.length ?? 0;
-    for (let j = 0; j <= n; j++) if (!(n === 0 && j === 1)) screens.push({ step: i + 1, card: j });
-  });
+  const screens = SCREENS;
   expect(screens).toHaveLength(1 + SCRIPT.length + SCRIPT_STEPS.reduce((n, st) => n + (st.cards?.ids.length ?? 0), 0));
 
   for (let at = screens.length - 1; at >= 0; at--) {
@@ -338,3 +338,82 @@ test('Back walks every screen of the whole script, from a session saved at its e
   expect(w.requests).toEqual([]);
   expect(w.errors).toEqual([]);
 });
+
+// ---- The log stays in view, on a REAL session (review fix round 1) ----
+// The Predict hint (the plot of step 4) and the Reveal hint (the plot of step 9) are two lines where CARD_HINT and the step hints around
+// them are one, at the lab sizes. A Back drew the log, which scrolls it to its end, and only then set the hint: the taller hint shrank
+// the log's box after that, and 15 to 33 px of its last line sat below it. The walk above uses a session seeded with one line per step,
+// whose log never overflows its box, so it cannot see this. This one types the whole script, so the logs are the real ones, and looks at
+// the last line of the log at every screen on the way forward and again on the way back.
+
+const LOG_VIEWPORTS = [
+  { name: '1366x768', width: 1366, height: 768, dsf: 1 },
+  { name: '1024x768', width: 1024, height: 768, dsf: 1 },
+  NARROW,
+];
+
+/** How far the last line of the log ends below the log's box (CSS px; 0 or less when it is all in view), and whether the log overflows. */
+const logView = (page: Page): Promise<{ below: number; overflows: boolean }> => page.evaluate(() => {
+  const out = document.querySelector('#terminal .term-out')!;
+  const last = [...out.querySelectorAll('.term-line')].pop();
+  return {
+    below: last ? last.getBoundingClientRect().bottom - out.getBoundingClientRect().bottom : 0,
+    overflows: out.scrollHeight > out.clientHeight + 1,
+  };
+});
+
+for (const c of LOG_VIEWPORTS) {
+  test(`a real session, forward and then back through every screen: the last line of the log is never cut off: ${c.name}`, async ({ browser }) => {
+    test.setTimeout(300_000);
+    const ctx = await browser.newContext({ viewport: { width: c.width, height: c.height }, deviceScaleFactor: c.dsf });
+    try {
+      const page = await ctx.newPage();
+      const w = watch(page);
+      await freshStart(page);
+      const overflowing = new Set<string>();
+      const look = async (way: string, key: string): Promise<void> => {
+        const v = await logView(page);
+        expect(v.below, `${way}, screen ${key}: the last line of the log ends ${v.below.toFixed(1)} px below its box`).toBeLessThanOrEqual(2);
+        if (v.overflows) overflowing.add(`${way} ${key}`);
+      };
+
+      // Below 1100 px a card covers both panes, the log with them. At 682 x 512 CARD_HINT is two lines where the step hint is one, so with
+      // a card open the log's box is 17 px shorter than its last scroll, in the live run too: nobody sees it (the card is over it) and it is
+      // gone when the card closes. Back is held to the strict reading at every screen; the way forward looks at a card screen only where
+      // the card leaves the log in view.
+      const logUnderCard = c.width < 1100;
+
+      // forward: every command really typed, every card clicked through
+      await look('forward', '0.0');
+      for (let i = 0; i < SCRIPT.length; i++) {
+        await run(page, formatCommand(SCRIPT[i]!));
+        const ids = SCRIPT_STEPS[i]?.cards?.ids ?? [];
+        for (let j = 0; j < ids.length; j++) {
+          await expect(page.locator('#card-title')).toHaveText(CARDS[ids[j]!].title);
+          if (!logUnderCard) await look('forward', `${i + 1}.${j}`);
+          await page.locator('#card .card-continue').click();
+        }
+        await expect(page.locator('#card')).toBeHidden();
+        await look('forward', `${i + 1}.${ids.length}`);
+      }
+
+      // back: through every screen, with the header button on a bare plot and the card's own on a card
+      for (let at = SCREENS.length - 2; at >= 0; at--) {
+        await page.locator((await cardOpen(page)) !== null ? '#card .card-back' : '#back').click();
+        expect(await screen(page)).toEqual(SCREENS[at]);
+        await look('back', screenKey(SCREENS[at]!));
+      }
+
+      // the test means something only if the logs really overflow at the screens whose hint is taller than the one before
+      for (const key of ['4.1', '9.0']) {
+        expect(overflowing.has(`forward ${key}`), `the log overflows its box at ${key} on the way forward`).toBe(true);
+        expect(overflowing.has(`back ${key}`), `the log overflows its box at ${key} on the way back`).toBe(true);
+      }
+      expect(overflowing.has('back 4.0'), 'and at a card screen on the way back (B1 over the Predict plot)').toBe(true);
+      expect(w.requests).toEqual([]);
+      expect(w.errors).toEqual([]);
+    } finally {
+      await ctx.close();
+    }
+  });
+}
