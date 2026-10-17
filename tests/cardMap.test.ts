@@ -12,6 +12,7 @@ import { IRELAND_FOOTNOTE, MAP_SOURCE_SUFFIX, MAP_TEXT } from '../src/content';
 import { ALL_OFF, ALL_ON } from '../src/features';
 import { A1_CONFIRMED_LABELS, mapSpec } from '../src/maps';
 import { cloneFixture, FIXTURE } from './fixtures/fixture';
+import { ruleViolations } from './contentRules';
 import { checkedManifest, fakeUrls } from './helpers/assetEnv';
 import { cardCtx, flagSet, openOnCard } from './helpers/cardCtx';
 
@@ -276,6 +277,7 @@ describe('distribution cards with their maps (Task 24, spec §3.4)', () => {
       expect(svg.getAttribute('role')).toBe('img');
       expect(svg.getAttribute('aria-label')).toBe(`${CARDS[id].title}: ${placed(gene).map((r) => `${r.label} ${r.display}`).join(', ')}`);
       expect(svg.hasAttribute('aria-hidden')).toBe(false);
+      expect(ruleViolations(svg.getAttribute('aria-label')!), 'what a screen reader gets passes the content rules like the labels it lists').toEqual([]);
     });
 
     it(`${id}: each distribution map has its own flag: with only another map's flag on, ${id} keeps its value bars`, () => {
