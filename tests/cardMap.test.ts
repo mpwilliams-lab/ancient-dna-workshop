@@ -1,17 +1,17 @@
 // @vitest-environment jsdom
-// Map slot on cards (Task 20; spec §5.2, §3.2–§3.3, CONTRACT §4.11 DOM). Tasks 23 and 24 append their cases.
+// Map slot on cards (Task 20; spec §5.2, §3.2–§3.3, CONTRACT §4.11 DOM; Task 23: A1). Task 24 appends its cases.
 // Every manifest here is an in-memory copy (tests/helpers/assetEnv.ts): nothing reads the committed manifest's checks.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { cardShowsUpgrade } from '../src/assets';
 import { renderCardMap } from '../src/cardMap';
-import { CARDS, cardSource } from '../src/cards';
+import { CARDS, cardSource, cardVars, fillCard } from '../src/cards';
 import { renderCardBody, upgradedFormShown } from '../src/cardView';
 import { MAP_SOURCE_SUFFIX, MAP_TEXT } from '../src/content';
 import { ALL_OFF, ALL_ON } from '../src/features';
-import { mapSpec } from '../src/maps';
-import { FIXTURE } from './fixtures/fixture';
+import { A1_CONFIRMED_LABELS, mapSpec } from '../src/maps';
+import { cloneFixture, FIXTURE } from './fixtures/fixture';
 import { checkedManifest, fakeUrls } from './helpers/assetEnv';
 import { cardCtx, flagSet, openOnCard } from './helpers/cardCtx';
 
@@ -29,8 +29,8 @@ describe('the upgrade rule for D1, E1, G1', () => {
     });
   }
   it('a map card whose spec is not built is never upgraded, whatever the flags and checks', () => {
-    for (const id of ['H2', 'I2', 'J3', 'K2', 'L3', 'A1'] as const) {
-      // (Tasks 23/24/27 build these; each of them moves its id out of this list.)
+    for (const id of ['H2', 'I2', 'J3', 'K2', 'L3'] as const) {
+      // (Tasks 24/27 build these; each of them moves its id out of this list. A1 is built: Task 23.)
       expect(cardShowsUpgrade(CARDS[id], ALL_ON, checkedManifest(), fakeUrls()), id).toBe(false);
     }
   });
@@ -111,5 +111,85 @@ describe('the card map layout rules (src/style.css, src/plots/plots.css)', () =>
   });
   it('a map svg paints its frame outline whole: the 1 px stroke on the edge the viewBox touches is half outside the box (Task 19 review)', () => {
     expect(block(plots, '.map-svg')).toMatch(/overflow:\s*visible/);
+  });
+});
+
+describe('A1 card (Task 23, spec §3.1)', () => {
+  const ON = flagSet('map.A1', true, ALL_OFF);
+  // An independent copy of the approved text (RF3), with {n_pops} and {n_people} as the fixture's europe_fit gives them.
+  const LEAD = 'On this map each dot is a whole group of people living in Europe today, placed by their DNA. A thin line joins it to where that group lives.';
+  const BULLETS = [
+    'North and south line up well; east and west only roughly, partly because we have no German, Dutch, Danish or Swiss groups.',
+    "Small, isolated groups such as Basque and Saami people are left off: their DNA has drifted apart from their neighbours'.",
+    'Britain is held back. You will place Britons later.',
+  ];
+  const SOURCE = "Drawn from this workshop's data (26 groups, 716 people). The DNA map was turned and scaled to fit the real map as closely as possible. Inspired by Novembre et al. 2008. Map outline: Made with Natural Earth.";
+
+  const without = (...keys: ('europe_pops' | 'europe_fit')[]) => {
+    const d = cloneFixture();
+    for (const k of keys) delete d[k];
+    return d;
+  };
+
+  it('is upgraded only with map.A1 on, the instructor\'s check of the map, and the data (europe_pops and europe_fit)', () => {
+    expect(cardShowsUpgrade(CARDS.A1, ON, checkedManifest(), fakeUrls())).toBe(true);
+    expect(cardShowsUpgrade(CARDS.A1, ALL_OFF, checkedManifest(), fakeUrls())).toBe(false);
+    expect(cardShowsUpgrade(CARDS.A1, ON, checkedManifest(['A1']), fakeUrls())).toBe(false);
+    expect(upgradedFormShown(CARDS.A1, ON, checkedManifest(), fakeUrls())).toBe(true);
+    // The data is the card view's rule (the body and the footer both ask it): see the text-form test below.
+  });
+
+  it('upgraded: the map sits after the lead and before the bullets, the words are the approved ones, and the source line has the fitted groups and people', () => {
+    const el = renderCardBody(document, CARDS.A1, cardCtx(FIXTURE, ON, checkedManifest()));
+    const slot = el.querySelector<HTMLElement>('.card-map[data-map="A1"]');
+    expect(slot).not.toBeNull();
+    const svg = slot!.querySelector('svg.map-svg')!;
+    expect(svg.getAttribute('aria-label')).toBe('Genes mirror geography');
+    expect(el.querySelector('.card-title')!.textContent).toBe('Genes mirror geography');
+    expect(el.querySelector('.card-lead')!.textContent).toBe(LEAD);
+    expect([...el.querySelectorAll('.card-bullets > li')].map((li) => li.textContent)).toEqual(BULLETS);
+    expect(el.querySelector('.card-lead')!.compareDocumentPosition(slot!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(slot!.compareDocumentPosition(el.querySelector('.card-bullets')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const v = cardVars(FIXTURE);
+    expect(v.n_pops).toBe('26');
+    expect(el.querySelector('.card-source')!.textContent).toBe(SOURCE);
+    expect(el.querySelector('.card-source')!.textContent).toBe(fillCard(cardSource(CARDS.A1, true)!, v));
+    expect(el.querySelector('.card-source')!.textContent).toContain(MAP_SOURCE_SUFFIX);
+    expect(el.textContent).not.toMatch(/[{}]/);
+    // No group ID (the data's own code for a group) is on the card, in its text or in any attribute, whatever it holds.
+    for (const p of (FIXTURE.europe_pops ?? []).filter((q) => q.id !== q.label)) expect(el.innerHTML, p.id).not.toContain(p.id);
+    expect(openOnCard('A1', FIXTURE, ON, checkedManifest()).querySelector('.card-credits')).not.toBeNull();
+  });
+
+  it('the picture is the window of its spec with 26 links, and carries labels only if the instructor has confirmed their names', () => {
+    const svg = renderCardMap(document, CARDS.A1, FIXTURE).querySelector('svg.map-svg')!;
+    const v = mapSpec('A1', FIXTURE).view!;
+    expect(svg.getAttribute('viewBox')).toBe(`${v.x} ${v.y} ${v.width} ${v.height}`);
+    expect(svg.querySelectorAll('g.map-link')).toHaveLength(26);
+    expect(svg.querySelectorAll('text.map-label')).toHaveLength(A1_CONFIRMED_LABELS.length > 0 ? 8 : 0);
+    expect(svg.getAttribute('role')).toBe('img');
+    expect(svg.hasAttribute('aria-hidden')).toBe(false);
+    expect(MAP_TEXT.A1).toEqual([]);   // A1's labels are data (europe_pops[].label), not fixed text
+  });
+
+  it('text form (flag off, or map unchecked, or europe_pops or europe_fit missing): the P1 title, lead and bullets, no map, no source line, no credits button', () => {
+    const contexts: [string, ReturnType<typeof cardCtx>][] = [
+      ['flag off', cardCtx(FIXTURE, ALL_OFF, checkedManifest())],
+      ['map unchecked', cardCtx(FIXTURE, ON, checkedManifest(['A1']))],
+      ['no europe_pops', cardCtx(without('europe_pops'), ON, checkedManifest())],
+      ['no europe_fit (the source line is never drawn without it)', cardCtx(without('europe_fit'), ON, checkedManifest())],
+      ['neither', cardCtx(without('europe_pops', 'europe_fit'), ON, checkedManifest())],
+    ];
+    for (const [name, ctx] of contexts) {
+      const el = renderCardBody(document, CARDS.A1, ctx);
+      expect(el.querySelector('.card-map'), name).toBeNull();
+      expect(el.querySelector('svg'), name).toBeNull();
+      expect(el.querySelector('.card-source'), name).toBeNull();
+      expect(el.querySelector('.card-title')!.textContent, name).toBe('Genes mirror geography');
+      expect(el.querySelector('.card-lead')!.textContent, name).toBe(LEAD);
+      expect([...el.querySelectorAll('.card-bullets > li')].map((li) => li.textContent), name).toEqual(BULLETS);
+      expect(el.textContent, name).not.toContain('Natural Earth');
+      expect(openOnCard('A1', ctx.data, ctx.features, ctx.manifest!).querySelector('.card-credits'), name).toBeNull();
+    }
   });
 });

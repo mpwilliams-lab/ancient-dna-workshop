@@ -171,6 +171,15 @@ describe('open checks (spec §11)', () => {
     expect(OPEN_CHECKS[13]!.check).toMatch(/A1 map labels/);
     expect(OPEN_CHECKS[14]!.ifFails).toBe('Line 3 becomes "The next plot follows this letter across all of West Eurasia."');
   });
+  it('check 14: the Europe data run is done; what is open is the instructor\'s confirmation of the eight names, and the map ships unlabelled until then', () => {
+    const c = OPEN_CHECKS[13]!;
+    expect(c.n).toBe(14);
+    expect(c.status).not.toMatch(/Open until the europe_pops run/);
+    expect(c.status).toContain('Data run done');
+    expect(c.status).toContain('confirms the eight names');
+    expect(c.status).toContain('ships unlabelled');
+    expect(c.ifFails).toBe('The map ships unlabelled');
+  });
   // O1 (settled): the build writes 1000 Genomes Britain as 5 copies = 0.02747, so card K2 shows 2.7. The spec §11 line still
   // has the pre-O1 value (0.0275, which would round to 2.8).
   it('check 5 carries O1: 1000 Genomes Britain is 0.02747 and card K2 shows 2.7, never the stale 0.0275 or 2.8', () => {

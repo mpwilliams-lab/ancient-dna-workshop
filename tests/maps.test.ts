@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
-// Spec §6 map specs (Task 20: D1, E1, G1). Tasks 23, 24 and 27 append their own describe blocks to this file.
+// Spec §6 map specs (Task 20: D1, E1, G1; Task 23: A1). Tasks 24 and 27 append their own describe blocks to this file.
 import { describe, expect, it } from 'vitest';
 import { MAP_TEXT } from '../src/content';
 import {
-  BAND_MAX_ASPECT, BAND_PAD, bandView, drawingBox, frameBox, labelAt, labelBox, MAP_LABEL_FONT_PX, MAP_SPECS_BUILT, mapDataReady,
-  mapSpec, placeLabels, type LabelBox,
+  A1_CONFIRMED_LABELS, A1_DOT_R, A1_LABEL_PX, BAND_MAX_ASPECT, BAND_PAD, bandView, drawingBox, frameBox, labelAt, labelBox,
+  MAP_LABEL_FONT_PX, MAP_SPECS_BUILT, mapDataReady, mapSpec, placeLabels, specA1, type LabelBox,
 } from '../src/maps';
 import {
-  ARROW_WIDTH, MAP_FRAMES, MAP_VIEW, WIDE_ARROW_WIDTH, arrowReach, catmullRomSegments, makeProjection, project, renderMap,
-  type LatLon, type MapSpec, type XY,
+  ARROW_WIDTH, MAP_FRAMES, MAP_VIEW, WIDE_ARROW_WIDTH, arrowReach, catmullRomSegments, makeProjection, project, projectUnits, renderMap,
+  type LatLon, type MapSpec, type MapView, type XY,
 } from '../src/plots/map';
 import { SVG_NS } from '../src/plots/svg';
+import type { EuropePop } from '../src/types';
 import { FIXTURE } from './fixtures/fixture';
 import { ruleViolations } from './contentRules';
 
@@ -338,4 +339,215 @@ describe('the D1, E1 and G1 drawings (Task 20)', () => {
       }
     });
   }
+});
+
+// ---- A1: genes mirror geography (Task 23, spec §3.1, §6, §8; Novembre et al. 2008) ----
+
+describe('mapSpec(A1): genes mirror geography (Task 23, spec §3.1, §6, §8)', () => {
+  const pops = FIXTURE.europe_pops ?? [];
+  const fitted = pops.filter((p) => !p.isolate);
+  /** The eight groups the data build labels (open check 14), in europe_pops order: what A1_CONFIRMED_LABELS holds once he confirms. */
+  const EIGHT = fitted.filter((p) => p.map_label).map((p) => p.label);
+  const c = makeProjection(MAP_FRAMES.europe);
+  const trueAt = (p: EuropePop): XY => project(c, p.lat, p.lon);
+  const geneticAt = (p: EuropePop): XY => project(c, p.map_y, c.lon0 + p.map_x / c.cosLat0);
+  /** Both ends of every link: the 52 dots, as discs of the radius the label placer keeps clear. */
+  const discs = (): LabelBox[] => fitted.flatMap((p) => [trueAt(p), geneticAt(p)]).map((d) => ({ left: d.x - A1_DOT_R, right: d.x + A1_DOT_R, top: d.y - A1_DOT_R, bottom: d.y + A1_DOT_R }));
+  const within = (b: LabelBox, v: MapView): boolean => b.left >= v.x && b.right <= v.x + v.width && b.top >= v.y && b.bottom <= v.y + v.height;
+
+  it('the fixture carries the 35 populations, 26 non-isolates and 8 map labels', () => {
+    expect(pops).toHaveLength(35);
+    expect(fitted).toHaveLength(26);
+    expect(pops.filter((p) => p.map_label)).toHaveLength(8);
+    expect(pops.filter((p) => p.map_label && p.isolate)).toHaveLength(0);
+    expect(FIXTURE.europe_fit?.n_pops).toBe(26);
+    expect(FIXTURE.europe_fit?.n_people).toBe(fitted.reduce((s, p) => s + p.n, 0));
+  });
+
+  it('one 1 px link per non-isolate population (isolates left off), on the Europe frame, no separate points', () => {
+    const s = mapSpec('A1', FIXTURE);
+    expect(s.id).toBe('A1');
+    expect(s.frame).toBe('europe');
+    expect(s.points ?? []).toHaveLength(0);
+    expect(s.arrows ?? []).toHaveLength(0);
+    expect(s.links).toEqual(fitted.map((p) => ({ from: { lat: p.lat, lon: p.lon }, to: { ux: p.map_x, uy: p.map_y } })));
+    for (const iso of pops.filter((p) => p.isolate)) {
+      expect(s.links!.some((l) => l.from.lat === iso.lat && l.from.lon === iso.lon), `${iso.label} is left off`).toBe(false);
+    }
+  });
+
+  it('labels only map_label groups whose names are confirmed (open check 14); none before that', () => {
+    const s = mapSpec('A1', FIXTURE);
+    const expected = fitted.filter((p) => p.map_label && A1_CONFIRMED_LABELS.includes(p.label)).map((p) => p.label);
+    expect((s.texts ?? []).map((t) => t.text)).toEqual(expected);
+    if (A1_CONFIRMED_LABELS.length > 0) expect(expected).toHaveLength(8);
+  });
+
+  it('the confirmation list is the only switch, and a name unlocks its group only if the data build chose it for a label', () => {
+    expect(EIGHT).toEqual(['Estonian', 'Lithuanian', 'Czech', 'Hungarian', 'Romanian', 'Serbian', 'South Italian', 'Sicilian']);
+    expect(specA1(FIXTURE, []).texts).toEqual([]);
+    expect((specA1(FIXTURE, EIGHT).texts ?? []).map((t) => t.text)).toEqual(EIGHT);
+    expect((specA1(FIXTURE, ['Czech']).texts ?? []).map((t) => t.text)).toEqual(['Czech']);
+    // A fitted group the build did not choose, an isolate and a name the data does not have stay unlabelled, confirmed or not.
+    expect(specA1(FIXTURE, ['Spanish', 'Basque', 'Saami', 'Atlantis']).texts).toEqual([]);
+    // The list says which names are confirmed; it never reorders or repeats a label.
+    expect((specA1(FIXTURE, [...EIGHT].reverse().concat(EIGHT)).texts ?? []).map((t) => t.text)).toEqual(EIGHT);
+  });
+
+  it('a label sits next to its genetic dot (the lat/lon conversion agrees with projectUnits)', () => {
+    const s = specA1(FIXTURE, EIGHT);
+    expect(s.texts).toHaveLength(8);
+    for (const t of s.texts ?? []) {
+      const p = fitted.find((q) => q.label === t.text)!;
+      const dot = projectUnits(c, p.map_x, p.map_y);
+      const viaDegrees = geneticAt(p);
+      expect(viaDegrees.x).toBeCloseTo(dot.x, 6);
+      expect(viaDegrees.y).toBeCloseTo(dot.y, 6);
+      // From the dot's centre to the label's text box (a label anchored at its start or end runs away from the dot).
+      const b = labelBox(c, t, s.labelPx);
+      const gap = Math.hypot(Math.max(b.left - dot.x, 0, dot.x - b.right), Math.max(b.top - dot.y, 0, dot.y - b.bottom));
+      expect(gap, t.text).toBeLessThanOrEqual(A1_DOT_R + 8);
+    }
+  });
+
+  it('with every candidate name confirmed, the 8 labels lie inside the window and overlap neither each other nor any dot centre', () => {
+    const s = specA1(FIXTURE, EIGHT);
+    const v = s.view!;
+    const boxes = (s.texts ?? []).map((t) => ({ t: t.text, b: labelBox(c, t, s.labelPx) }));
+    expect(boxes).toHaveLength(8);
+    for (const { t, b } of boxes) expect(within(b, v), `${t} inside the window`).toBe(true);
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        expect(overlaps(boxes[i]!.b, boxes[j]!.b), `"${boxes[i]!.t}" overlaps "${boxes[j]!.t}"`).toBe(false);
+      }
+    }
+    const centres = fitted.flatMap((p) => [trueAt(p), geneticAt(p)]);
+    for (const { t, b } of boxes) {
+      const hit = centres.find((d) => d.x > b.left && d.x < b.right && d.y > b.top && d.y < b.bottom);
+      expect(hit, `"${t}" covers a dot's centre at ${hit ? `${hit.x.toFixed(0)}, ${hit.y.toFixed(0)}` : ''}`).toBeUndefined();
+    }
+  });
+
+  it('every population label passes the content rules, and no group ID is drawn anywhere on the map', () => {
+    expect(pops.map((p) => p.label).filter((l) => ruleViolations(l).length > 0)).toEqual([]);
+    const html = rendered(specA1(FIXTURE, EIGHT)).outerHTML;
+    for (const p of pops.filter((q) => q.id !== q.label)) expect(html, p.id).not.toContain(p.id);
+    expect(pops.filter((p) => p.id !== p.label).length, 'the check above would be empty').toBeGreaterThan(5);
+  });
+
+  it('A1 is built, and needs europe_pops and europe_fit', () => {
+    expect(MAP_SPECS_BUILT.has('A1')).toBe(true);
+    expect(mapDataReady('A1', FIXTURE)).toBe(true);
+    const noPops = structuredClone(FIXTURE);
+    delete noPops.europe_pops;
+    expect(mapDataReady('A1', noPops)).toBe(false);
+    const noFit = structuredClone(FIXTURE);
+    delete noFit.europe_fit;
+    expect(mapDataReady('A1', noFit)).toBe(false);
+    const empty = structuredClone(FIXTURE);
+    empty.europe_pops = [];
+    expect(mapDataReady('A1', empty)).toBe(false);
+    const bare = structuredClone(FIXTURE);
+    delete bare.europe_pops;
+    delete bare.europe_fit;
+    expect(mapDataReady('A1', bare)).toBe(false);
+  });
+
+  it('renderMap draws 26 links, each a grey dot at the true place, a blue dot at the DNA place and a 1 px line', () => {
+    const svg = rendered(mapSpec('A1', FIXTURE));
+    const links = [...svg.querySelectorAll('g.map-link')];
+    expect(links).toHaveLength(26);
+    for (const g of links) {
+      expect(g.querySelectorAll('line')).toHaveLength(1);
+      expect(g.querySelectorAll('circle.map-dot--true')).toHaveLength(1);
+      expect(g.querySelectorAll('circle.map-dot--genetic')).toHaveLength(1);
+      expect(g.querySelector('line')!.getAttribute('stroke-width')).toBe('1');
+    }
+    expect(svg.querySelectorAll('circle.map-dot--value, circle.map-dot--zero, path.map-arrow')).toHaveLength(0);
+    // The window and the label placer keep A1_DOT_R clear round every dot: the renderer must not draw a dot bigger than that.
+    for (const dot of svg.querySelectorAll('g.map-link circle')) expect(Number(dot.getAttribute('r'))).toBeLessThanOrEqual(A1_DOT_R);
+  });
+
+  it('the window holds all 52 dots whole and is cut from the frame\'s empty north, whatever the labels', () => {
+    const s = specA1(FIXTURE, []);
+    const v = s.view!;
+    expect(v).toBeDefined();
+    for (const d of discs()) expect(within(d, v), `dot at ${d.left + A1_DOT_R}, ${d.top + A1_DOT_R}`).toBe(true);
+    const f = frameBox('europe');
+    expect(v.y).toBeGreaterThanOrEqual(f.top);
+    expect(v.y + v.height).toBeLessThanOrEqual(f.bottom);
+    expect(v.height, 'a window onto the frame, not the whole frame').toBeLessThan(f.bottom - f.top);
+    expect(v.y, 'the empty north (Lapland, the Arctic sea) is left out').toBeGreaterThan(f.top + 100);
+    // The frame's full width (as bandView: rounded inwards to 0.1), widened (never narrowed) only where a dot would otherwise be cut off.
+    expect(v.x).toBeLessThan(f.left + 0.1);
+    expect(v.x + v.width).toBeGreaterThan(f.right - 0.1);
+    expect(v.x).toBeGreaterThan(f.left - 2 * A1_DOT_R);
+    expect(v.x + v.width).toBeLessThan(f.right + 2 * A1_DOT_R);
+    // The room round the dots is BAND_PAD where the frame has it.
+    const box = drawingBox(s)!;
+    expect(box.top - v.y).toBeGreaterThanOrEqual(Math.min(BAND_PAD, box.top - f.top) - 0.1);
+    expect(v.y + v.height - box.bottom).toBeGreaterThanOrEqual(Math.min(BAND_PAD, f.bottom - box.bottom) - 0.1);
+    expect(v.width / v.height).toBeLessThanOrEqual(BAND_MAX_ASPECT);
+    // The labels are placed inside this window; they never move it, so the card's layout is the same with or without them.
+    expect(specA1(FIXTURE, EIGHT).view).toEqual(v);
+    expect(mapSpec('A1', FIXTURE).view).toEqual(v);
+  });
+
+  it('drawingBox holds both ends of every link, with the dot radius', () => {
+    const box = drawingBox(specA1(FIXTURE, []))!;
+    for (const d of discs()) {
+      expect(d.left).toBeGreaterThanOrEqual(box.left - 1e-6);
+      expect(d.right).toBeLessThanOrEqual(box.right + 1e-6);
+      expect(d.top).toBeGreaterThanOrEqual(box.top - 1e-6);
+      expect(d.bottom).toBeLessThanOrEqual(box.bottom + 1e-6);
+    }
+    // ... and it is tight: some dot touches each side.
+    const ds = discs();
+    expect(Math.min(...ds.map((d) => d.left))).toBeCloseTo(box.left, 6);
+    expect(Math.max(...ds.map((d) => d.right))).toBeCloseTo(box.right, 6);
+    expect(Math.min(...ds.map((d) => d.top))).toBeCloseTo(box.top, 6);
+    expect(Math.max(...ds.map((d) => d.bottom))).toBeCloseTo(box.bottom, 6);
+  });
+
+  it('placeLabels keeps every label inside the window it is given (default: the whole 1000 x 700 map space)', () => {
+    const view: MapView = { x: 100, y: 100, width: 300, height: 200 };
+    const at = (x: number, y: number): LatLon => ({ lat: c.latMax - (y - c.offY) / c.k, lon: c.lon0 + ((x - c.offX) / c.k + c.pxMin) / c.cosLat0 });
+    const items = [{ at: at(385, 200), text: 'Edge', r: A1_DOT_R }];
+    const free = placeLabels('europe', items);
+    const bounded = placeLabels('europe', items, [], { within: view });
+    expect(within(labelBox(c, free[0]!), view), 'unbounded, the label runs out of the window').toBe(false);
+    expect(within(labelBox(c, bounded[0]!), view), 'bounded, it takes another side of its dot').toBe(true);
+    expect(placeLabels('europe', items, [], {})).toEqual(free);
+    expect(placeLabels('europe', items, [], { within: undefined })).toEqual(free);
+  });
+
+  it('placeLabels measures with the font size it is given: a word that fits beside its dot at 20 takes the other side at 30 when a neighbour is in the way', () => {
+    const at = (x: number, y: number): LatLon => ({ lat: c.latMax - (y - c.offY) / c.k, lon: c.lon0 + ((x - c.offX) / c.k + c.pxMin) / c.cosLat0 });
+    const items = [{ at: at(400, 300), text: 'Lithuanian', r: A1_DOT_R }];
+    const obstacles = [{ at: at(560, 300), r: A1_DOT_R }];                       // 160 units to the right of the dot
+    const neighbour: LabelBox = { left: 555, right: 565, top: 295, bottom: 305 };
+    const placed = (fontPx: number): { anchor?: string; clear: boolean } => {
+      const t = placeLabels('europe', items, obstacles, { fontPx })[0]!;
+      return { anchor: t.anchor, clear: !overlaps(labelBox(c, t, fontPx), neighbour) };
+    };
+    expect(placed(20)).toEqual({ anchor: 'start', clear: true });                // 116 units wide: fits to the right of its dot
+    expect(placed(30)).toEqual({ anchor: 'end', clear: true });                  // 174 wide: would cover the neighbour, so it goes left
+    // The estimate itself scales with the font.
+    const w = (fontPx: number): number => { const b = labelBox(c, placeLabels('europe', items, [], { fontPx })[0]!, fontPx); return b.right - b.left; };
+    expect(w(30) / w(20)).toBeCloseTo(1.5, 6);
+  });
+
+  it('A1 labels are larger than the arrow maps\' (A1_LABEL_PX), so they stay readable in a picture drawn at about 0.65 on the card', () => {
+    expect(A1_LABEL_PX).toBeGreaterThan(MAP_LABEL_FONT_PX);
+    for (const s of [specA1(FIXTURE, []), specA1(FIXTURE, EIGHT), mapSpec('A1', FIXTURE)]) expect(s.labelPx).toBe(A1_LABEL_PX);
+    const svg = rendered(specA1(FIXTURE, EIGHT));
+    const texts = [...svg.querySelectorAll('text.map-label')];
+    expect(texts).toHaveLength(8);
+    for (const t of texts) expect(Number(t.getAttribute('font-size'))).toBe(A1_LABEL_PX);
+    // The arrow maps are unchanged: no labelPx, the shared 20.
+    for (const id of ['D1', 'E1', 'G1'] as const) {
+      expect(mapSpec(id, FIXTURE).labelPx, id).toBeUndefined();
+      for (const t of [...rendered(mapSpec(id, FIXTURE)).querySelectorAll('text.map-label')]) expect(Number(t.getAttribute('font-size')), id).toBe(MAP_LABEL_FONT_PX);
+    }
+  });
 });

@@ -64,6 +64,9 @@ export interface MapSpec {
   /** The window the svg shows (its viewBox). Default: the whole 1000 x 700 map space. Same projection and outline either way, so a
    *  window moves nothing: it only leaves out the part of the frame the drawing does not use (src/maps.ts bandView, Task 20). */
   view?: MapView;
+  /** Font size of this map's labels in map units (default MAP_LABEL_FONT_PX). A map whose picture is drawn small on its card asks for
+   *  larger words, so they stay readable on a projector (A1, Task 23: a nearly square drawing in a short, wide slot). */
+  labelPx?: number;
 }
 
 export const DOT_MAX_RADIUS = 14;
@@ -150,10 +153,11 @@ export function mapBase(frame: MapFrameId): { land: readonly string[]; projectio
   return BASES[frame];
 }
 
-function label(x: number, y: number, text: string, anchor: 'start' | 'middle' | 'end'): SVGTextElement {
+/** The halo is a fifth of the font size: 4 units at the default 20. */
+function label(x: number, y: number, text: string, anchor: 'start' | 'middle' | 'end', fontPx: number): SVGTextElement {
   return svgEl('text', {
-    class: 'map-label', x, y, 'text-anchor': anchor, 'font-size': MAP_LABEL_FONT_PX, 'font-weight': '600', fill: MAP_COLOURS.ink,
-    stroke: MAP_COLOURS.halo, 'stroke-width': 4, 'stroke-linejoin': 'round', 'paint-order': 'stroke',
+    class: 'map-label', x, y, 'text-anchor': anchor, 'font-size': fontPx, 'font-weight': '600', fill: MAP_COLOURS.ink,
+    stroke: MAP_COLOURS.halo, 'stroke-width': fontPx / 5, 'stroke-linejoin': 'round', 'paint-order': 'stroke',
   }, text);
 }
 
@@ -178,6 +182,7 @@ export function renderMap(svg: SVGSVGElement, spec: MapSpec): void {
   const boxW = c.k * (f.lonMax - f.lonMin) * c.cosLat0;
   const boxH = c.k * (f.latMax - f.latMin);
   const view = spec.view ?? { x: 0, y: 0, width: MAP_VIEW.width, height: MAP_VIEW.height };
+  const fontPx = spec.labelPx ?? MAP_LABEL_FONT_PX;
   svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   svg.classList.add('map-svg');
@@ -237,7 +242,7 @@ export function renderMap(svg: SVGSVGElement, spec: MapSpec): void {
     arrowsG.append(path);
     if (a.label && pts.length > 0) {
       const p = pts[Math.max(0, Math.min(pts.length - 1, Math.trunc(a.label.at)))]!;
-      labels.push(label(p.x + a.label.dx, p.y + a.label.dy, a.label.text, 'start'));
+      labels.push(label(p.x + a.label.dx, p.y + a.label.dy, a.label.text, 'start', fontPx));
     }
   }
 
@@ -259,11 +264,11 @@ export function renderMap(svg: SVGSVGElement, spec: MapSpec): void {
     } else {
       dotsG.append(svgEl('circle', { class: 'map-dot map-dot--marker', cx: q.x, cy: q.y, r: 5, fill: MAP_COLOURS.ink, stroke: MAP_COLOURS.halo, 'stroke-width': 1.5 }));
     }
-    if (p.label !== undefined) labels.push(label(q.x + (p.dx ?? 8), q.y + (p.dy ?? -8), p.label, 'start'));
+    if (p.label !== undefined) labels.push(label(q.x + (p.dx ?? 8), q.y + (p.dy ?? -8), p.label, 'start', fontPx));
   }
   for (const t of spec.texts ?? []) {
     const q = project(c, t.lat, t.lon);
-    labels.push(label(q.x, q.y, t.text, t.anchor ?? 'middle'));
+    labels.push(label(q.x, q.y, t.text, t.anchor ?? 'middle', fontPx));
   }
   const labelsG = svgEl('g', { class: 'map-labels' });
   labelsG.append(...labels);

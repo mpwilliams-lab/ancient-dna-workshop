@@ -2,8 +2,9 @@
 // JSON (europe_pops[].label), so the content scan covers it. Coordinates are lat/lon; src/plots/map.ts projects them.
 import { MAP_TEXT } from './content';
 import {
-  MAP_FRAMES, MAP_LABEL_FONT_PX, MAP_VIEW, arrowReach, catmullRomSegments, makeProjection, project,
-  type CurveSegment, type LatLon, type MapFrameId, type MapProjectionConstants, type MapSpec, type MapText, type MapView, type XY,
+  MAP_FRAMES, MAP_LABEL_FONT_PX, MAP_VIEW, arrowReach, catmullRomSegments, makeProjection, project, projectUnits,
+  type CurveSegment, type LatLon, type MapFrameId, type MapLink, type MapProjectionConstants, type MapSpec, type MapText, type MapView,
+  type XY,
 } from './plots/map';
 import type { MapId, WorkshopData } from './types';
 
@@ -13,8 +14,8 @@ export { MAP_LABEL_FONT_PX };
 export const MAP_LABEL_CHAR_EM = 0.58;
 
 /** Maps whose spec exists. A card is upgraded to its map only if its id is here (assets.ts cardShowsUpgrade), so an
- *  unbuilt map is never drawn, whatever the flags. Tasks 23, 24, 27 and 29 add their ids. */
-export const MAP_SPECS_BUILT: ReadonlySet<MapId> = new Set<MapId>(['D1', 'E1', 'G1']);
+ *  unbuilt map is never drawn, whatever the flags. Tasks 24, 27 and 29 add their ids. */
+export const MAP_SPECS_BUILT: ReadonlySet<MapId> = new Set<MapId>(['A1', 'D1', 'E1', 'G1']);
 
 type Anchor = 'start' | 'middle' | 'end';
 const ll = (lat: number, lon: number): LatLon => ({ lat, lon });
@@ -70,14 +71,26 @@ function candidates(r: number, f: number): { anchor: Anchor; dx: number; dy: num
   ];
 }
 
+export interface PlaceOptions {
+  /** The window the map shows: a label outside it would be cut off, so it costs as much as one outside the viewBox. Default: the
+   *  whole 1000 x 700 map space. */
+  within?: MapView;
+  /** Font size the labels are drawn at (MapSpec.labelPx). Default MAP_LABEL_FONT_PX. */
+  fontPx?: number;
+}
+
 /**
  * Greedy, deterministic label placement for data-driven maps (A1, distribution maps). Biggest dots first (ties keep input
  * order); each label takes the first of its eight candidate places with the lowest cost, where cost = 10 x overlap with
- * labels already placed + overlap with every dot and obstacle + 1e6 if it leaves the viewBox. Returns labels in input order.
+ * labels already placed + overlap with every dot and obstacle + 1e6 if it leaves the viewBox (or options.within, when the map
+ * shows only a window of it). Returns labels in input order.
  */
-export function placeLabels(frame: MapFrameId, items: readonly LabelItem[], obstacles: readonly Obstacle[] = []): MapText[] {
+export function placeLabels(
+  frame: MapFrameId, items: readonly LabelItem[], obstacles: readonly Obstacle[] = [], options: PlaceOptions = {},
+): MapText[] {
   const c = projectionOf(frame);
-  const f = MAP_LABEL_FONT_PX;
+  const f = options.fontPx ?? MAP_LABEL_FONT_PX;
+  const room = options.within ?? { x: 0, y: 0, width: MAP_VIEW.width, height: MAP_VIEW.height };
   const discs: LabelBox[] = [...items, ...obstacles].map((o) => {
     const p = project(c, o.at.lat, o.at.lon);
     return { left: p.x - o.r, right: p.x + o.r, top: p.y - o.r, bottom: p.y + o.r };
@@ -90,11 +103,11 @@ export function placeLabels(frame: MapFrameId, items: readonly LabelItem[], obst
     let best: { t: MapText; box: LabelBox; cost: number } | null = null;
     for (const cand of candidates(it.r, f)) {
       const t = labelAt(frame, it.at, it.text, cand.anchor, cand.dx, cand.dy);
-      const box = labelBox(c, t);
+      const box = labelBox(c, t, f);
       let cost = 0;
       for (const b of placed) cost += 10 * overlapArea(box, b);
       for (const d of discs) cost += overlapArea(box, d);
-      if (box.left < 0 || box.right > MAP_VIEW.width || box.top < 0 || box.bottom > MAP_VIEW.height) cost += 1e6;
+      if (box.left < room.x || box.right > room.x + room.width || box.top < room.y || box.bottom > room.y + room.height) cost += 1e6;
       if (best === null || cost < best.cost) best = { t, box, cost };
     }
     placed.push(best!.box);
@@ -124,8 +137,8 @@ function curvePoints(pts: readonly XY[]): XY[] {
   return catmullRomSegments(pts).flatMap((s) => Array.from({ length: 17 }, (_, i) => bezierAt(s, i / 16)));
 }
 
-/** The smallest box that holds every arrow (curve, stroke and arrowhead) and every text label of a spec, in viewBox units; null
- *  when it draws neither. Text is the estimate of labelBox. */
+/** The smallest box that holds every arrow (curve, stroke and arrowhead), both ends of every link (a dot of radius A1_DOT_R) and
+ *  every text label of a spec, in viewBox units; null when it draws none of them. Text is the estimate of labelBox. */
 export function drawingBox(spec: MapSpec): LabelBox | null {
   const c = projectionOf(spec.frame);
   const boxes: LabelBox[] = [];
@@ -135,7 +148,12 @@ export function drawingBox(spec: MapSpec): LabelBox | null {
       boxes.push({ left: p.x - r, right: p.x + r, top: p.y - r, bottom: p.y + r });
     }
   }
-  for (const t of spec.texts ?? []) boxes.push(labelBox(c, t));
+  for (const l of spec.links ?? []) {
+    for (const p of [project(c, l.from.lat, l.from.lon), projectUnits(c, l.to.ux, l.to.uy)]) {
+      boxes.push({ left: p.x - A1_DOT_R, right: p.x + A1_DOT_R, top: p.y - A1_DOT_R, bottom: p.y + A1_DOT_R });
+    }
+  }
+  for (const t of spec.texts ?? []) boxes.push(labelBox(c, t, spec.labelPx));
   if (boxes.length === 0) return null;
   return boxes.reduce((u, b) => ({
     left: Math.min(u.left, b.left), right: Math.max(u.right, b.right), top: Math.min(u.top, b.top), bottom: Math.max(u.bottom, b.bottom),
@@ -251,10 +269,65 @@ function specG1(): MapSpec {
   });
 }
 
+// ---- A1: genes mirror geography (spec §3.1, §6, §8; an original drawing inspired by Novembre et al. 2008) ----
+/** Radius used to keep A1 labels clear of the dots (renderMap draws its link dots about this size). */
+export const A1_DOT_R = 5;
+/**
+ * Open check 14: the names of the groups A1 may label, copied here only once the instructor has confirmed them. They are the
+ * `map_label` groups of the data build, in europe_pops order (north to south): Estonian, Lithuanian, Czech, Hungarian, Romanian,
+ * Serbian, South Italian, Sicilian. Empty = the map ships unlabelled (spec §11, plan O8). A group is labelled only if the build
+ * chose it (`map_label`) AND its name is in this list, so the list can never label anything the data does not.
+ */
+export const A1_CONFIRMED_LABELS: readonly string[] = [];
+/**
+ * The size of A1's labels in map units (the other maps use MAP_LABEL_FONT_PX = 20). A1 is a nearly square drawing (about 1.2 : 1)
+ * in a card slot that is short and wide, so it is drawn smaller than the arrow maps: at 1366 x 768 the picture is about 0.65 px
+ * to a map unit, and a 20-unit label would be 13 px tall. At 24 it is 15.6 px there and 21.8 px at 1920 x 1080.
+ */
+export const A1_LABEL_PX = 24;
+
+/**
+ * A1 for the given confirmed names (mapSpec passes A1_CONFIRMED_LABELS; the tests pass their own). One link per non-isolate group,
+ * from a grey dot where the group lives to a blue dot where its DNA puts it, and no separate points, so no dot is drawn twice.
+ * Isolates (Basque, Saami, Sardinian ...) are left off: their DNA has drifted from their neighbours' (the card says so).
+ *
+ * The window: the frame's full width and the latitudes of the dots plus BAND_PAD (bandView). The Europe frame runs to 72 N and no
+ * group lives north of 60.4 N, so showing all of it would spend more than a quarter of the card's map height on empty Arctic sea
+ * and draw the dots and labels that much smaller (this is a height-limited picture). The window is cut from the dots alone, never
+ * from the labels, which are placed inside it, so a card has the same shape and size with the map labelled or not. It is widened
+ * (never narrowed) just enough to keep a dot whole: the fit puts the North Spanish dot on the frame's western edge.
+ */
+export function specA1(data: WorkshopData, confirmed: readonly string[] = A1_CONFIRMED_LABELS): MapSpec {
+  const c = projectionOf('europe');
+  const pops = (data.europe_pops ?? []).filter((p) => !p.isolate);
+  // map_x = (lon - lon0) cos(lat0) and map_y = lat (spec §6), so the DNA place in degrees is exact.
+  const genetic = (p: { map_x: number; map_y: number }): LatLon => ({ lat: p.map_y, lon: c.lon0 + p.map_x / c.cosLat0 });
+  const links: MapLink[] = pops.map((p) => ({ from: { lat: p.lat, lon: p.lon }, to: { ux: p.map_x, uy: p.map_y } }));
+  const dots: MapSpec = { id: 'A1', frame: 'europe', links };
+  const view = a1View(dots);
+  // Labels sit at the DNA dot (the dot placed by DNA, as in Novembre et al. 2008), clear of every true and DNA dot.
+  const named = pops.filter((p) => p.map_label && confirmed.includes(p.label));
+  const obstacles = pops.flatMap((p) => [{ at: { lat: p.lat, lon: p.lon }, r: A1_DOT_R }, { at: genetic(p), r: A1_DOT_R }]);
+  const texts = placeLabels('europe', named.map((p) => ({ at: genetic(p), text: p.label, r: A1_DOT_R })), obstacles, { within: view, fontPx: A1_LABEL_PX });
+  return { ...dots, view, texts, labelPx: A1_LABEL_PX };
+}
+
+/** bandView of the dots, widened on either side only as far as a dot needs. */
+function a1View(dots: MapSpec): MapView {
+  const band = bandView(dots.frame, dots);
+  const box = drawingBox(dots);
+  if (box === null) return band;
+  const r1 = (v: number): number => Math.round(v * 10) / 10;
+  const left = Math.min(band.x, Math.floor(box.left * 10) / 10);
+  const right = Math.max(band.x + band.width, Math.ceil(box.right * 10) / 10);
+  return { ...band, x: left, width: r1(right - left) };
+}
+
 /** The map for a card (CONTRACT §4.13). Throws for a map whose spec is not built yet (see MAP_SPECS_BUILT). */
 export function mapSpec(id: MapId, data: WorkshopData): MapSpec {
-  void data; // D1, E1 and G1 are fixed drawings; A1 and the distribution maps (Tasks 23, 24) read the data
   switch (id) {
+    case 'A1':
+      return specA1(data);
     case 'D1':
       return specD1();
     case 'E1':
@@ -266,9 +339,10 @@ export function mapSpec(id: MapId, data: WorkshopData): MapSpec {
   }
 }
 
-/** True when the map's spec is built and the data it needs is present (A1 needs europe_pops: Task 23). */
+/** True when the map's spec is built and the data it needs is present (A1 needs europe_pops and europe_fit: its source line is
+ *  never drawn without the fit). */
 export function mapDataReady(id: MapId, data: WorkshopData): boolean {
   if (!MAP_SPECS_BUILT.has(id)) return false;
-  void data;
+  if (id === 'A1') return (data.europe_pops?.length ?? 0) > 0 && data.europe_fit !== undefined;
   return true;
 }

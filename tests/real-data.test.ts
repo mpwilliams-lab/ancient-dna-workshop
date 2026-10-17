@@ -7,8 +7,11 @@ import { describe, expect, it } from 'vitest';
 import { CARDS, cardVars, distributionRows, formatCopies, SAMPLE_CARD_VARS } from '../src/cards';
 import { revealNote, traitCaption } from '../src/content';
 import { validateData } from '../src/data';
+import { FEATURES } from '../src/features';
+import { A1_CONFIRMED_LABELS, A1_DOT_R, frameBox, labelBox, mapDataReady, mapSpec, specA1 } from '../src/maps';
 import { zoomFactor } from '../src/plotState';
 import { steppePct } from '../src/plots/admixture';
+import { MAP_FRAMES, makeProjection, project, projectUnits } from '../src/plots/map';
 import { GENE_IDS, TRAIT_MAP_ORDER, type GeneId } from '../src/types';
 import { ruleViolations } from './contentRules';
 
@@ -211,5 +214,90 @@ describe.runIf(process.env.REAL_DATA === '1')('cards on the real data (Task 10)'
     const lct = data().traits.find((t) => t.gene === 'LCT')!;
     expect(lct.present_day).not.toBeNull();
     expect(lct.present_day!).toBeLessThan(0.75);
+  });
+});
+
+// ---------- v3 (Task 23): the A1 map reads europe_pops and europe_fit (spec §3.1, §8, open check 14) ----------
+describe.runIf(process.env.REAL_DATA === '1')('real data: A1 map (europe_pops, spec §8, open check 14)', () => {
+  const d = () => validateData(JSON.parse(readFileSync(REAL, 'utf8')));
+  /** The eight groups the data build labels, in europe_pops order (north to south): what A1_CONFIRMED_LABELS holds once the instructor confirms them. */
+  const EIGHT = ['Estonian', 'Lithuanian', 'Czech', 'Hungarian', 'Romanian', 'Serbian', 'South Italian', 'Sicilian'];
+
+  it('35 populations, 26 non-isolates, 8 map labels, and europe_fit agrees with them (26 groups, 716 people, r 0.8868 / 0.8298)', () => {
+    const data = d();
+    const pops = data.europe_pops ?? [];
+    expect(pops).toHaveLength(35);
+    const fitted = pops.filter((p) => !p.isolate);
+    expect(fitted).toHaveLength(26);
+    expect(pops.filter((p) => p.map_label)).toHaveLength(8);
+    expect(pops.filter((p) => p.isolate).map((p) => p.label).sort()).toEqual(
+      ['Icelandic', 'Karelian', 'Veps', 'Finnish', 'Saami', 'Mordovian', 'Basque', 'Sardinian', 'Maltese'].sort(),
+    );
+    expect(data.europe_fit).toMatchObject({ n_pops: 26, n_people: fitted.reduce((s, p) => s + p.n, 0) });
+    expect(data.europe_fit).toEqual({ n_pops: 26, n_people: 716, r_lat: 0.8868, r_lon: 0.8298 });
+    expect(data.europe_fit!.r_lat).toBeGreaterThanOrEqual(0.85);
+    expect(data.europe_fit!.r_lon).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it('the fixture\'s Europe rows are the real ones (a copy, so every unit test works with the real 26 / 8)', () => {
+    const fixture = JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/data.fixture.json', import.meta.url)), 'utf8'));
+    expect(fixture.europe_pops).toEqual(d().europe_pops);
+    expect(fixture.europe_fit).toEqual(d().europe_fit);
+  });
+
+  it('the labelled groups (open check 14) are exactly the eight names, in europe_pops order, and a confirmed list equals them', () => {
+    const named = (d().europe_pops ?? []).filter((p) => p.map_label).map((p) => p.label);
+    expect(named).toEqual(EIGHT);
+    if (A1_CONFIRMED_LABELS.length > 0) expect([...A1_CONFIRMED_LABELS]).toEqual(named);
+    for (const l of named) expect(ruleViolations(l), l).toEqual([]);
+    for (const p of d().europe_pops ?? []) expect(ruleViolations(p.label), p.label).toEqual([]);
+  });
+
+  it('when map.A1 ships, the real data can draw it (otherwise the card would fall back to its text form)', () => {
+    if (FEATURES['map.A1']) expect(mapDataReady('A1', d())).toBe(true);
+    expect(mapDataReady('A1', d())).toBe(true);
+  });
+
+  it('mapSpec(A1) has 26 links, one 1 px line each from the true place to the DNA place, and its labels as far as they are confirmed', () => {
+    const data = d();
+    const s = mapSpec('A1', data);
+    expect(s.links).toHaveLength(26);
+    expect((s.texts ?? []).map((t) => t.text)).toEqual(EIGHT.filter((n) => A1_CONFIRMED_LABELS.includes(n)));
+    const fitted = (data.europe_pops ?? []).filter((p) => !p.isolate);
+    expect(s.links).toEqual(fitted.map((p) => ({ from: { lat: p.lat, lon: p.lon }, to: { ux: p.map_x, uy: p.map_y } })));
+  });
+
+  it('the real data fits the window: all 52 dots whole, the eight labels (once confirmed) inside it, clear of each other and of every dot centre', () => {
+    const data = d();
+    const c = makeProjection(MAP_FRAMES.europe);
+    const s = specA1(data, EIGHT);
+    const v = s.view!;
+    const f = frameBox('europe');
+    expect(v.y).toBeGreaterThanOrEqual(f.top);
+    expect(v.y + v.height).toBeLessThanOrEqual(f.bottom);
+    const fitted = (data.europe_pops ?? []).filter((p) => !p.isolate);
+    const centres = fitted.flatMap((p) => [project(c, p.lat, p.lon), projectUnits(c, p.map_x, p.map_y)]);
+    for (const p of centres) {
+      expect(p.x - A1_DOT_R).toBeGreaterThanOrEqual(v.x);
+      expect(p.x + A1_DOT_R).toBeLessThanOrEqual(v.x + v.width);
+      expect(p.y - A1_DOT_R).toBeGreaterThanOrEqual(v.y);
+      expect(p.y + A1_DOT_R).toBeLessThanOrEqual(v.y + v.height);
+    }
+    const boxes = (s.texts ?? []).map((t) => ({ name: t.text, b: labelBox(c, t, s.labelPx) }));
+    expect(boxes).toHaveLength(8);
+    for (const { name, b } of boxes) {
+      expect(b.left, name).toBeGreaterThanOrEqual(v.x);
+      expect(b.right, name).toBeLessThanOrEqual(v.x + v.width);
+      expect(b.top, name).toBeGreaterThanOrEqual(v.y);
+      expect(b.bottom, name).toBeLessThanOrEqual(v.y + v.height);
+      expect(centres.some((p) => p.x > b.left && p.x < b.right && p.y > b.top && p.y < b.bottom), `${name} covers a dot`).toBe(false);
+    }
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!.b;
+        const b = boxes[j]!.b;
+        expect(Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top), `${boxes[i]!.name} / ${boxes[j]!.name}`).toBe(false);
+      }
+    }
   });
 });

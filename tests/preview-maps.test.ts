@@ -10,7 +10,7 @@ import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { CARDS } from '../src/cards';
 import { MAP_TEXT } from '../src/content';
-import { MAP_SPECS_BUILT } from '../src/maps';
+import { A1_CONFIRMED_LABELS, MAP_SPECS_BUILT } from '../src/maps';
 
 const ROOT = resolve(__dirname, '..');
 const MANIFEST = resolve(ROOT, 'assets/manifest.json');
@@ -44,7 +44,9 @@ describe('npm run preview-maps', () => {
       expect(text, id).toContain(CARDS[id as keyof typeof CARDS].title);
       // Each map is drawn by renderMap, whose text elements carry the approved labels.
       for (const label of MAP_TEXT[id]) expect(text, `${id} "${label}"`).toContain(`>${label}</text>`);
-      expect(html.match(new RegExp(`data-map="${id}"`, 'g')), `${id} drawn once per lab screen`).toHaveLength(2);
+      // Once per lab screen; A1 twice per screen while its names are unconfirmed (as it ships, and with the eight names: see below).
+      const drawn = id === 'A1' && A1_CONFIRMED_LABELS.length === 0 ? 4 : 2;
+      expect(html.match(new RegExp(`data-map="${id}"`, 'g')), `${id} drawn ${drawn} times`).toHaveLength(drawn);
     }
     expect(text).toContain(`npm run visual-check -- ${ids.join(' ')}`);
     expect(html).not.toMatch(/<script/i);
@@ -58,11 +60,33 @@ describe('npm run preview-maps', () => {
     expect(r.status, r.stderr).toBe(0);
     const html = readFileSync(join(r.dir, 'maps.html'), 'utf8');
     expect(html).toContain('<section id="G1">');
-    expect(html).not.toContain('<section id="D1">');
-    expect(html).not.toContain('<section id="E1">');
+    for (const other of ['A1', 'D1', 'E1']) expect(html).not.toContain(`<section id="${other}">`);
     expect(unescape(html)).toContain('npm run visual-check -- G1</code>');
     expect(html).toContain('At 1366 x 768');
     expect(html).toContain('At 1920 x 1080');
+  });
+
+  // Open check 14: until the instructor confirms the eight A1 names the map ships unlabelled, and the preview shows it both ways so he can
+  // decide. Once the names are in A1_CONFIRMED_LABELS the shipped map has them and the second drawing would only repeat it.
+  it('A1: what to look for, the map as it ships, and (until the names are confirmed) the same map with the eight groups named', () => {
+    const r = preview('A1');
+    expect(r.status, r.stderr).toBe(0);
+    const text = unescape(readFileSync(join(r.dir, 'maps.html'), 'utf8'));
+    const eight = ['Estonian', 'Lithuanian', 'Czech', 'Hungarian', 'Romanian', 'Serbian', 'South Italian', 'Sicilian'];
+    expect(text).toContain('<section id="A1">');
+    expect(text).toContain('26 pairs of dots');
+    expect(text).toContain(`npm run visual-check -- A1</code>`);
+    // Eight labels in each of the two lab-screen drawings that carry them, none in the unlabelled ones.
+    expect(text.match(/class="map-label"/g) ?? []).toHaveLength(16);
+    for (const name of eight) expect(text.match(new RegExp(`>${name}</text>`, 'g')), name).toHaveLength(2);
+    if (A1_CONFIRMED_LABELS.length === 0) {
+      expect(text).toContain('as it ships: no labels');
+      expect(text).toContain(`groups named (${eight.join(', ')})`);
+      expect(text).toContain('The app does not show these labels until you do');
+    } else {
+      expect(text).not.toContain('groups named');
+    }
+    expect(text).not.toMatch(/<script/i);
   });
 
   it('refuses a map that is not built, and an option it does not know, and writes nothing', () => {

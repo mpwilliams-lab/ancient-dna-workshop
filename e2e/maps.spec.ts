@@ -2,18 +2,21 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import { CARDS } from '../src/cards';
 import { MAP_TEXT } from '../src/content';
 import { FEATURES } from '../src/features';
+import { A1_CONFIRMED_LABELS } from '../src/maps';
 import type { CardId } from '../src/types';
-import { buildMapApp, type MapApp } from './mapBuild';
+import { a1LabelCandidates, buildMapApp, type MapApp } from './mapBuild';
 import { idle, intersects, prompt, screenViolations, watch, type Rect } from './helpers';
 
 /**
- * The map cards D1, E1 and G1 in their MAP form (Task 20). The shipped build draws their text form until the instructor has
- * checked the maps, so this spec builds its own copy of the app with the three map flags forced on and the three maps recorded as
- * checked (e2e/mapBuild.ts: an in-memory change while Vite reads two modules, into a temporary directory; nothing in the repo is
- * written and the shipped flags stay as committed). It then asks what spec §5.2 and §5.4 ask of every card, of these three:
- * no page scroll, title, first bullet and every footer button on screen, the prompt and hint line uncovered, and no `dense` at the
- * lab-standard screens at 100% (`normal`); plus what only a map can get wrong: a label cut off or overlapped, a picture too small
- * to read, rule violations in the map text.
+ * The map cards A1 (Task 23), D1, E1 and G1 (Task 20) in their MAP form. The shipped build draws their text form until the instructor
+ * has checked the maps, so this spec builds its own copy of the app with the four map flags forced on and the four maps recorded as
+ * checked, and A1's label list filled with the eight names the data build chose (e2e/mapBuild.ts: an in-memory change while Vite reads
+ * three modules, into a temporary directory; nothing in the repo is written and the shipped flags and the empty A1 list stay as
+ * committed). It then asks what spec §5.2 and §5.4 ask of every card, of these four: no page scroll, title, first bullet and every
+ * footer button on screen, the prompt and hint line uncovered, and no `dense` at the lab-standard screens at 100% (`normal`); plus what
+ * only a map can get wrong: a label cut off or overlapped, a picture too small to read, rule violations in the map text, and for A1 a
+ * dot cut off by its window or hidden under a word. A1's window does not depend on its labels (src/maps.ts specA1), so the card is the
+ * same size with the map labelled or not, and the labelled build proves both.
  *
  * The viewport matrix is the one e2e/layout.spec.ts uses (26 cases plus LAB_VIEWPORTS); keep the two in step.
  */
@@ -41,13 +44,21 @@ for (const spec of (process.env.LAB_VIEWPORTS ?? '').split(',').filter(Boolean))
   cases.push({ name: `lab ${w}x${h} @${s * 100}%`, width: Math.floor(w / s), height: Math.floor(h / s), dsf: s, fit: 'no-scroll' });
 }
 
-/** The map cards of Task 20 (Tasks 23, 24 and 27 draw their own checks for theirs). */
-const IDS = ['D1', 'E1', 'G1'] as const satisfies readonly CardId[];
+/** The map cards built so far, in card order (Tasks 24 and 27 draw their own checks for theirs). */
+const IDS = ['A1', 'D1', 'E1', 'G1'] as const satisfies readonly CardId[];
+type MapCardId = (typeof IDS)[number];
+
+/** The words each map must carry: the approved text, and for A1 the eight groups the data build chose (the build forces them in). */
+const LABELS = a1LabelCandidates();
+const expectedLabels = (id: MapCardId): string[] => (id === 'A1' ? [...LABELS] : [...MAP_TEXT[id]]);
 
 /** A label in the picture must be at least this many CSS px tall at the lab-standard screens at 100% (spec §5.2 body text is 19 px). */
 const MIN_LABEL_PX = 14;
 /** No card may leave its map smaller than this (CSS px of height) at a screen whose fit rule is 'normal' or 'no-scroll'. */
 const MIN_MAP_PX = 150;
+/** A1 is 26 pairs of dots: at the lab-standard screens at 100% its picture must be drawn at no less than this many CSS px to a map unit,
+ *  so a grey dot (4 units) is at least 4.8 px across and a DNA dot (5 units) at least 6 px (Task 23: legible at 1366 x 768). */
+const MIN_A1_SCALE = 0.6;
 
 async function withPage(browser: Browser, c: Case, body: (page: Page) => Promise<void>): Promise<void> {
   const ctx = await browser.newContext({ viewport: { width: c.width, height: c.height }, deviceScaleFactor: c.dsf });
@@ -71,9 +82,14 @@ interface MapGeometry {
   hint: Rect | null; prompt: Rect | null; hintHit: boolean; promptHit: boolean;
   map: null | {
     id: string | null; slot: Rect; svg: Rect; viewBox: Box; scale: number; sizeCss: [number, number];
-    labels: { text: string; box: Box }[]; arrows: Box[];
+    /** box: getBBox (the line box, which reaches above and below the letters); glyphs: the real width of the word and the height from
+     *  0.8 em above its baseline to 0.25 em below it, the extent src/maps.ts labelBox estimates. */
+    labels: MapLabel[]; arrows: Box[];
+    /** A1: the dots (grey = the true place, blue = where the DNA puts the group) in map units, and how many links and lines were drawn. */
+    dots: { kind: string; cx: number; cy: number; r: number; px: number }[]; links: number; lines: number;
   };
 }
+interface MapLabel { text: string; box: Box; glyphs: Box; fontPx: number }
 
 /** Everything the checks need, read in one evaluate so the numbers belong to one moment. */
 async function geometry(page: Page): Promise<MapGeometry> {
@@ -109,8 +125,23 @@ async function geometry(page: Page): Promise<MapGeometry> {
         viewBox: { left: vb.x, right: vb.x + vb.width, top: vb.y, bottom: vb.y + vb.height },
         scale: Math.min(r.width / vb.width, r.height / vb.height),
         sizeCss: [Math.round(r.width), Math.round(r.height)],
-        labels: [...svg.querySelectorAll<SVGTextElement>('text.map-label')].map((t) => ({ text: t.textContent ?? '', box: box(t.getBBox()) })),
+        labels: [...svg.querySelectorAll<SVGTextElement>('text.map-label')].map((t) => {
+          const b = t.getBBox();
+          const f = Number(t.getAttribute('font-size'));
+          const y = Number(t.getAttribute('y'));
+          return {
+            text: t.textContent ?? '', box: box(b), fontPx: f,
+            glyphs: { left: b.x, right: b.x + b.width, top: y - 0.8 * f, bottom: y + 0.25 * f },
+          };
+        }),
         arrows: [...svg.querySelectorAll<SVGGraphicsElement>('path.map-arrow')].map((p) => box(p.getBBox())),
+        dots: [...svg.querySelectorAll<SVGCircleElement>('circle.map-dot--true, circle.map-dot--genetic')].map((e) => ({
+          kind: e.classList.contains('map-dot--true') ? 'true' : 'genetic',
+          cx: Number(e.getAttribute('cx')), cy: Number(e.getAttribute('cy')), r: Number(e.getAttribute('r')),
+          px: e.getBoundingClientRect().width,
+        })),
+        links: svg.querySelectorAll('g.map-link').length,
+        lines: svg.querySelectorAll('g.map-link line').length,
       };
     }
     const hint = document.querySelector('#terminal .term-hint');
@@ -137,22 +168,23 @@ const overlaps = (a: Box, b: Box): boolean =>
 test.describe('map cards in their map form', () => {
   let app: MapApp;
   test.beforeAll(async () => {
-    app = await buildMapApp(IDS);
+    expect(LABELS, 'the data build chose eight groups to name on A1').toHaveLength(8);
+    app = await buildMapApp(IDS, { a1Labels: LABELS });
   });
   test.afterAll(() => {
     app?.cleanup();
   });
 
-  test('the scratch build differs from the shipped flags in the three map flags only', async ({ page }) => {
+  test('the scratch build differs from the shipped flags in the four map flags only', async ({ page }) => {
     await page.goto(`${app.url}?test&reset`);
     await expect(prompt(page)).toBeVisible();
     await idle(page);
     const features = await page.evaluate(() => ({ ...window.__adw!.features }));
-    expect(features).toEqual({ ...FEATURES, 'map.D1': true, 'map.E1': true, 'map.G1': true });
+    expect(features).toEqual({ ...FEATURES, 'map.A1': true, 'map.D1': true, 'map.E1': true, 'map.G1': true });
   });
 
   for (const c of cases) {
-    test(`D1, E1 and G1 show their map and fit: ${c.name}`, async ({ browser }, testInfo) => {
+    test(`A1, D1, E1 and G1 show their map and fit: ${c.name}`, async ({ browser }, testInfo) => {
       test.setTimeout(240_000);
       await withPage(browser, c, async (page) => {
         const w = watch(page);
@@ -208,11 +240,13 @@ test.describe('map cards in their map form', () => {
           // Spec §5.2: maps fill the image row at max-height min(52vh, 460px).
           expect(m!.svg.bottom - m!.svg.top, `${id}: map height against the spec cap`).toBeLessThanOrEqual(Math.min(0.52 * g.vh, 460) + 0.5);
           if (c.fit !== 'any') expect(m!.svg.bottom - m!.svg.top, `${id}: map height at ${c.name}`).toBeGreaterThanOrEqual(MIN_MAP_PX);
-          // A label is 20 map units tall; at the lab-standard screens at 100% it must be legible on a projector.
-          if (c.fit === 'normal') expect(20 * m!.scale, `${id}: label height in CSS px at ${c.name}`).toBeGreaterThanOrEqual(MIN_LABEL_PX);
+          // A label is its font size (20 map units; A1's 24) tall; at the lab-standard screens at 100% it must be legible on a projector.
+          const fontPx = Math.min(...m!.labels.map((t) => t.fontPx));
+          expect(fontPx, `${id}: the labels have a font size`).toBeGreaterThanOrEqual(20);
+          if (c.fit === 'normal') expect(fontPx * m!.scale, `${id}: label height in CSS px at ${c.name}`).toBeGreaterThanOrEqual(MIN_LABEL_PX);
 
           // The words on the map are the approved ones, each once, and every one is whole inside the picture and clear of the others.
-          expect(m!.labels.map((t) => t.text).sort(), `${id}: map labels`).toEqual([...MAP_TEXT[id]].sort());
+          expect(m!.labels.map((t) => t.text).sort(), `${id}: map labels`).toEqual(expectedLabels(id).sort());
           const vb = m!.viewBox;
           for (const t of m!.labels) {
             expect(t.box.left, `${id} "${t.text}" left in the picture`).toBeGreaterThanOrEqual(vb.left - 0.01);
@@ -220,19 +254,47 @@ test.describe('map cards in their map form', () => {
             expect(t.box.top, `${id} "${t.text}" top in the picture`).toBeGreaterThanOrEqual(vb.top - 0.01);
             expect(t.box.bottom, `${id} "${t.text}" bottom in the picture`).toBeLessThanOrEqual(vb.bottom + 0.01);
           }
+          // The arrow maps' words are far apart, so they are held to the whole line box. A1 puts one word at each of eight dots, and two of
+          // them sit one line apart (27 units between the Estonian and Lithuanian dots against a line box of 1.2 em, 29 at 24): the
+          // letters are clear of each other but the empty space above and below them is not, so A1 is judged on the glyphs.
+          const extent = (t: MapLabel): Box => (id === 'A1' ? t.glyphs : t.box);
           for (let i = 0; i < m!.labels.length; i++) {
             for (let j = i + 1; j < m!.labels.length; j++) {
-              expect(overlaps(m!.labels[i]!.box, m!.labels[j]!.box), `${id}: "${m!.labels[i]!.text}" overlaps "${m!.labels[j]!.text}"`).toBe(false);
+              expect(overlaps(extent(m!.labels[i]!), extent(m!.labels[j]!)), `${id}: "${m!.labels[i]!.text}" overlaps "${m!.labels[j]!.text}"`).toBe(false);
             }
           }
-          expect(m!.arrows.length, `${id}: arrows`).toBe(id === 'D1' ? 2 : id === 'E1' ? 1 : 5);
+          expect(m!.arrows.length, `${id}: arrows`).toBe(id === 'A1' ? 0 : id === 'D1' ? 2 : id === 'E1' ? 1 : 5);
           for (const a of m!.arrows) {
             expect(a.left >= vb.left && a.right <= vb.right && a.top >= vb.top && a.bottom <= vb.bottom, `${id}: an arrow leaves the picture`).toBe(true);
           }
 
+          // A1 (Task 23): 26 links, each a line, a grey dot and a DNA dot; no dot cut off by the window, none hidden under a word, and at
+          // the lab-standard screens at 100% the picture is big enough for the dots to be seen.
+          if (id === 'A1') {
+            expect([m!.links, m!.lines, m!.dots.length], 'A1: 26 links, 26 lines, 52 dots').toEqual([26, 26, 52]);
+            expect(m!.dots.filter((d) => d.kind === 'true'), 'A1: grey dots').toHaveLength(26);
+            expect(m!.dots.filter((d) => d.kind === 'genetic'), 'A1: DNA dots').toHaveLength(26);
+            for (const d of m!.dots) {
+              expect(d.cx - d.r >= vb.left - 0.01 && d.cx + d.r <= vb.right + 0.01 && d.cy - d.r >= vb.top - 0.01 && d.cy + d.r <= vb.bottom + 0.01,
+                `A1: the ${d.kind} dot at ${d.cx.toFixed(0)}, ${d.cy.toFixed(0)} is cut off by the window`).toBe(true);
+              for (const t of m!.labels) {
+                const hidden = d.cx > t.glyphs.left && d.cx < t.glyphs.right && d.cy > t.glyphs.top && d.cy < t.glyphs.bottom;
+                expect(hidden, `A1: "${t.text}" covers the ${d.kind} dot at ${d.cx.toFixed(0)}, ${d.cy.toFixed(0)}`).toBe(false);
+              }
+            }
+            if (c.fit === 'normal') {
+              expect(m!.scale, `A1: picture scale at ${c.name}`).toBeGreaterThanOrEqual(MIN_A1_SCALE);
+              expect(Math.min(...m!.dots.filter((d) => d.kind === 'true').map((d) => d.px)), 'A1: grey dot width in CSS px').toBeGreaterThanOrEqual(4.8);
+              expect(Math.min(...m!.dots.filter((d) => d.kind === 'genetic').map((d) => d.px)), 'A1: DNA dot width in CSS px').toBeGreaterThanOrEqual(6);
+            }
+            // The source line is the approved one, with the real counts from europe_fit.
+            const source = await page.locator('#card .card-source').textContent();
+            expect(source, 'A1: source line').toMatch(/^Drawn from this workshop's data \(\d+ groups, [\d,]+ people\)\. The DNA map was turned and scaled to fit the real map as closely as possible\. Inspired by Novembre et al\. 2008\. Map outline: Made with Natural Earth\.$/);
+          }
+
           // Spec §5.4 (guided.spec): no content-rule violation in anything on screen with this card open.
           expect(await screenViolations(page), `${id}: rule violations on screen`).toEqual([]);
-          testInfo.annotations.push({ type: 'map size', description: `${id} at ${c.name}: ${m!.sizeCss[0]} x ${m!.sizeCss[1]} px, label ${(20 * m!.scale).toFixed(1)} px, fit ${g.fit}` });
+          testInfo.annotations.push({ type: 'map size', description: `${id} at ${c.name}: ${m!.sizeCss[0]} x ${m!.sizeCss[1]} px, scale ${m!.scale.toFixed(3)}, label ${(fontPx * m!.scale).toFixed(1)} px, fit ${g.fit}` });
 
           await page.locator('#card .card-continue').click();
           await expect(page.locator('#card')).toBeHidden();
@@ -245,7 +307,7 @@ test.describe('map cards in their map form', () => {
     });
   }
 
-  test('the map cards are the three and only three cards that draw a map in this build', async ({ page }) => {
+  test('the map cards are the four and only four cards that draw a map in this build', async ({ page }) => {
     await page.goto(`${app.url}?test&reset`);
     await expect(prompt(page)).toBeVisible();
     await idle(page);
@@ -256,5 +318,52 @@ test.describe('map cards in their map form', () => {
       await page.locator('#card .card-continue').click();
     }
     expect(withMap).toEqual([...IDS]);
+  });
+
+  // A1 ships unlabelled until the instructor confirms the eight names (open check 14: A1_CONFIRMED_LABELS stays empty), but the proof above
+  // runs on the labelled map, the stricter one. This ties the two together: the same card, the same picture, whatever the words.
+  test('A1 as the repo has it (its own label list, empty until the names are confirmed) is the same picture, in the same place, as the labelled one', async ({ browser }) => {
+    test.setTimeout(240_000);
+    const repoHas = await buildMapApp(['A1']);
+    try {
+      for (const [width, height] of [[1366, 768], [1920, 1080]] as const) {
+        const read = async (url: string): Promise<{ svg: Rect | null; viewBox: string | null; labels: number; links: number; fit: string | null; sh: number }> => {
+          let out!: Awaited<ReturnType<typeof read>>;
+          await withPage(browser, { name: `${width}x${height}`, width, height, dsf: 1, fit: 'normal' }, async (page) => {
+            await page.goto(`${url}?test&reset`);
+            await expect(prompt(page)).toBeVisible();
+            await idle(page);
+            await page.evaluate(() => window.__adw!.openCard!('A1'));
+            await expect(page.locator('#card[data-card-id="A1"]')).toBeVisible();
+            await settle(page);
+            out = await page.evaluate(() => {
+              const svg = document.querySelector<SVGSVGElement>('#card .card-map svg.map-svg');
+              const r = svg?.getBoundingClientRect();
+              return {
+                svg: r ? { top: r.top, bottom: r.bottom, left: r.left, right: r.right } : null,
+                viewBox: svg?.getAttribute('viewBox') ?? null,
+                labels: svg?.querySelectorAll('text.map-label').length ?? 0,
+                links: svg?.querySelectorAll('g.map-link').length ?? 0,
+                fit: document.querySelector('#card')?.getAttribute('data-fit') ?? null,
+                sh: document.documentElement.scrollHeight,
+              };
+            });
+          });
+          return out;
+        };
+        const labelled = await read(app.url);
+        const asShipped = await read(repoHas.url);
+        expect(labelled.labels, 'the labelled build names the eight groups').toBe(8);
+        expect(asShipped.labels, `A1 as the repo has it names ${A1_CONFIRMED_LABELS.length} groups`).toBe(A1_CONFIRMED_LABELS.length);
+        expect([asShipped.links, labelled.links]).toEqual([26, 26]);
+        expect(asShipped.svg, `${width}x${height}: same picture box`).toEqual(labelled.svg);
+        expect(asShipped.viewBox, `${width}x${height}: same window`).toBe(labelled.viewBox);
+        expect(asShipped.fit, `${width}x${height}: same fit`).toBe(labelled.fit);
+        expect(asShipped.fit, `${width}x${height}: normal`).toBe('normal');
+        expect(asShipped.sh, `${width}x${height}: no page scroll`).toBeLessThanOrEqual(height);
+      }
+    } finally {
+      repoHas.cleanup();
+    }
   });
 });

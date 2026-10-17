@@ -10,7 +10,7 @@
 //
 // Written in the subset of TypeScript that Node 24 runs as it is (type stripping), so scripts/preview-maps.ts and plain .mjs scripts
 // can import it too: relative imports carry their .ts extension and nothing here needs more than types erased.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -20,20 +20,43 @@ import type { MapId } from '../src/types.ts';
 /** The repo root: read when a build starts, not when the module loads, so the plugin can be imported anywhere (the unit tests do). */
 const repoRoot = (): string => fileURLToPath(new URL('..', import.meta.url));
 
-/** The three map cards of Task 20: the card, its flag (`map.<id>`) and its manifest key are all this id. Tasks 23, 24 and 27 add theirs. */
-export const MAP_CARD_IDS: readonly MapId[] = ['D1', 'E1', 'G1'];
+/** The map cards built so far (Tasks 20 and 23): the card, its flag (`map.<id>`) and its manifest key are all this id. Tasks 24, 27
+ *  and 29 add theirs. */
+export const MAP_CARD_IDS: readonly MapId[] = ['A1', 'D1', 'E1', 'G1'];
 
-/** Turns the listed map flags on and records the listed maps as checked while the build reads their modules. A flag that is already
- *  on (the instructor has checked the map and the release task has shipped it) and a check that is already recorded are simply
- *  set again. Fails the build if a module no longer has the shape this rewrites, so a reformatted features.ts or manifest can never
- *  leave the proof testing the text form. */
-export function forceMaps(ids: readonly MapId[] = MAP_CARD_IDS): Plugin {
+export interface ForceOptions {
+  /** A1 only: the names the scratch build puts in A1_CONFIRMED_LABELS (src/maps.ts), so the map is drawn labelled. In the repo that list
+   *  stays empty until the instructor confirms open check 14, and the map ships unlabelled; this is how the layout proof and the preview
+   *  see the labelled map before he has. Left out, the list is whatever the repo has. */
+  a1Labels?: readonly string[];
+}
+
+/** The groups the data build chose for A1 labels (open check 14): the non-isolate `map_label` names of the real data, in europe_pops
+ *  order. `root` is the repo root (default: found from this file; the unit tests, whose import.meta.url is not a file, pass theirs). */
+export function a1LabelCandidates(root: string = repoRoot()): string[] {
+  const data = JSON.parse(readFileSync(join(root, 'src/data/workshop_data.json'), 'utf8')) as {
+    europe_pops?: { label: string; isolate: boolean; map_label: boolean }[];
+  };
+  return (data.europe_pops ?? []).filter((p) => !p.isolate && p.map_label).map((p) => p.label);
+}
+
+/** Turns the listed map flags on and records the listed maps as checked while the build reads their modules (and, with
+ *  options.a1Labels, fills A1_CONFIRMED_LABELS). A flag that is already on (the instructor has checked the map and the release task
+ *  has shipped it), a check that is already recorded and a list that is already filled are simply set again. Fails the build if a
+ *  module no longer has the shape this rewrites, so a reformatted features.ts, manifest or maps.ts can never leave the proof
+ *  testing the text form or the unlabelled map. */
+export function forceMaps(ids: readonly MapId[] = MAP_CARD_IDS, options: ForceOptions = {}): Plugin {
   return {
     name: 'adw-force-maps',
     enforce: 'pre',
     apply: 'build',
     transform(code, id) {
       const file = id.split('?')[0]!.replace(/\\/g, '/');
+      if (options.a1Labels !== undefined && file.endsWith('/src/maps.ts')) {
+        const list = /(export const A1_CONFIRMED_LABELS: readonly string\[\] = )\[[^\]]*\];/;
+        if (!list.test(code)) throw new Error('adw-force-maps: src/maps.ts has no A1_CONFIRMED_LABELS list to fill');
+        return { code: code.replace(list, (_all, head: string) => `${head}${JSON.stringify(options.a1Labels)};`), map: null };
+      }
       if (file.endsWith('/src/features.ts')) {
         let out = code;
         for (const map of ids) {
@@ -64,14 +87,14 @@ export interface MapApp {
 }
 
 /** Builds the app (real data, shipped everything else) into a new temporary directory. Takes a few seconds at most. */
-export async function buildMapApp(ids: readonly MapId[] = MAP_CARD_IDS): Promise<MapApp> {
+export async function buildMapApp(ids: readonly MapId[] = MAP_CARD_IDS, options: ForceOptions = {}): Promise<MapApp> {
   const dir = mkdtempSync(join(tmpdir(), 'adw-maps-'));
   try {
     await build({
       root: repoRoot(),
       configFile: join(repoRoot(), 'vite.config.ts'),
       logLevel: 'warn',
-      plugins: [forceMaps(ids)],
+      plugins: [forceMaps(ids, options)],
       build: { outDir: dir, emptyOutDir: true },
     });
   } catch (err) {

@@ -4,8 +4,9 @@
 // projector size (spec §6, §7.2) before running `npm run visual-check -- <ids>`. The app itself never draws a map before that check,
 // so the page shows each map two ways: the whole card as it will look, a picture taken of a scratch copy of the app with the map
 // flags forced on (e2e/mapBuild.ts, in memory, into a temporary directory) at the two lab screens, 1366 x 768 and 1920 x 1080; and
-// the map alone as a vector drawing at the size the card gives it there, which can be zoomed. Nothing written here is shipped or
-// committed, and no flag or visual_check entry is touched.
+// the map alone as a vector drawing at the size the card gives it there, which can be zoomed. Until the instructor confirms the eight
+// A1 label names (open check 14: A1_CONFIRMED_LABELS in src/maps.ts is empty, so A1 ships unlabelled) the page also draws A1 with those
+// names, marked as not shipped. Nothing written here is shipped or committed, and no flag or visual_check entry is touched.
 //   --out <dir>   write to <dir> instead of assets/preview (the tests use a temporary one)
 //   --no-cards    skip the card pictures (no browser is started); the maps are then drawn at estimated card sizes
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -24,8 +25,14 @@ const SCREENS = [{ width: 1366, height: 768 }, { width: 1920, height: 1080 }] as
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-/** What the instructor should see on each map (spec §3.2, §3.3, §6). Plain words for the person checking; never shown to students. */
+/** What the instructor should see on each map (spec §3.1, §3.2, §3.3, §6). Plain words for the person checking; never shown to students. */
 const SHOULD_SHOW: Readonly<Record<string, readonly string[]>> = {
+  A1: [
+    '26 pairs of dots, each pair joined by a thin grey line: a grey dot where a group of people lives today and a blue dot where their DNA places them (the card says so in its first lines). The blue dots are the map of the DNA, turned and scaled to fit the real map as closely as possible.',
+    'Grey dots in the right countries, from Norway in the north to Crete in the south and from Spain in the west to Russia in the east. Blue dots near them, in the same order: north groups at the top, south groups at the bottom (north and south agree well), east and west only roughly. Lines short and readable; the longest (Norway, North Spain, Iberia, Russia) are the groups furthest from where the DNA puts them.',
+    'Nine groups are left off on purpose (isolated groups such as Basque, Saami and Sardinian people; the card says why). Nothing on the map names a group by an ID or a code.',
+    'Labels: until you confirm open check 14 the map ships WITHOUT labels. Below the card pictures you will see the map alone twice: as it ships (no labels) and with the eight groups named, so you can decide. Are the eight names right, and readable at projector size?',
+  ],
   D1: [
     'One thick red arrow from "Steppe herders\' homeland" (north of the Black Sea) west through central Europe ("Corded Ware people"), to the mouth of the Rhine ("Bell Beaker people") and across to Britain (arrowhead near Wiltshire, labelled "Britain").',
     'One thin dashed arrow from Portugal to the Rhine mouth, labelled "Pot style probably spread from here, mostly as an idea". It must read as an idea, not as a movement of people.',
@@ -110,7 +117,7 @@ async function main(argv: string[]): Promise<void> {
   // svgEl() and renderMap() create elements through the global document.
   Object.assign(globalThis, { document: dom.window.document, window: dom.window });
   const { DATA } = await import('../src/data');
-  const { mapSpec, MAP_SPECS_BUILT } = await import('../src/maps');
+  const { A1_CONFIRMED_LABELS, mapSpec, MAP_SPECS_BUILT, specA1 } = await import('../src/maps');
   const { renderMap } = await import('../src/plots/map');
   const { CARDS } = await import('../src/cards');
   const { SVG_NS } = await import('../src/plots/svg');
@@ -128,12 +135,22 @@ async function main(argv: string[]): Promise<void> {
   mkdirSync(options.out, { recursive: true });
   const shots = options.cards ? await takeCardPictures(ids, options.out) : null;
 
-  const sections: string[] = [];
-  for (const id of ids) {
-    const spec = mapSpec(id as never, DATA);
+  const drawn = (spec: ReturnType<typeof mapSpec>): SVGSVGElement => {
     const svg = dom.window.document.createElementNS(SVG_NS, 'svg') as unknown as SVGSVGElement;
     svg.setAttribute('class', 'map-svg');
     renderMap(svg, spec);
+    return svg;
+  };
+  // Open check 14: until the instructor confirms the eight A1 names (A1_CONFIRMED_LABELS in src/maps.ts) the map ships unlabelled and
+  // the preview also draws it with the data build's eight names, so he can decide. Once the list is filled, the shipped map has them.
+  const candidates = A1_CONFIRMED_LABELS.length > 0 ? [] :
+    (DATA.europe_pops ?? []).filter((p) => !p.isolate && p.map_label).map((p) => p.label);
+
+  const sections: string[] = [];
+  for (const id of ids) {
+    const spec = mapSpec(id as never, DATA);
+    const svg = drawn(spec);
+    const named = id === 'A1' && candidates.length > 0 ? drawn(specA1(DATA, candidates)) : null;
     const title = id in CARDS ? CARDS[id as keyof typeof CARDS].title : id;
     const aspect = spec.view !== undefined ? spec.view.width / spec.view.height : 1000 / 700;
     const expect = (SHOULD_SHOW[id] ?? []).map((line) => `<li>${escapeHtml(line)}</li>`).join('');
@@ -147,8 +164,11 @@ async function main(argv: string[]): Promise<void> {
         `<figure><img class="card" src="${escapeHtml(shot.file)}" alt="The ${escapeHtml(id)} card at ${label}">` +
         `<figcaption>The whole card as the students see it at ${label} (picture size: its real size).</figcaption></figure>`;
       const alone = `<figure><div class="map" style="width:${width}px;height:${height}px">${svg.outerHTML}</div>` +
-        `<figcaption>The map alone at ${label}: ${width} x ${height} px${shot === undefined ? ' (estimated)' : ''}. Zoom in to look closer.</figcaption></figure>`;
-      return `<h3>At ${label}</h3>${card}${alone}`;
+        `<figcaption>The map alone at ${label}: ${width} x ${height} px${shot === undefined ? ' (estimated)' : ''}${named === null ? '' : ', as it ships: no labels'}. Zoom in to look closer.</figcaption></figure>`;
+      const withNames = named === null ? '' :
+        `<figure><div class="map" style="width:${width}px;height:${height}px">${named.outerHTML}</div>` +
+        `<figcaption>The same map with its ${candidates.length} groups named (${escapeHtml(candidates.join(', '))}): how it will look if you confirm the names (open check 14). The app does not show these labels until you do.</figcaption></figure>`;
+      return `<h3>At ${label}</h3>${card}${alone}${withNames}`;
     });
     sections.push(`<section id="${escapeHtml(id)}"><h2>${escapeHtml(id)}: ${escapeHtml(title)}</h2><ul class="expect">${expect}</ul>${figures.join('')}</section>`);
   }

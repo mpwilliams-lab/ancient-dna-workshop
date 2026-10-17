@@ -237,3 +237,31 @@ describe('finaleAnimation (Task 22, spec §10.3)', () => {
     expect(shape(on)).toEqual(shape(off));
   });
 });
+
+// Task 23. Both flag states are proved with in-memory manifests (checkedManifest), never the committed assets/manifest.json, whose
+// visual_check only the instructor fills: this passes before and after his check of the map.
+describe('map.A1 (Task 23, spec §10.3)', () => {
+  it('false: A1 is the P1 text form (title, lead, three bullets) with no map, no source line and no credits button, even with the data and a checked map', () => {
+    const off = flagSet('map.A1', false);
+    const el = renderCardBody(document, CARDS.A1, cardCtx(FIXTURE, off, checkedManifest()));
+    expect(el.querySelector('.card-title')!.textContent).toBe('Genes mirror geography');
+    expect(el.querySelector('.card-lead')).not.toBeNull();
+    expect(el.querySelectorAll('.card-bullets li')).toHaveLength(3);
+    expect(el.querySelector('.card-map')).toBeNull();
+    expect(el.querySelector('svg.map-svg')).toBeNull();
+    expect(el.querySelector('.card-source')).toBeNull();
+    expect(openOnCard('A1', FIXTURE, off, checkedManifest()).querySelector('.card-credits')).toBeNull();
+  });
+  it('true with its map checked: A1 draws the map, its full source line with the real groups and people, and the Image credits button', () => {
+    const on = flagSet('map.A1', true);
+    const el = renderCardBody(document, CARDS.A1, cardCtx(FIXTURE, on, checkedManifest()));
+    expect(el.querySelector('.card-map[data-map="A1"] svg.map-svg')).not.toBeNull();
+    expect(el.querySelector('.card-source')?.textContent ?? '').toContain('(26 groups, 716 people)');
+    expect(el.querySelector('.card-source')?.textContent ?? '').toContain('Map outline: Made with Natural Earth.');
+    expect(openOnCard('A1', FIXTURE, on, checkedManifest()).querySelector('.card-credits')).not.toBeNull();
+  });
+  it('has its own flag: with only map.D1 on, A1 stays in its text form', () => {
+    const only = flagSet('map.D1', true, ALL_OFF);
+    expect(renderCardBody(document, CARDS.A1, cardCtx(FIXTURE, only, checkedManifest())).querySelector('.card-map')).toBeNull();
+  });
+});

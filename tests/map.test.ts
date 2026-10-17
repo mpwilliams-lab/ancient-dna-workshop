@@ -143,6 +143,15 @@ describe('renderMap (spec §6 drawing)', () => {
     expect(Number(labels[0]!.getAttribute('x'))).toBeCloseTo(start.x + 6, 0);
     expect(Number(labels[0]!.getAttribute('y'))).toBeCloseTo(start.y - 8, 0);
   });
+  it('a map can ask for larger labels (MapSpec.labelPx, Task 23): every label (arrow, point, text) takes the size and a halo of a fifth of it; the default stays 20 and 4', () => {
+    const plain = svg();
+    renderMap(plain, spec);
+    const sizes = (s: SVGSVGElement): string[][] => [...s.querySelectorAll('text.map-label')].map((t) => [t.getAttribute('font-size')!, t.getAttribute('stroke-width')!]);
+    expect(sizes(plain)).toEqual([['20', '4'], ['20', '4'], ['20', '4']]);
+    const big = svg();
+    renderMap(big, { ...spec, labelPx: 30 });
+    expect(sizes(big)).toEqual([['30', '6'], ['30', '6'], ['30', '6']]);
+  });
   it('value dots are area-true; a value that rounds to 0 is a hollow 3 px ring; markers and links draw', () => {
     const s = svg();
     renderMap(s, spec);
