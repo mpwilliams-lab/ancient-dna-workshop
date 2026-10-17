@@ -26,6 +26,17 @@ function bundledIds() {
   return new Set([...names(join(ROOT, 'src/assets/img'), '.jpg'), ...names(join(ROOT, 'src/assets/svg'), '.svg')]);
 }
 
+/**
+ * The "Changes:" line of one credit. "cropped" appears only where a crop box was really applied to the file (`crop`), never because
+ * the manifest merely ALLOWS cropping (`ops`): the app shows every photo whole, so a photo is only resized unless it has a box.
+ * CC BY / BY-SA entries carry their line in `changes` (src/assetManifest.ts checks it against the box); CC0 and public-domain
+ * entries have none, so it is derived here the same way.
+ */
+function changesLine(e) {
+  if (e.kind === 'own-svg') return 'none';
+  return e.changes ?? (e.crop ? 'cropped and resized' : 'resized');
+}
+
 function render(manifest, bundled) {
   const lines = [
     '# Image and data credits',
@@ -34,6 +45,7 @@ function render(manifest, bundled) {
     '',
     "The licence of this repository's code does not cover the images below: each image keeps its own licence.",
     'An image is bundled into the app only after the instructor has checked it.',
+    'Photos are shown whole in the app. A credit that says "cropped and resized" names a photo that was cropped before it was resized; every other photo was only resized.',
     '',
     '## Images',
     '',
@@ -49,7 +61,7 @@ function render(manifest, bundled) {
     lines.push(`- ${attribution(e)}`);
     if (e.file_page) lines.push(`  - File page: ${e.file_page}`);
     lines.push(`  - Licence: ${e.licence === 'own' ? 'drawn for this workshop' : e.licence}${e.licence_url ? ` (${e.licence_url})` : ''}`);
-    lines.push(`  - Changes: ${e.kind === 'own-svg' ? 'none' : e.changes ?? (e.ops.includes('crop') ? 'resized; may be shown cropped' : 'resized')}`);
+    lines.push(`  - Changes: ${changesLine(e)}`);
     lines.push('');
   }
   lines.push('## Data and maps', '', CREDITS_FOOTER, '');

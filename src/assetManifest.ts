@@ -89,9 +89,14 @@ function check(v: unknown, path: string): VisualCheck | null {
   }
   return { by: 'instructor', at: v.at };
 }
-function expectedChanges(licence: LicenceId, ops: readonly AssetOp[]): ImageEntry['changes'] {
+/**
+ * The change line a CC BY / BY-SA credit must carry. A credit says "cropped" only when a crop box is really applied to the file
+ * (`crop` is not null, see scripts/fetch-assets): a picture whose `ops` merely ALLOW cropping is shown whole by the cards and is only
+ * resized. (CC BY-SA entries can never have a box: ops resize only.) CC0 and public-domain credits carry no change line.
+ */
+function expectedChanges(licence: LicenceId, ops: readonly AssetOp[], crop: ImageEntry['crop']): ImageEntry['changes'] {
   if (!isCcBy(licence)) return null;
-  if (ops.includes('crop')) return 'cropped and resized';
+  if (crop !== null) return 'cropped and resized';
   if (ops.includes('convert')) return 'resized, converted to JPEG';
   return 'resized';
 }
@@ -137,8 +142,10 @@ function toEntry(v: unknown, i: number, seen: Set<string>): ImageEntry {
     crop = { x: (c as Obj).x as number, y: (c as Obj).y as number, width: (c as Obj).width as number, height: (c as Obj).height as number };
   }
   const orientation = oneOf(v.orientation, ['landscape', 'portrait'] as const, `${p}.orientation`);
-  const changes = expectedChanges(licence, ops);
-  if (v.changes !== changes) throw new ManifestError(`${p}.changes`, `expected ${JSON.stringify(changes)}`);
+  const changes = expectedChanges(licence, ops, crop);
+  if (v.changes !== changes) {
+    throw new ManifestError(`${p}.changes`, `expected ${JSON.stringify(changes)}${isCcBy(licence) ? ' (a credit says "cropped" only when a crop box is applied)' : ''}`);
+  }
   const raw_sha256 = v.raw_sha256 === null ? null : typeof v.raw_sha256 === 'string' && /^[0-9a-f]{64}$/.test(v.raw_sha256) ? v.raw_sha256 : null;
   if (v.raw_sha256 !== raw_sha256) throw new ManifestError(`${p}.raw_sha256`, 'expected null or 64 lower-case hex digits');
   let fallback: ImageEntry['fallback'] = null;

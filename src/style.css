@@ -603,6 +603,14 @@ body {
   background: #f2f2f2;
 }
 
+/* F1 carries the most text of the photo cards (two columns, one with three long bullets), so with three whole pictures it only fits
+   at normal size, with no dense level, at 1366 x 768 if they are shorter than the general cap. A per-card cap, inside the spec's
+   image bound and never above it (min(26vh, 230px)): measured at that screen (Chromium and Edge on macOS), 15vh fits with about
+   3 px to spare and 16vh overflows by 5. If the lab font tips F1 to dense, F1 ships in its text form; the rule is not loosened. */
+#card[data-card-id="F1"] .card-tile img {
+  max-height: min(15vh, 230px);
+}
+
 #card .tile-image-caption {
   display: block;
   font-size: 0.8em;

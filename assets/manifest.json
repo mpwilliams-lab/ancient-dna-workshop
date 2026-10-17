@@ -209,7 +209,7 @@
       ],
       "crop": null,
       "orientation": "landscape",
-      "changes": "cropped and resized",
+      "changes": "resized",
       "raw_sha256": null,
       "fallback": {
         "commons_file": "Bell Beaker culture artefacts from Mere Down, Wiltshire, England.png",
@@ -236,7 +236,7 @@
       ],
       "crop": null,
       "orientation": "landscape",
-      "changes": "cropped and resized",
+      "changes": "resized",
       "raw_sha256": "512f1de689dee106bd156cdf16cec4a7240223850d4ccae72c42e22972b502fa",
       "fallback": {
         "commons_file": "Iron Age Village at Butser Ancient Farm.jpg",

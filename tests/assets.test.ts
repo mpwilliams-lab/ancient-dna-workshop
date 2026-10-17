@@ -123,9 +123,10 @@ describe('assets/manifest.json (spec §7.1)', () => {
   });
   it('rejects a cropped CC BY-SA image, a named checker, a stray crop box, a trailing slash and a missing map', () => {
     const bad: [string, (m: any) => void][] = [
-      ['CC BY-SA, with a matching "cropped" change line, so only the share-alike rule can object', (m) => {
+      ['CC BY-SA, with a crop box and the matching "cropped" change line, so only the share-alike rule can object', (m) => {
         const e = m.images.find((x: any) => x.id === 'castlerigg');
         e.ops = ['resize', 'crop'];
+        e.crop = { x: 0, y: 0, width: 100, height: 100 };
         e.changes = 'cropped and resized';
       }],
       ['CC BY-SA converted', (m) => {
@@ -137,7 +138,12 @@ describe('assets/manifest.json (spec §7.1)', () => {
       ['crop', (m) => { m.images.find((e: any) => e.id === 'battersea-shield').crop = { x: 0, y: 0, width: 10, height: 10 }; }],
       ['licence_url', (m) => { m.images.find((e: any) => e.id === 'shrewton-beaker').licence_url = 'https://creativecommons.org/licenses/by/4.0/'; }],
       ['maps', (m) => { delete m.maps.L3; }],
-      ['changes', (m) => { m.images.find((e: any) => e.id === 'shrewton-beaker').changes = 'resized'; }],
+      ['changes: "cropped" without a crop box (cropping is merely allowed)', (m) => { m.images.find((e: any) => e.id === 'shrewton-beaker').changes = 'cropped and resized'; }],
+      ['changes: a crop box without the "cropped" line', (m) => {
+        const e = m.images.find((x: any) => x.id === 'roundhouse');
+        e.crop = { x: 0, y: 0, width: 100, height: 100 };
+      }],
+      ['changes: a CC BY credit with no change line', (m) => { m.images.find((e: any) => e.id === 'sutton-hoo-helmet').changes = null; }],
       ['thumb_url host', (m) => { m.images[0].thumb_url = 'https://example.org/a.jpg'; }],
       ['thumb_url lookalike', (m) => { m.images[0].thumb_url = `${UPLOAD_PREFIX.slice(0, -1)}.example.org/a.jpg`; }],
       ['thumb_url on an own drawing', (m) => { m.images.find((e: any) => e.id === 'irises').thumb_url = `${UPLOAD_PREFIX}a.jpg`; }],
@@ -201,8 +207,14 @@ describe('licence and media-host rules are written once (D-L11)', () => {
 });
 
 describe('attributionString (spec §7.2)', () => {
-  it('matches the three spec examples exactly', () => {
-    expect(attributionString(entry('shrewton-beaker'))).toBe(
+  it('matches the three spec examples exactly (the cropped one for a photo that really has a crop box)', () => {
+    // Spec §7.2's first example says "cropped and resized". Since the Task 21 ruling a credit says "cropped" only when a crop box is
+    // applied, and the Shrewton photo has none (the cards show it whole), so the example is built from a copy that has a box.
+    const m = rawCopy();
+    const shrewton = m.images.find((e: any) => e.id === 'shrewton-beaker');
+    shrewton.crop = { x: 0, y: 0, width: 600, height: 400 };
+    shrewton.changes = 'cropped and resized';
+    expect(attributionString(parseManifest(m).images.find((e) => e.id === 'shrewton-beaker')!)).toBe(
       '"Shrewton Beaker Burial" by TobyEditor, CC BY 4.0 (creativecommons.org/licenses/by/4.0), via Wikimedia Commons; cropped and resized');
     expect(attributionString(entry('melanocyte'))).toBe(
       '"Melanocyte" by BruceBlaus (Blausen.com staff 2014, WikiJournal of Medicine), CC BY 3.0 (creativecommons.org/licenses/by/3.0), via Wikimedia Commons; resized, converted to JPEG');
@@ -215,14 +227,35 @@ describe('attributionString (spec §7.2)', () => {
     expect(attributionString(entry('thornborough-plan'))).toBe('Plan drawn for this workshop');
     expect(attributionString(entry('irises'))).toBe('Drawn for this workshop');
   });
-  it('every CC BY / BY-SA string names its licence URL and says "cropped" exactly when cropping is allowed; BY-SA is never cropped', () => {
+  it('every CC BY / BY-SA string names its licence URL and says "cropped" exactly when a crop box is applied; BY-SA is never cropped', () => {
     for (const e of ASSET_MANIFEST.images.filter((x) => x.licence.startsWith('CC BY'))) {
       const s = attributionString(e);
       expect(s, e.id).toContain('creativecommons.org/licenses/');
-      expect(s.includes('cropped'), e.id).toBe(e.ops.includes('crop'));
+      expect(s.includes('cropped'), e.id).toBe(e.crop !== null);
       expect(e.licence_url!.endsWith('/'), e.id).toBe(false);
-      if (e.licence.startsWith('CC BY-SA')) expect(e.ops, e.id).toEqual(['resize']);
+      if (e.licence.startsWith('CC BY-SA')) {
+        expect(e.ops, e.id).toEqual(['resize']);
+        expect(e.crop, e.id).toBeNull();
+      }
     }
+  });
+  it('the change line follows the crop box, not the allowed ops: a box needs "cropped and resized", no box needs "resized" (Task 21)', () => {
+    // The committed Shrewton and roundhouse photos allow cropping but have no box: shown whole, only resized.
+    for (const id of ['shrewton-beaker', 'roundhouse'] as const) expect(entry(id).crop, id).toBeNull();
+    expect(attributionString(entry('shrewton-beaker'))).toBe(
+      '"Shrewton Beaker Burial" by TobyEditor, CC BY 4.0 (creativecommons.org/licenses/by/4.0), via Wikimedia Commons; resized');
+    expect(attributionString(entry('roundhouse'))).toBe(
+      '"Interior of Little Woodbury Iron Age Roundhouse 2" by Tim Sheerman-Chase, CC BY 4.0 (creativecommons.org/licenses/by/4.0), via Wikimedia Commons; resized');
+    // The rule itself, on a copy: a box makes "cropped and resized" the only valid line, and without a box it is invalid.
+    const m = rawCopy();
+    const round = m.images.find((e: any) => e.id === 'roundhouse');
+    expect(() => parseManifest(m)).not.toThrow();
+    round.crop = { x: 0, y: 0, width: 600, height: 400 };
+    expect(() => parseManifest(m), 'a box with the "resized" line').toThrow(/changes/);
+    round.changes = 'cropped and resized';
+    expect(attributionString(parseManifest(m).images.find((e) => e.id === 'roundhouse')!)).toContain('; cropped and resized');
+    round.crop = null;
+    expect(() => parseManifest(m), 'the "cropped" line without a box').toThrow(/changes/);
   });
   // The old "object-fit: cover is allowed only where cropping is allowed" test is gone with cropAllowed(): cards show every picture
   // whole (Task 21 ruling), pinned in tests/cardView.test.ts and tests/shell-css.test.ts. `ops` still says what the pipeline may do.

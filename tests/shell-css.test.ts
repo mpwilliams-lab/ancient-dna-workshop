@@ -197,6 +197,17 @@ describe('card overlay (spec §5.2, CONTRACT §4.11)', () => {
     expect(rule('#card .card-tile img')['max-height']).toBe('min(26vh, 230px)');
     expect(rule('#card .card-map')['max-height']).toBe('min(52vh, 460px)');
   });
+  it('F1 caps its pictures below the general cap so its photo form fits at normal size at 1366 x 768 (Task 21): inside the spec bound, never above it', () => {
+    const cap = rule('#card[data-card-id="F1"] .card-tile img')['max-height'];
+    expect(cap).toBe('min(15vh, 230px)');
+    const m = /^min\((\d+(?:\.\d+)?)vh, (\d+)px\)$/.exec(cap!);
+    expect(m, 'a min(Nvh, Mpx) cap, comparable with the spec bound').not.toBeNull();
+    expect(Number(m![1]), 'never above the spec bound min(26vh, 230px): the vh part').toBeLessThanOrEqual(26);
+    expect(Number(m![2]), 'never above the spec bound min(26vh, 230px): the px part').toBeLessThanOrEqual(230);
+    // The cap belongs to F1 alone: no other card has a per-card picture cap.
+    const perCard = allRules(css).filter((r) => /data-card-id/.test(r.prelude) && /\.card-tile img/.test(r.prelude));
+    expect(perCard.map((r) => r.prelude)).toEqual(['#card[data-card-id="F1"] .card-tile img']);
+  });
   it('shows every card picture whole (Task 21 ruling): no card-image rule sets object-fit: cover or an aspect-ratio, and the letterbox has a background', () => {
     const pictureRules = allRules(css).filter((r) => /\.card-tile img|\.tile-img/.test(r.prelude));
     expect(pictureRules.length, 'the base, compact and contain rules').toBeGreaterThanOrEqual(3);

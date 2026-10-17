@@ -5,8 +5,9 @@
 // card is on screen. "In the build" means: an image whose file is bundled (src/assets/img, src/assets/svg), and a map that the
 // instructor has checked (it is drawn by the build; its manifest slot is filled).
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ASSET_MANIFEST, MAP_IDS, attributionString } from '../src/assetManifest';
 import { CARDS } from '../src/cards';
@@ -59,7 +60,7 @@ describe('creditsGroups (D-L5: every image and map in the build)', () => {
         'https://commons.wikimedia.org/wiki/File:Amesbury_Archer_-_Salisbury_and_South_Wiltshire_Museum.jpg',
         'Photo: Poliphilo (CC0), via Wikimedia Commons',
         'https://commons.wikimedia.org/wiki/File:Round_barrow,_Overton_Hill.JPG',
-        '"Shrewton Beaker Burial" by TobyEditor, CC BY 4.0 (creativecommons.org/licenses/by/4.0), via Wikimedia Commons; cropped and resized',
+        '"Shrewton Beaker Burial" by TobyEditor, CC BY 4.0 (creativecommons.org/licenses/by/4.0), via Wikimedia Commons; resized',
         'https://commons.wikimedia.org/wiki/File:Shrewton_Beaker_Burial.jpg',
       ],
     });
@@ -219,5 +220,46 @@ describe('CREDITS.md (spec §7.2)', () => {
   });
   it('says the code licence does not cover the images', () => {
     expect(readFileSync(resolve(__dirname, '../CREDITS.md'), 'utf8')).toContain('does not cover the images');
+  });
+  it('says the photos are shown whole and what "cropped and resized" means', () => {
+    const text = readFileSync(resolve(__dirname, '../CREDITS.md'), 'utf8');
+    expect(text).toContain('Photos are shown whole in the app.');
+    expect(text).toContain('"cropped and resized" names a photo that was cropped before it was resized; every other photo was only resized.');
+  });
+  it('the Changes line says "cropped and resized" only where a crop box is applied, "resized" for every other photo, "none" for a drawing (Task 21)', () => {
+    // The real script in a throw-away repository: it reads assets/manifest.json and the files bundled under src/assets/.
+    const root = mkdtempSync(join(tmpdir(), 'credits-'));
+    try {
+      for (const dir of ['scripts', 'assets', 'src/assets/img', 'src/assets/svg']) mkdirSync(join(root, dir), { recursive: true });
+      copyFileSync(MAKE_CREDITS, join(root, 'scripts/make-credits.mjs'));
+      const manifest = JSON.parse(readFileSync(resolve(__dirname, '../assets/manifest.json'), 'utf8'));
+      const round = manifest.images.find((e: { id: string }) => e.id === 'roundhouse');
+      round.crop = { x: 0, y: 0, width: 600, height: 400 };   // a CC BY photo that really is cropped
+      round.changes = 'cropped and resized';
+      writeFileSync(join(root, 'assets/manifest.json'), JSON.stringify(manifest));
+      for (const id of ['ring-of-brodgar', 'stonehenge', 'roundhouse', 'castlerigg', 'melanocyte']) writeFileSync(join(root, 'src/assets/img', `${id}.jpg`), 'x');
+      writeFileSync(join(root, 'src/assets/svg/thornborough-plan.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+      const r = spawnSync(process.execPath, [join(root, 'scripts/make-credits.mjs')], { encoding: 'utf8' });
+      expect(r.status, r.stderr).toBe(0);
+      expect(spawnSync(process.execPath, [join(root, 'scripts/make-credits.mjs'), '--check'], { encoding: 'utf8' }).status).toBe(0);
+      // credit line -> its "Changes:" line
+      const changes: Record<string, string> = {};
+      let credit = '';
+      for (const line of readFileSync(join(root, 'CREDITS.md'), 'utf8').split('\n')) {
+        if (line.startsWith('- ')) credit = line.slice(2);
+        else if (line.startsWith('  - Changes: ')) changes[credit] = line.slice('  - Changes: '.length);
+      }
+      const of = (needle: string): string | undefined => Object.entries(changes).find(([c]) => c.includes(needle))?.[1];
+      expect(of('Libasstref'), 'the Ring of Brodgar (CC0), pixel-cropped to 3:1').toBe('cropped and resized');
+      expect(of('Gary Todd'), 'Stonehenge (CC0): cropping allowed, no box').toBe('resized');
+      expect(of('Tim Sheerman-Chase'), 'the roundhouse with a box in this copy (CC BY)').toBe('cropped and resized');
+      expect(of('Mike Peel'), 'Castlerigg (CC BY-SA)').toBe('resized');
+      expect(of('BruceBlaus'), 'the melanocyte (CC BY, PNG converted)').toBe('resized, converted to JPEG');
+      expect(of('Plan drawn for this workshop'), 'an own drawing').toBe('none');
+      expect(Object.keys(changes)).toHaveLength(6);
+      expect(readFileSync(join(root, 'CREDITS.md'), 'utf8')).not.toContain('may be shown cropped');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
