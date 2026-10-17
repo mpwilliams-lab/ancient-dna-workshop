@@ -4,12 +4,14 @@ import { formatCommand, PARSE_TEXT } from '../src/parser';
 import { CARDS } from '../src/cards';
 import { FEATURES } from '../src/features';
 import {
-  BEAKER_CALLOUT, CARD_HINT, cardCounter, EAST_ENGLAND_LEGEND, EUROPE_HELD_BACK, HLA_REVEAL_LINE, HLA_TEXT_CARD, PERIOD_LABELS,
-  PREDICT_HINT, REVEAL_CALLOUT, REVEAL_HINT, ROMAN_LOG_LINE, TODAY_PLACED,
+  BEAKER_CALLOUT, CARD_HINT, cardCounter, CONSUMER_BARS_LOG, EAST_ENGLAND_LEGEND, EUROPE_HELD_BACK, HLA_REVEAL_LINE, HLA_TEXT_CARD,
+  ME_RESULT, PERIOD_LABELS, PREDICT_HINT, REVEAL_CALLOUT, REVEAL_HINT, ROMAN_LOG_LINE, TODAY_PLACED,
 } from '../src/content';
+import { consumerRows } from '../src/plots/consumer';
 import { PERIOD_IDS, type PeriodId } from '../src/types';
 import {
-  cardOpen, centreOf, closeCardWithEnter, DATA, focusLayer, freshStart, hintIndex, idle, layersShown, plotSettled, run, screenViolations, watch,
+  cardOpen, centreOf, closeCardWithEnter, consumerBarsShown, DATA, focusLayer, freshStart, hintIndex, idle, layersShown, plotSettled, run,
+  screenViolations, terminalBars, watch,
 } from './helpers';
 
 const REVEAL_PCA = SCRIPT_STEPS.findIndex((s) => s.id === 'revealPca');
@@ -81,6 +83,26 @@ test('the 19-step guided script runs over file://: cards in order, Britain today
     }
     await expect(page.locator('#card')).toBeHidden();
     expect(await screenViolations(page), `after ${cmd}`).toEqual([]);
+
+    // Task 18: consumer bars, shipped set only (spec §10.3). Steps 0 and 8.
+    if (step.name === 'ancestry_test') {
+      const bars = page.locator('#plot svg[data-view="consumer"] g.consumer-bar');
+      if (FEATURES.consumerBars) {
+        await expect(page.locator('#plot')).toHaveAttribute('data-view', 'consumer');
+        const want = step.person === 'me' ? ME_RESULT.length : (DATA.consumer[step.person] ?? []).length;
+        await expect(bars).toHaveCount(want);
+        await expect(page.locator('#terminal')).toContainText(CONSUMER_BARS_LOG);
+        // The bars are the terminal's numbers: the same labels and whole percents, in the same order (the last `want` bar lines are this command's).
+        const rows = consumerRows(DATA, step.person).map((r) => `${r.label} ${r.pct}%`);
+        expect(await consumerBarsShown(page), `the bars after ${cmd}`).toEqual(rows);
+        expect((await terminalBars(page)).slice(-want), `the terminal's bar lines after ${cmd}`).toEqual(rows);
+        // Britain today is not shown yet (instructor feedback): neither bars nor words for it before the reveal step.
+        await expect(page.locator('#plot')).not.toContainText(PERIOD_LABELS.Today);
+      } else {
+        await expect(bars).toHaveCount(0);
+        await expect(page.locator('#terminal')).not.toContainText(CONSUMER_BARS_LOG);
+      }
+    }
 
     // The plot under the cards (spec §2.3).
     const exp = expectedAfter(i);

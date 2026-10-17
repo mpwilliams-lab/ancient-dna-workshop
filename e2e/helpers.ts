@@ -131,6 +131,21 @@ export async function cardOpen(page: Page): Promise<string | null> {
   return page.evaluate(() => window.__adw!.cardOpen());
 }
 
+/** The consumer bars on screen, as "label pct%" in drawn order (CONTRACT §4.12: g.consumer-bar with text.consumer-label and text.consumer-pct). */
+export async function consumerBarsShown(page: Page): Promise<string[]> {
+  return page.locator('#plot svg[data-view="consumer"] g.consumer-bar').evaluateAll((els) =>
+    els.map((g) => `${g.querySelector('.consumer-label')?.textContent ?? ''} ${g.querySelector('.consumer-pct')?.textContent ?? ''}`));
+}
+
+/** The bar lines the terminal has printed ("  British      [###...]  72%"), as "label pct%", over the whole log. */
+export async function terminalBars(page: Page): Promise<string[]> {
+  const lines = await page.locator('#terminal .term-out .term-line').allTextContents();
+  return lines.flatMap((l) => {
+    const m = /^\s*(\w+)\s+\[[#.]{20}\]\s+(\d+)%\s*$/.exec(l);
+    return m ? [`${m[1]} ${m[2]}%`] : [];
+  });
+}
+
 /** The data-layer ids of the PCA period layers on screen (one per PlotState.layers entry, CONTRACT §4.12). */
 export async function layersShown(page: Page): Promise<string[]> {
   return page.locator('#plot g.layer.period').evaluateAll((els) => els.map((e) => e.getAttribute('data-layer') ?? ''));

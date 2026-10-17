@@ -4,9 +4,10 @@ import { CARD_HINT, PREDICT_HINT, RESTORED_NOTICE, REVEAL_HINT, cardCounter } fr
 import { FEATURES } from '../src/features';
 import { NEXT_PREFIX, SCRIPT, SCRIPT_STEPS, hintText } from '../src/hints';
 import { formatCommand } from '../src/parser';
+import { consumerRows } from '../src/plots/consumer';
 import { derive, sessionBuildHash } from '../src/replay';
 import { screensOf, screenKey } from '../tests/helpers/script';
-import { APP_URL, CARD_KEY_GAP_MS, DATA, boxes, cardOpen, covers, freshStart, hintIndex, idle, installBoxes, prompt, run, screen, watch } from './helpers';
+import { APP_URL, CARD_KEY_GAP_MS, DATA, boxes, cardOpen, consumerBarsShown, covers, freshStart, hintIndex, idle, installBoxes, prompt, run, screen, watch } from './helpers';
 
 // e2e asserts only the shipped flag set (spec §10.3).
 test.skip(!FEATURES.back, 'the back flag is off in the shipped set');
@@ -348,6 +349,11 @@ test('Back walks every screen of the whole script, from a session saved at its e
       if (d.plot.focus !== undefined) await expect(page.locator('#plot svg.plot-svg'), label).toHaveAttribute('data-focus', d.plot.focus);
     }
     if (d.plot.view === 'trait') await expect(page.locator('#plot .traj'), label).toHaveAttribute('data-gene', d.plot.gene!);
+    if (d.plot.view === 'consumer') {
+      // Task 18: Back and a refresh redraw the bars from the command log, with the numbers the terminal printed
+      await expect(page.locator('#plot svg.plot-svg'), label).toHaveAttribute('data-person', d.plot.person!);
+      expect(await consumerBarsShown(page), `${label}: the consumer bars`).toEqual(consumerRows(DATA, d.plot.person!).map((r) => `${r.label} ${r.pct}%`));
+    }
     // the terminal shows what the saved session says, which Back cut to the end of this step
     expect(await shownScreen(page), `${label}: terminal lines`).toEqual(await savedScreen(page));
     expect((await shownScreen(page)).length, `${label}: one saved line per step so far`).toBe(step);

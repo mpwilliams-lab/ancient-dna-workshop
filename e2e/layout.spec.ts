@@ -2,6 +2,8 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import { SCRIPT } from '../src/hints';
 import { formatCommand } from '../src/parser';
 import { HLA_REVEAL_LINE, HLA_TEXT_CARD } from '../src/content';
+import { FEATURES } from '../src/features';
+import { consumerRows } from '../src/plots/consumer';
 import { CARD_IDS } from '../src/types';
 import {
   APP_URL, boxes, centreOf, covers, DATA, focusLayer, idle, installBoxes, intersects, layersShown, plotSettled, prompt, run, watch, type Rect,
@@ -334,7 +336,7 @@ for (const c of cases.filter((k) => k.name.includes('CSS 682x512') || k.name.sta
  */
 const MIN_PLOT_PX = { lab: 200, floorPca: 120, floorTrait: 64 } as const;
 
-/** A box in the plot's own units (the PCA plot is 1000 x 760, the ADMIXTURE bars 1000 x 700, the trajectory 1000 x 520). */
+/** A box in the plot's own units (the PCA plot is 1000 x 760, the ADMIXTURE and consumer bars 1000 x 700, the trajectory 1000 x 520). */
 interface Extent { left: number; right: number; top: number; bottom: number }
 interface LegendBox { name: string; row: number; left: number; right: number }
 const PCA_BLOCKS = ['svg.plot-svg', 'div.pca-captions'];
@@ -518,6 +520,85 @@ for (const c of cases) {
         const hla = await panelGeometry(page);
         if (c.height <= 512) console.log(`${c.name}: HLA-DQ2 plot ${hla.svg!.height.toFixed(0)} px of ${(hla.panel.bottom - hla.panel.top).toFixed(0)}`);
         expectPanelHolds(hla, 'HLA-DQ2', c, 'trait', ['h3.traj-title', 'svg.traj-svg', 'p.traj-caption', 'p.traj-reveal', 'p.traj-source']);
+      }
+      expect(w.requests).toEqual([]);
+      expect(w.errors).toEqual([]);
+    });
+  });
+}
+
+interface ConsumerGeometry {
+  title: Extent; subtitle: Extent; note: Extent;
+  rows: { label: Extent; track: Extent; pct: Extent }[];
+}
+
+/** The text and the tracks of the consumer bars, as drawn, in the plot's own units (the svg root has no transform). */
+async function consumerGeometry(page: Page): Promise<ConsumerGeometry> {
+  return page.evaluate((): ConsumerGeometry => {
+    const ext = (e: Element | null): Extent => {
+      if (!e) throw new Error('a part of the consumer bars is missing');
+      const b = (e as SVGGraphicsElement).getBBox();
+      return { left: b.x, right: b.x + b.width, top: b.y, bottom: b.y + b.height };
+    };
+    const svg = document.querySelector('#plot svg[data-view="consumer"]')!;
+    return {
+      title: ext(svg.querySelector('.consumer-title')),
+      subtitle: ext(svg.querySelector('.consumer-subtitle')),
+      note: ext(svg.querySelector('.consumer-note')),
+      rows: [...svg.querySelectorAll('g.consumer-bar')].map((g) => ({
+        label: ext(g.querySelector('.consumer-label')), track: ext(g.querySelector('.consumer-track')), pct: ext(g.querySelector('.consumer-pct')),
+      })),
+    };
+  });
+}
+
+/**
+ * The consumer bars are laid out on character-width estimates too (the title wraps at 60 characters, the labels sit right-aligned
+ * in a 190-unit column), so a wider font could push a line past the edge or a label into its bar. Looked at on the real text: every
+ * text inside the 1000 x 700 plot, each label ending before its bar and each percent starting after it, and the title, subtitle,
+ * bars and note in reading order without touching.
+ */
+function expectConsumerClear(g: ConsumerGeometry, label: string, rows: number): void {
+  expect(g.rows.length, `${label}: bars`).toBe(rows);
+  const inside = (name: string, e: Extent): void => {
+    expect(e.left, `${label}: ${name} left edge`).toBeGreaterThanOrEqual(0);
+    expect(e.right, `${label}: ${name} right edge (the plot is 1000 units wide)`).toBeLessThanOrEqual(1000);
+    expect(e.top, `${label}: ${name} top`).toBeGreaterThanOrEqual(0);
+    expect(e.bottom, `${label}: ${name} bottom (the bars plot is 700 units tall)`).toBeLessThanOrEqual(700);
+  };
+  inside('title', g.title);
+  inside('subtitle', g.subtitle);
+  inside('note', g.note);
+  expect(g.subtitle.top, `${label}: the subtitle starts below the title`).toBeGreaterThanOrEqual(g.title.bottom - 1);
+  g.rows.forEach((r, k) => {
+    inside(`label ${k}`, r.label);
+    inside(`bar ${k}`, r.track);
+    inside(`percent ${k}`, r.pct);
+    expect(r.label.right, `${label}: label ${k} ends before its bar`).toBeLessThanOrEqual(r.track.left);
+    expect(r.pct.left, `${label}: percent ${k} starts after its bar`).toBeGreaterThanOrEqual(r.track.right);
+    if (k === 0) expect(r.track.top, `${label}: the first bar starts below the subtitle`).toBeGreaterThanOrEqual(g.subtitle.bottom);
+    else expect(r.track.top, `${label}: bar ${k} starts below bar ${k - 1}`).toBeGreaterThanOrEqual(g.rows[k - 1]!.track.bottom);
+  });
+  expect(g.note.top, `${label}: the note starts below the last bar`).toBeGreaterThanOrEqual(g.rows.at(-1)!.track.bottom);
+}
+
+for (const c of cases) {
+  test(`the consumer bars fit the plot panel with every text in view (Task 18): ${c.name}`, async ({ browser }) => {
+    test.skip(!FEATURES.consumerBars, 'the consumerBars flag is off in the shipped set');
+    test.setTimeout(120_000);
+    await withPage(browser, c, async (page) => {
+      const w = watch(page);
+      await page.goto(`${APP_URL}?reset`);
+      await expect(prompt(page)).toBeVisible();
+      await idle(page);
+      // The hook (the longest one-line heading, two bars), the longest title (two lines), and the most bars (five).
+      for (const person of ['me', 'FirstFarmers', 'AngloSaxon'] as const) {
+        await run(page, `ancestry_test(person = "${person}")`);
+        await expect(page.locator('#plot')).toHaveAttribute('data-view', 'consumer');
+        await expect(page.locator('#plot svg.plot-svg')).toHaveAttribute('data-person', person);
+        const label = `consumer bars (${person})`;
+        expectPanelHolds(await panelGeometry(page), label, c, 'bars', ['svg.plot-svg']);
+        expectConsumerClear(await consumerGeometry(page), label, consumerRows(DATA, person).length);
       }
       expect(w.requests).toEqual([]);
       expect(w.errors).toEqual([]);

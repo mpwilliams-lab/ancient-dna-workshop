@@ -2,8 +2,14 @@ import { expect, test, type Page } from '@playwright/test';
 import { SCRIPT, SCRIPT_STEPS } from '../src/hints';
 import { formatCommand } from '../src/parser';
 import { CARDS } from '../src/cards';
-import { CARD_HINT, cardCounter, RESTORED_NOTICE } from '../src/content';
-import { APP_URL, cardOpen, closeAllCards, closeCardWithEnter, freshStart, hintIndex, idle, layersShown, prompt, run, screen, watch } from './helpers';
+import { CARD_HINT, cardCounter, CONSUMER_BARS_LOG, RESTORED_NOTICE, REVEAL_HINT } from '../src/content';
+import { FEATURES } from '../src/features';
+import { consumerRows } from '../src/plots/consumer';
+import type { PeriodId } from '../src/types';
+import {
+  APP_URL, cardOpen, closeAllCards, closeCardWithEnter, consumerBarsShown, DATA, freshStart, hintIndex, idle, layersShown, prompt, run, screen,
+  terminalBars, watch,
+} from './helpers';
 
 const V2 = 'adna-workshop-session-v2';
 const V1 = 'adna-workshop-session-v1';
@@ -104,6 +110,44 @@ test('refresh with a card open shows the same card again (spec §4.5)', async ({
   await expect(page.locator('#card')).toBeHidden();
   expect(await hintIndex(page)).toBe(admix1 + 1);
   await expect(page.locator('#terminal .term-hint')).toHaveText(`Next: ${formatCommand(SCRIPT[admix1 + 1]!)}`);
+  expect(w.errors).toEqual([]);
+});
+
+test('refresh (and Back, when it ships) bring the consumer bars back: at the hook and at the Iron Age test (Task 18, RF1)', async ({ page }) => {
+  test.skip(!FEATURES.consumerBars, 'the consumerBars flag is off in the shipped set');
+  const w = watch(page);
+  await freshStart(page);
+  const rows = (person: PeriodId | 'me'): string[] => consumerRows(DATA, person).map((r) => `${r.label} ${r.pct}%`);
+
+  await run(page, formatCommand(SCRIPT[0]!));                         // the hook: the made-up customer
+  expect(await consumerBarsShown(page)).toEqual(rows('me'));
+  await page.reload();
+  await idle(page);
+  await expect(page.locator('#plot')).toHaveAttribute('data-view', 'consumer');
+  expect(await consumerBarsShown(page)).toEqual(rows('me'));
+  expect(await terminalBars(page)).toEqual(rows('me'));                // the log came back with the bars
+  await expect(page.locator('#terminal')).toContainText(CONSUMER_BARS_LOG);
+
+  const ironAgeTest = SCRIPT.findIndex((c) => c.name === 'ancestry_test' && c.person === 'IronAge');
+  await runGuided(page, ironAgeTest, 1);                              // load_genomes up to the Iron Age map, every card closed
+  await run(page, formatCommand(SCRIPT[ironAgeTest]!));
+  expect(await consumerBarsShown(page)).toEqual(rows('IronAge'));
+  await page.reload();
+  await idle(page);
+  await expect(page.locator('#plot svg.plot-svg')).toHaveAttribute('data-person', 'IronAge');
+  expect(await consumerBarsShown(page)).toEqual(rows('IronAge'));
+  await expect(page.locator('#terminal .term-hint')).toHaveText(REVEAL_HINT);   // the hint beat that follows the test came back too
+
+  await run(page, formatCommand(SCRIPT[ironAgeTest + 1]!));           // the reveal map replaces the bars
+  await expect(page.locator('#plot')).toHaveAttribute('data-view', 'pca');
+  if (FEATURES.back) {
+    await page.locator('#back').click();                              // and Back puts them back
+    await expect(page.locator('#plot')).toHaveAttribute('data-view', 'consumer');
+    expect(await consumerBarsShown(page)).toEqual(rows('IronAge'));
+    await page.reload();
+    await idle(page);
+    expect(await consumerBarsShown(page)).toEqual(rows('IronAge'));
+  }
   expect(w.errors).toEqual([]);
 });
 

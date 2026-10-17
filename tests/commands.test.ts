@@ -11,6 +11,12 @@ import {
 import { FEATURES, withFeatures } from '../src/features';
 
 const fixture = fixtureRaw as unknown as WorkshopData;
+/**
+ * ancestry_test's two paths. consumerBars is on in the shipped set, and it adds the "Drawing the result as bars." line and the
+ * consumer plot action, so every test that pins the terminal text or the plot action names the path it means.
+ */
+const NO_BARS: ExecContext = { todayShown: false, features: withFeatures({ consumerBars: false }) };
+const BARS: ExecContext = { todayShown: false, features: withFeatures({ consumerBars: true }) };
 const PERIODS: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
 const GENES: GeneId[] = ['LCT', 'SLC45A2', 'HERC2', 'TYK2', 'HLA-DQ2'];
 
@@ -114,8 +120,10 @@ describe('execute: plot actions', () => {
     for (const gene of GENES) {
       expect(execute({ name: 'allele_freq', gene }, fixture).plot).toEqual({ kind: 'trait', gene });
     }
-    expect(execute({ name: 'ancestry_test', person: 'me' }, fixture).plot).toEqual({ kind: 'none' });
-    expect(execute({ name: 'ancestry_test', person: 'IronAge' }, fixture).plot).toEqual({ kind: 'none' });
+    for (const person of ['me', 'IronAge'] as const) {
+      expect(execute({ name: 'ancestry_test', person }, fixture, NO_BARS).plot).toEqual({ kind: 'none' });
+      expect(execute({ name: 'ancestry_test', person }, fixture, BARS).plot).toEqual({ kind: 'consumer', person });
+    }
   });
   it('only clear() clears, and valid commands are not refused', () => {
     expect(execute({ name: 'clear' }, fixture)).toEqual({ lines: [], plot: { kind: 'none' }, refused: false, clear: true });
@@ -254,7 +262,7 @@ describe('execute: ancestry_test', () => {
   // Final review (ruled): the hook screen used to print the whole Beat 4 debrief (CONSUMER_NOTE) after the example result,
   // about twenty minutes before Beat 4. Only its last sentence belongs on the hook screen.
   it('me shows ME_HEADING, the ME_RESULT bars, HOOK_QUESTION and only the short illustrative sentence (spec §3 hook)', () => {
-    const lines = execute({ name: 'ancestry_test', person: 'me' }, fixture).lines;
+    const lines = execute({ name: 'ancestry_test', person: 'me' }, fixture, NO_BARS).lines;
     expect(lines).toEqual([
       ME_HEADING,
       'Compared with: people living in Europe today',
@@ -279,7 +287,7 @@ describe('execute: ancestry_test', () => {
   });
   it('a period keeps the full CONSUMER_NOTE (Beat 4), with every sentence the hook screen leaves out', () => {
     for (const person of PERIODS) {
-      const lines = execute({ name: 'ancestry_test', person }, fixture).lines;
+      const lines = execute({ name: 'ancestry_test', person }, fixture, NO_BARS).lines;
       expect(lines[lines.length - 1], person).toBe(CONSUMER_NOTE);
       for (const piece of ['where similar people live today', 'Dutch, German or Danish', 'It does not mean Vikings.', HOOK_NOTE]) {
         expect(lines.join('\n'), `${person}: ${piece}`).toContain(piece);
@@ -290,7 +298,7 @@ describe('execute: ancestry_test', () => {
     const d = withConsumer(withN(fixture, 'IronAge', 281, 270), 'IronAge', [
       { label: 'Scandinavian', share: 0.333 }, { label: 'British', share: 0.334 }, { label: 'French', share: 0.333 },
     ]);
-    const r = execute({ name: 'ancestry_test', person: 'IronAge' }, d);
+    const r = execute({ name: 'ancestry_test', person: 'IronAge' }, d, NO_BARS);
     expect(r.refused).toBe(false);
     expect(r.lines[0]).toBe('Consumer-style ancestry test: Iron Age (281 people)');
     expect(r.lines.slice(2, 5)).toEqual([
@@ -305,7 +313,7 @@ describe('execute: ancestry_test', () => {
     const d = withConsumer(withN(fixture, 'Today', 107, 106), 'Today', [
       { label: 'Scandinavian', share: 0.1 }, { label: 'British', share: 0.9 },
     ]);
-    const r = execute({ name: 'ancestry_test', person: 'Today' }, d);
+    const r = execute({ name: 'ancestry_test', person: 'Today' }, d, NO_BARS);
     expect(r).toEqual({
       lines: [
         'Consumer-style ancestry test: Britain today (107 people)',
@@ -323,7 +331,7 @@ describe('execute: ancestry_test', () => {
   it('every period, Today included, uses the same template', () => {
     const shares: ConsumerShare[] = [{ label: 'British', share: 0.75 }, { label: 'French', share: 0.25 }];
     for (const p of PERIODS) {
-      const r = execute({ name: 'ancestry_test', person: p }, withConsumer(withN(fixture, p, 40, 30), p, shares));
+      const r = execute({ name: 'ancestry_test', person: p }, withConsumer(withN(fixture, p, 40, 30), p, shares), NO_BARS);
       expect(r.refused).toBe(false);
       expect(r.lines).toEqual([
         `Consumer-style ancestry test: ${PERIOD_LABELS[p]} (40 people)`,
@@ -454,8 +462,8 @@ describe('shownPercents: the one place a consumer result is ordered and rounded 
 });
 
 describe('ancestry_test consumer bars (Task 18, spec §3.3, §3.5)', () => {
-  const on: ExecContext = { todayShown: false, features: withFeatures({ consumerBars: true }) };
-  const off: ExecContext = { todayShown: false, features: withFeatures({ consumerBars: false }) };
+  const on = BARS;
+  const off = NO_BARS;
   const PEOPLE = ['me', ...PERIODS] as const;
   it.each(PEOPLE)('%s: with the flag, bars on the plot and the log line last; terminal values unchanged', (person) => {
     const r = execute({ name: 'ancestry_test', person }, fixture, on);

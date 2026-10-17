@@ -34,7 +34,7 @@ export const ALL_ON: Features = allFlags(true);
  */
 export const FEATURES: Features = Object.freeze({
   back: true,
-  consumerBars: false,
+  consumerBars: true,
   finaleAnimation: false,
   'map.A1': false,
   'map.D1': false,
