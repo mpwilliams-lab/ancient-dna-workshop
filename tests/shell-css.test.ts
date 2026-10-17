@@ -221,6 +221,36 @@ describe('card overlay (spec §5.2, CONTRACT §4.11)', () => {
     const perCard = allRules(css).filter((r) => /data-card-id/.test(r.prelude) && /\.card-tile img/.test(r.prelude));
     expect(perCard.map((r) => r.prelude)).toEqual(['#card[data-card-id="F1"] .card-tile img']);
   });
+  // After Task 26 (review of Task 25): a card with a single picture (I1's diagram, J1's drawing) may draw it larger than the general cap, because
+  // its tile spans the whole card and a picture held to min(26vh, 230px) sits small in a wide grey panel. The larger cap applies in a window at
+  // least 600 px tall (below that the card has too little height to spare: 27 px at CSS 682 x 512, where it tipped the card to compact, which
+  // hides the picture) and not in the stacked layout (the card is only the lower half of the window). e2e/layout.spec.ts measures it in the browser.
+  it('lets a card with a single picture draw it up to min(35vh, 380px), above the general cap, in a window 600 px tall or more and not stacked', () => {
+    const SINGLE = '#card .card-tiles[data-count="1"] .card-tile img';
+    const general = rule('#card .card-tile img')['max-height']!;
+    const tall = rules(css).filter((r) => r.prelude === '@media (min-height: 600px)');
+    expect(tall, 'one min-height: 600px block holds the larger cap').toHaveLength(1);
+    const inTall = rules(tall[0]!.body);
+    expect(inTall.map((r) => r.prelude)).toEqual([SINGLE]);
+    const single = decls(inTall[0]!.body)['max-height']!;
+    expect(decls(inTall[0]!.body)).toEqual({ 'max-height': 'min(35vh, 380px)' });
+    const parts = (v: string): number[] => {
+      const m = /^min\((\d+(?:\.\d+)?)vh, (\d+)px\)$/.exec(v);
+      expect(m, `${v} is a min(Nvh, Mpx) cap`).not.toBeNull();
+      return [Number(m![1]), Number(m![2])];
+    };
+    expect(parts(single)[0], 'larger than the general cap: the vh part').toBeGreaterThan(parts(general)[0]!);
+    expect(parts(single)[1], 'larger than the general cap: the px part').toBeGreaterThan(parts(general)[1]!);
+    // The stacked layout puts the general cap back: the same selector, in a block that comes later in the file, so it wins at equal specificity.
+    const all = rules(css);
+    const stacked = all.filter((r) => r.prelude === '@media (max-width: 599px), (max-aspect-ratio: 3/4)' && rules(r.body).some((x) => x.prelude === SINGLE));
+    expect(stacked, 'one stacked block overrides the single-picture cap').toHaveLength(1);
+    expect(decls(rules(stacked[0]!.body).find((x) => x.prelude === SINGLE)!.body)).toEqual({ 'max-height': general });
+    expect(all.indexOf(stacked[0]!), 'the override comes after the larger cap').toBeGreaterThan(all.indexOf(tall[0]!));
+    // Nothing else caps a tile picture's height: the general rule, the larger one and its stacked override, and F1's own.
+    const capped = allRules(css).filter((r) => /\.card-tile img/.test(r.prelude) && 'max-height' in decls(r.body)).map((r) => r.prelude).sort();
+    expect(capped).toEqual(['#card .card-tile img', '#card[data-card-id="F1"] .card-tile img', SINGLE, SINGLE].sort());
+  });
   it('shows every card picture whole (Task 21 ruling): no card-image rule sets object-fit: cover or an aspect-ratio, and the letterbox has a background', () => {
     const pictureRules = allRules(css).filter((r) => /\.card-tile img|\.tile-img/.test(r.prelude));
     expect(pictureRules.length, 'the base, compact and contain rules').toBeGreaterThanOrEqual(3);

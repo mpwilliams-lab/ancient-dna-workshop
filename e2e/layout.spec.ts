@@ -730,8 +730,9 @@ for (const c of CASES) {
 // pictures of the staged photos' exact sizes bundled, all in memory and in a temporary directory, the repo untouched. 15 of the 23
 // cards then draw an upgrade (the other eight have none built). It asks what the matrix asks of every card, and also that each card
 // really is in the form it should be in, that every picture is decoded and drawn whole (object-fit: contain, never above the spec's
-// height cap) and that the credits panel, with every image and map of the build in its list, still fits. The words and dots on the maps
-// are judged in e2e/maps.spec.ts, which runs the same viewports.
+// height cap, except that a card with a single picture, I1 and J1, is drawn as tall as the larger cap of src/style.css lets it: the
+// card stays `normal` at both lab-standard screens with it) and that the credits panel, with every image and map of the build in its
+// list, still fits. The words and dots on the maps are judged in e2e/maps.spec.ts, which runs the same viewports.
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 /** The own drawings in src/assets/svg (bundled as they are, in this build and in the shipped one). */
@@ -781,8 +782,31 @@ async function pictures(page: Page): Promise<{ form: string | null; pictures: Pi
   });
 }
 
-/** The open card is in the form this build should draw for it, and what it draws there is whole, decoded and within spec §5.2's caps. */
-async function expectFormShown(page: Page, c: Case, id: CardId, fit: string): Promise<void> {
+/**
+ * The tallest a picture may be drawn at this window, in CSS px. Spec §5.2's bound is min(26vh, 230px). A card with a single picture (I1, J1)
+ * may go higher (src/style.css, a ruling after Task 26's review): min(35vh, 380px), in a window at least 600 px tall that is not stacked.
+ * A window shorter than 600 px and the stacked layout (narrower than 600 px, or at most 3:4: the card is the lower half of the window) keep
+ * the bound.
+ */
+function pictureCap(c: Case, single: boolean): number {
+  const stacked = c.width <= 599 || c.width / c.height <= 3 / 4;
+  return single && !stacked && c.height >= 600 ? Math.min(0.35 * c.height, 380) : Math.min(0.26 * c.height, 230);
+}
+
+/**
+ * How tall a single-picture card draws its picture at the two lab-standard screens at 100%, in CSS px, keyed by the window's CSS size. Measured
+ * 2026-10-17 in Chromium and Edge on macOS: the melanocyte diagram 336 x 269 at 1366 x 768 and 473 x 378 at 1920 x 1080 (it was 250 x 200 and
+ * 288 x 230 under the general cap), the irises drawing as wide as its tile, 702 x 234 and 1005 x 335. The pins sit just under what was
+ * measured, so a change that shrinks the picture back is noticed.
+ */
+const MIN_SINGLE_PICTURE_H: Readonly<Record<string, number>> = { '1366x768': 265, '1920x1080': 375 };
+
+/**
+ * The open card is in the form this build should draw for it, and what it draws there is whole, decoded and within the height caps (spec
+ * §5.2, and the larger one of a single picture). Returns what a single picture is drawn at, "336 x 269", or null (no picture, a card with
+ * several, or the pictures hidden at compact).
+ */
+async function expectFormShown(page: Page, c: Case, id: CardId, fit: string): Promise<string | null> {
   const form = expectedForm(id);
   const card = page.locator('#card');
   expect(await card.locator('.card-credits').count(), `${id}: Image credits is offered in the upgraded form and only there`).toBe(form.upgraded ? 1 : 0);
@@ -791,6 +815,8 @@ async function expectFormShown(page: Page, c: Case, id: CardId, fit: string): Pr
   if ((CARDS[id].tiles ?? []).length > 0) expect(g.form, `${id}: the tile row is in the ${form.upgraded ? 'picture' : 'text'} form`).toBe(form.upgraded ? 'images' : 'text');
   expect(g.pictures.map((p) => p.id), `${id}: the pictures on the card, in tile order`).toEqual(form.pictures);
   const cardBox = (await card.boundingBox())!;
+  const single = g.pictures.length === 1;
+  let drawn: string | null = null;
   for (const p of g.pictures) {
     expect(p.src.startsWith('data:image/'), `${id}/${p.id}: the picture is inlined`).toBe(true);
     expect(p.natural[0] > 0 && p.natural[1] > 0, `${id}/${p.id}: the picture is decoded`).toBe(true);
@@ -802,10 +828,22 @@ async function expectFormShown(page: Page, c: Case, id: CardId, fit: string): Pr
     if (p.shown === 'none') continue;
     const [w, h] = [p.box.right - p.box.left, p.box.bottom - p.box.top];
     expect(w > 0 && h > 0, `${id}/${p.id}: the picture has a box`).toBe(true);
-    expect(h, `${id}/${p.id}: the picture is at most min(26vh, 230px) tall`).toBeLessThanOrEqual(Math.min(0.26 * c.height, 230) + 0.5);
+    const cap = pictureCap(c, single);
+    expect(h, `${id}/${p.id}: the picture is at most ${cap.toFixed(1)} px tall (${single ? 'the cap of a single picture' : 'spec §5.2: min(26vh, 230px)'})`).toBeLessThanOrEqual(cap + 0.5);
+    if (single) {
+      // A single picture is drawn as tall as its cap lets it, or as tall as its own proportions give at the tile's width if that is less:
+      // never smaller (the general cap would leave it at 200 px on a 1366 x 768 screen), never larger.
+      const natural = (w * p.natural[1]) / p.natural[0];
+      expect(Math.abs(h - Math.min(cap, natural)), `${id}/${p.id}: the box is ${h.toFixed(1)} px tall; its cap is ${cap.toFixed(1)} and its proportions give ${natural.toFixed(1)} at the tile's width`).toBeLessThanOrEqual(1);
+      const pin = MIN_SINGLE_PICTURE_H[`${c.width}x${c.height}`];
+      if (pin !== undefined) expect(h, `${id}/${p.id}: the picture is drawn at least ${Math.min(pin, natural).toFixed(0)} px tall at ${c.name}`).toBeGreaterThanOrEqual(Math.min(pin, natural) - 0.5);
+      const scale = Math.min(w / p.natural[0], h / p.natural[1]);
+      drawn = `${(p.natural[0] * scale).toFixed(0)} x ${(p.natural[1] * scale).toFixed(0)}`;
+    }
     expect(p.box.left, `${id}/${p.id}: the picture is inside the card (left)`).toBeGreaterThanOrEqual(cardBox.x - 0.5);
     expect(p.box.right, `${id}/${p.id}: the picture is inside the card (right)`).toBeLessThanOrEqual(cardBox.x + cardBox.width + 0.5);
   }
+  return drawn;
 }
 
 test.describe('every upgraded form at once (all flags forced on, in memory)', () => {
@@ -836,15 +874,18 @@ test.describe('every upgraded form at once (all flags forced on, in memory)', ()
         const w = watch(page);
         await startForCards(page, testUrl(app.url));
         const fits: Record<string, string> = {};
+        const singles: Record<string, string> = {};
         for (const id of CARD_IDS) {
           await openTestCard(page, id);
           fits[id] = await expectCardFits(page, c, id);
-          await expectFormShown(page, c, id, fits[id]!);
+          const drawn = await expectFormShown(page, c, id, fits[id]!);
+          if (drawn !== null) singles[id] = drawn;
           expect(await page.locator('#card a[href]').count(), `${id}: no link in the card (credits URLs are plain text)`).toBe(0);
           await closeWithContinue(page, id);
         }
         await expectHeaderUsable(page, 'F1');   // a picture card with three pictures, the tallest of the lot
         console.log(`fit levels at ${c.name} with every upgrade on: ${JSON.stringify(fits)}`);
+        console.log(`single-picture cards at ${c.name}: picture drawn ${JSON.stringify(singles)} CSS px`);
         expect(w.requests).toEqual([]);
         expect(w.errors).toEqual([]);
       });
