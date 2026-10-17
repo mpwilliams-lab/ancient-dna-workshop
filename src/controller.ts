@@ -304,9 +304,7 @@ export class Controller {
   back(): void {
     this.closeTestCard();
     if (!this.canGoBack) return;
-    const here: Cursor = this.pendingAfterToken !== null
-      ? { step: this.cursor.step, card: this.currentCards().length }
-      : { ...this.cursor };
+    const here = this.cursorWithHeldCardsSkipped();
     if (this.t.isPrinting()) this.t.flush();
     if (this.animating()) this.finishAnimation();
     const next = backSession({ ...this.session, cursor: here }, this.live.cardsFor);
@@ -365,6 +363,20 @@ export class Controller {
     return this.cursor.step > 0 ? this.live.cardsFor[this.cursor.step - 1] ?? [] : [];
   }
 
+  /** The bare plot of the current step: the cursor after its last card. */
+  private bareCursor(): Cursor {
+    return { step: this.cursor.step, card: this.currentCards().length };
+  }
+
+  /**
+   * The screen the student stands on under the typed-line rule of spec §4.4 row 2: a step whose after-cards still wait for their log
+   * (it is printing, or it has just ended and the callback that opens them has not run) stands on its bare plot, the cards skipped but
+   * still screens. Any other cursor comes back as it is. skipPrinting() makes this the cursor; back() starts from it.
+   */
+  private cursorWithHeldCardsSkipped(): Cursor {
+    return this.pendingAfterToken !== null ? this.bareCursor() : { ...this.cursor };
+  }
+
   /**
    * Refreshes the hint line, makes the card host match the cursor, and tells the shell. The hint goes first: it is one line
    * as a step hint and two as CARD_HINT at the smallest lab screens, and the card view places the card's bottom edge against
@@ -395,7 +407,7 @@ export class Controller {
   /** Closes the remaining cards of the current step (Enter with text). They stay screens for Back. */
   private closeStepCards(): void {
     this.pendingAfterToken = null;
-    this.cursor = { step: this.cursor.step, card: this.currentCards().length };
+    this.cursor = this.bareCursor();
     this.showCurrentCard();
   }
 
@@ -453,14 +465,15 @@ export class Controller {
     if (this.animating()) this.finishAnimation();
   }
 
-  /** The typed-line path (spec §4.4 row 2; Task 17's Back reuses it): flush the running log, draw its plot, and skip the
-   *  step's held after-cards (cursor.card = cards.length; they stay screens). */
+  /** The typed-line path (spec §4.4 row 2): flush the running log, draw its plot, and skip the step's held after-cards
+   *  (cursor.card = cards.length; they stay screens). Back does not call it: it settles the same state through restore(), which
+   *  drops the held plot instead of drawing it for a screen that is about to go (see back()). */
   private skipPrinting(): void {
     if (this.t.isPrinting()) this.t.flush();
     this.applyPendingRender();
     if (this.pendingAfterToken !== null) {
+      this.cursor = this.cursorWithHeldCardsSkipped();
       this.pendingAfterToken = null;
-      this.cursor = { step: this.cursor.step, card: this.currentCards().length };
       this.notifyScreen();
     }
   }
