@@ -86,6 +86,19 @@ describe('layout', () => {
     expect(panes['grid-template-rows']).toBe('minmax(0, 1fr) minmax(0, 1fr)');
     expect(decls(nested.find((r) => r.prelude === '#terminal')!.body)['border-right']).toBe('0');
   });
+  // Task 26: the PCA's caption strip follows the plot. The svg takes the height its own proportions give it at the pane's width (and
+  // so the blank band that sat between the legend and the strip, 106 px at 1366 x 768, is gone), yet can still shrink where the pane is
+  // too short for plot and strip together, and stays anchored to the pane's top. e2e/layout.spec.ts measures it in the browser.
+  it('lets the PCA svg take its own proportions\' height and shrink, and no other view: the bars keep filling the pane', () => {
+    const pca = rule('#plot[data-view="pca"] > svg.plot-svg');
+    expect(pca.flex).toBe('0 1 auto');
+    expect(pca.height).toBe('auto');
+    expect(rule('#plot > svg').flex).toBe('1 1 auto');
+    expect(rule('#plot > svg').height).toBe('100%');
+    expect(rule('#plot > svg')['min-height']).toBe('0');      // the shrinking depends on it
+    const order = rules(css).map((r) => r.prelude);
+    expect(order.indexOf('#plot[data-view="pca"] > svg.plot-svg'), 'after the general rule it overrides').toBeGreaterThan(order.indexOf('#plot > svg'));
+  });
 });
 
 describe('the header Back button (Task 17, spec §4.3)', () => {

@@ -173,6 +173,17 @@ body {
   min-height: 0;
 }
 
+/* The PCA (Task 26): the svg is as tall as its own proportions give it at the pane's width (its viewBox is 1000 x 760), so the caption
+   strip under it follows the plot. When the svg took every pixel the strip left, the plot, which is width-limited on a lab screen and
+   anchored to its own top (xMidYMin), left a blank band between its legend and the strip: 106 px at 1366 x 768, 250 px at 1024 x 768.
+   Now the spare height is under the strip. It can still shrink (flex-shrink 1, min-height 0): where the pane is too short for plot
+   and strip together the svg gives up height, and only then, exactly as before, so the plot is never smaller than it was. It stays
+   anchored to the top of the pane, so a caption strip that changes height from step to step never moves it (the Task 8 fix). */
+#plot[data-view="pca"] > svg.plot-svg {
+  flex: 0 1 auto;
+  height: auto;
+}
+
 /* Stack terminal above plot on narrow or portrait screens. */
 @media (max-width: 599px), (max-aspect-ratio: 3/4) {
   #panes {
