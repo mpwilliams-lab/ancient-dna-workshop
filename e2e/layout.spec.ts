@@ -734,8 +734,8 @@ for (const c of CASES) {
 // The shipped build draws a card's text form until the instructor has checked its maps and pictures and the release task has enabled
 // the flag, so the matrix above is silent about how an upgrade fits. This one is built the way e2e/mapBuild.ts builds the map proof,
 // extended to the pictures: every map flag and every image flag forced on, every map and picture recorded as checked, and stand-in
-// pictures of the staged photos' exact sizes bundled, all in memory and in a temporary directory, the repo untouched. 15 of the 23
-// cards then draw an upgrade (the other eight have none built). It asks what the matrix asks of every card, and also that each card
+// pictures of the staged photos' exact sizes bundled, all in memory and in a temporary directory, the repo untouched. 17 of the 23
+// cards then draw an upgrade (the other six have none built). It asks what the matrix asks of every card, and also that each card
 // really is in the form it should be in, that every picture is decoded and drawn whole (object-fit: contain, never above the spec's
 // height cap, except that a card with a single picture, I1 and J1, is drawn as tall as the larger cap of src/style.css lets it: the
 // card stays `normal` at both lab-standard screens with it) and that the credits panel, with every image and map of the build in its
@@ -888,13 +888,13 @@ test.describe('every upgraded form at once (all flags forced on, in memory)', ()
     app?.cleanup();
   });
 
-  test('the scratch build forces on the map and image flags and no others, and 15 cards draw an upgrade', async ({ page }) => {
+  test('the scratch build forces on the map and image flags and no others, and 17 cards draw an upgrade', async ({ page }) => {
     await page.goto(testUrl(app.url));
     await expect(prompt(page)).toBeVisible();
     await idle(page);
     const features = await page.evaluate(() => ({ ...window.__adw!.features }));
     expect(features).toEqual({ ...FEATURES, ...Object.fromEntries([...FORCED].map((f) => [f, true])) });
-    expect(CARD_IDS.filter((id) => expectedForm(id).upgraded).sort()).toEqual(['A1', 'B1', 'C1', 'D1', 'E1', 'E2', 'F1', 'G1', 'G2', 'H1', 'H2', 'I1', 'I2', 'J1', 'J3']);
+    expect(CARD_IDS.filter((id) => expectedForm(id).upgraded).sort()).toEqual(['A1', 'B1', 'C1', 'D1', 'E1', 'E2', 'F1', 'G1', 'G2', 'H1', 'H2', 'I1', 'I2', 'J1', 'J3', 'K2', 'L3']);
     // The stand-ins are every staged photo, and every one is a card tile; so is each own drawing.
     const tileImages = new Set(Object.values(CARDS).flatMap((card) => (card.tiles ?? []).map((t) => t.image)));
     for (const id of BUNDLED) expect(tileImages.has(id as never), `${id} is the picture of a card tile`).toBe(true);
@@ -958,7 +958,7 @@ test.describe('every upgraded form at once (all flags forced on, in memory)', ()
     });
   }
 
-  // The credits panel lists EVERY image and map in the build (spec §5.2): here 15 groups, 18 photographs, 2 drawings and 7 maps. It is
+  // The credits panel lists EVERY image and map in the build (spec §5.2): here 17 groups, 18 photographs, 2 drawings and 9 maps. It is
   // a dialog above the page, and its list (not the page) scrolls; the title, the footer and the Close button stay on screen at every viewport.
   async function expectCreditsFit(page: Page, label: string): Promise<void> {
     await expect(page.locator('#credits'), `${label}: the credits panel is open`).toBeVisible();

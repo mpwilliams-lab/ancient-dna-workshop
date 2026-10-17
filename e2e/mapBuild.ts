@@ -3,7 +3,7 @@
 // shipped flag stays false and the committed manifest stays null, so the shipped dist/index.html draws the card's text form and cannot
 // show how the upgraded form fits. Two halves, which the layout matrix (e2e/layout.spec.ts) uses together and the map spec and the
 // preview use one of:
-//   - maps (forceMaps, buildMapApp): the map cards A1, D1, E1, G1, H2, I2 and J3 so far (MAP_CARD_IDS);
+//   - maps (forceMaps, buildMapApp): the map cards A1, D1, E1, G1, H2, I2, J3, K2 and L3 so far (MAP_CARD_IDS);
 //   - pictures (forceImages, buildFormsApp): the image cards B1, C1, E2, F1, G2, H1, I1 and J1 (IMAGE_CARD_IDS), with stand-in pictures
 //     of the exact pixel size of each staged photo.
 //
@@ -31,9 +31,9 @@ import type { CardId, MapId } from '../src/types.ts';
 /** The repo root: read when a build starts, not when the module loads, so the plugin can be imported anywhere (the unit tests do). */
 const repoRoot = (): string => fileURLToPath(new URL('..', import.meta.url));
 
-/** The map cards built so far (Tasks 20, 23 and 24): the card, its flag (`map.<id>`) and its manifest key are all this id. Tasks 27
- *  and 29 add theirs. */
-export const MAP_CARD_IDS: readonly MapId[] = ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3'];
+/** The map cards built so far (Tasks 20, 23, 24 and 27): the card, its flag (`map.<id>`) and its manifest key are all this id. Task 29
+ *  adds its own (the Roman inset of F1, which is a map of a card that is not itself a map card). */
+export const MAP_CARD_IDS: readonly MapId[] = ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3'];
 
 /** The cards with photographs or drawings (Tasks 16, 21 and 25): the card and its flag (`images.<id>`) are this id; its pictures are the
  *  manifest entries whose `card` is this id. */
@@ -209,8 +209,8 @@ export function buildMapApp(ids: readonly MapId[] = MAP_CARD_IDS, options: Force
   return buildInto([forceMaps(ids, options)], 'adw-maps-');
 }
 
-/** The app with every upgraded form forced on: the seven built maps and the pictures of all eight image cards (real data). Of the 23 cards
- *  15 are drawn in their upgraded form (A1 B1 C1 D1 E1 E2 F1 G1 G2 H1 H2 I1 I2 J1 J3); the other eight (D2 E3 J2 K1 K2 L1 L2 L3) have no
+/** The app with every upgraded form forced on: the nine built maps and the pictures of all eight image cards (real data). Of the 23 cards
+ *  17 are drawn in their upgraded form (A1 B1 C1 D1 E1 E2 F1 G1 G2 H1 H2 I1 I2 J1 J3 K2 L3); the other six (D2 E3 J2 K1 L1 L2) have no
  *  upgrade built, so they stay as they ship. */
 export function buildFormsApp(options: ForceOptions = {}): Promise<FormsApp> {
   return buildInto([forceMaps(MAP_CARD_IDS, options), forceImages()], 'adw-forms-');

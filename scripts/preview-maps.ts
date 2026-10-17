@@ -46,39 +46,79 @@ const SHOULD_SHOW: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
-type DistributionRow = { label: string; display: string; lat?: number; lon?: number };
+type DistributionRow = { label: string; display: string; value: number; lat?: number; lon?: number };
+
+/** The 1000 Genomes places by region, in the order the instructor looks for them, with how each is named in the instructions (the city the
+ *  spec §6 table puts its dot in, where a country has more than one). */
+const SITE_REGIONS: readonly (readonly [region: string, places: readonly (readonly [label: string, as: string])[]])[] = [
+  ['Europe', [['Britain', 'Britain'], ['Finland', 'Finland'], ['Tuscany', 'Tuscany'], ['Spain', 'Spain']]],
+  ['South Asia', [['Pakistan', 'Pakistan (Lahore)'], ['Bangladesh', 'Bangladesh (Dhaka)']]],
+  ['East Asia', [['China', 'China (Beijing)'], ['Japan', 'Japan (Tokyo)']]],
+  ['Africa', [['Nigeria', 'Nigeria (Ibadan)'], ['Kenya', 'Kenya (Webuye)']]],
+];
+const andList = (items: readonly string[]): string => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
 
 /**
- * What the instructor should see on H2, I2 and J3 (Task 24, spec §3.4, §6), written from the real rows so the numbers here are the ones the
- * card prints. Plain words for the person checking; never shown to students. `source` is the card's source line (verbatim from spec §3.4)
- * and `footnote` H2's side note.
+ * What the instructor should see on H2, I2, J3, K2 and L3 (Tasks 24 and 27, spec §3.4, §6), written from the real rows so the numbers here
+ * are the ones the card prints. Plain words for the person checking; never shown to students. `source` is the card's source line as it
+ * prints with its map (the spec's §3.4 line, with the Natural Earth line after it where the spec's K2 line has none: spec §6), `footnote`
+ * H2's side note, and `radius` the drawn radius of a dot of this many copies in every 100 on this map's scale.
  */
-function distributionShouldShow(id: 'H2' | 'I2' | 'J3', rows: readonly DistributionRow[], source: string, footnote: string): string[] {
+function distributionShouldShow(
+  id: 'H2' | 'I2' | 'J3' | 'K2' | 'L3', rows: readonly DistributionRow[], source: string, footnote: string, radius: (copies: number) => number,
+): string[] {
   const placed = (r: DistributionRow): boolean => r.lat !== undefined && r.lon !== undefined;
   const dots = rows.filter(placed);
   const side = rows.filter((r) => !placed(r));
   const named = (list: readonly DistributionRow[]): string => list.map((r) => `${r.label} ${r.display}`).join(', ');
-  const rings = dots.filter((r) => r.display === '0');
-  const smallest = dots.filter((r) => r.display !== '0').at(-1);
-  const small = `A bigger number is a bigger and darker dot (the biggest is ${dots[0]!.label} ${dots[0]!.display}). A small number never looks weaker than none: `
-    + (rings.length > 0 ? `${rings.map((r) => r.label).join(', ')} print 0 and are the small hollow rings, and ` : '')
-    + (smallest === undefined ? '' : `every other number, even the smallest (${smallest.label} ${smallest.display}), is a filled dot a little bigger than a ring, in a blue that still shows on the land.`);
-  return [
+  const isZero = (r: DistributionRow): boolean => Number(r.display) === 0;
+  const rings = dots.filter(isZero);
+  const smallest = dots.filter((r) => !isZero(r)).at(-1);
+  // How much wider than a ring the smallest filled dot is (4 against 3 on the 0-100 maps; 6 against 3 on K2's fixed 0-15 scale).
+  const wider = smallest === undefined ? 1 : radius(smallest.value * 100) / 3;
+  const filled = wider >= 1.8 ? 'about twice as wide as a ring' : 'a little bigger than a ring';
+  const small = `A bigger number is a bigger and darker dot (the biggest is ${dots[0]!.label} ${dots[0]!.display}). `
+    + (rings.length > 0
+      ? `A small number never looks weaker than none: ${rings.map((r) => r.label).join(', ')} print ${rings[0]!.display} and are the small hollow rings, and `
+        + (smallest === undefined ? '' : `every other number, even the smallest (${smallest.label} ${smallest.display}), is a filled dot ${filled}, in a blue that still shows on the land.`)
+      : (smallest === undefined ? '' : `No number here is 0, so there are no hollow rings: even the smallest (${smallest.label} ${smallest.display}) is a filled dot, in a blue that still shows on the land.`));
+  const where = SITE_REGIONS.map(([region, places]) => {
+    const here = places.filter(([label]) => dots.some((r) => r.label === label)).map(([, as]) => as);
+    return here.length === 0 ? '' : `${andList(here)} in ${region}`;
+  }).filter((s) => s !== '').join('; ');
+  const several = side.length > 1;
+  const lines: string[] = [
     id === 'H2'
       ? `One dot for each of ${dots.length} countries, in its own country, each with its name and number as the card's value list has them (biggest first): ${named(dots)}.`
-      : `One dot for each of ${dots.length} places where 1000 Genomes took its samples, each with its name and number: ${named(dots)}. Britain, Finland, Tuscany and Spain in Europe; Pakistan (Lahore) and Bangladesh (Dhaka) in South Asia; China (Beijing) and Japan (Tokyo) in East Asia; Nigeria (Ibadan) and Kenya (Webuye) in Africa. Each dot in its own country or city.`,
+      : `One dot for each of ${dots.length} places where 1000 Genomes took its samples, each with its name and number: ${named(dots)}. ${where}. Each dot in its own country or city.`,
     small,
+  ];
+  if (id === 'K2') {
+    lines.push(`The scale of this map is fixed at 0 to 15 copies in every 100 (spec §3.4, the same as the value bars it replaces). Even the biggest dot (${dots[0]!.label} ${dots[0]!.display}) is small next to that 15, so every dot is small${rings.length > 0 ? ' and the zeros are the smallest rings' : ''}: that is right, not a mistake. Numbers have one decimal. The card's own line says some numbers, including Britain's, come from only a handful of copies, so they are rough.`);
+  }
+  if (id === 'L3') {
+    lines.push('This map shows Europe only, on its own western-Europe frame (longitude 12 west to 30 east, latitude 36 to 66 north); the card\'s second line says why (the marker\'s link to coeliac disease was measured in people of European ancestry). Look at the coastlines: Britain, the North Sea, Scandinavia, the Baltic, the Alps, Italy and Spain should all look right.');
+  }
+  lines.push(
     id === 'H2'
       ? `Under the map, as in the spec's side-list footnote: "${footnote}"`
-      : `${named(side)}: no point for it (a region, not a place), so it is in a side list beside the map, as the spec says for places without coordinates. The value list the map replaces has all ${rows.length} rows.`,
-    ...(id === 'I2' ? ['The card\'s second line sends students to China and Japan ("look at their numbers"): both words must be easy to find and read.'] : []),
+      : `${named(side)}: no point for ${several ? 'them' : 'it'} (${several ? 'regions and whole samples' : 'a region'}, not ${several ? 'places' : 'a place'}), so ${several ? 'they are' : 'it is'} in a side list beside the map, as the spec says for places without coordinates. The value list the map replaces has all ${rows.length} rows.`,
+  );
+  if (id === 'K2' && side.some((r) => r.label === 'Finland')) lines.push('The side list\'s "Finland" is the gnomAD Finnish sample (the card\'s source line says so), not a 1000 Genomes dot.');
+  if (id === 'I2') lines.push('The card\'s second line sends students to China and Japan ("look at their numbers"): both words must be easy to find and read.');
+  lines.push(
     id === 'H2'
       ? 'Every word sits beside its own dot, is readable at projector size, and hides no other word and no dot. Where dots crowd (north-west Europe: Ireland, the United Kingdom, the Netherlands, Germany, Poland) check that each number is clearly its own dot\'s. A word may hang over the edge of the map\'s frame (Ireland and Portugal on the west, Russia on the east): that is where the room is. The picture is a window cut to the dots, so it leaves out the empty Arctic and the south of the frame.'
-      : 'Every word sits beside its own dot, is readable at projector size, and hides no other word and no dot. The picture is a window cut to the dots: it leaves out the empty north and south of the frame and some of its west, so the picture\'s left edge is not the frame\'s.',
-    ...(id === 'H2' ? [] : ['The east edge of the frame cuts Hokkaido (the frame ends at 145 degrees east): that is the frame, not a missing piece.']),
+      : id === 'L3'
+        ? 'Every word sits beside its own dot, is readable at projector size, and hides no other word and no dot. The picture is a window of the frame cut to the dots, so its left edge is not the frame\'s: it starts just west of Britain and Spain, and Ireland and Portugal are left out. Finland\'s word hangs over the frame\'s east edge (the thin grey line): that is where the room is.'
+        : 'Every word sits beside its own dot, is readable at projector size, and hides no other word and no dot. The picture is a window cut to the dots: it leaves out the empty north and south of the frame and some of its west, so the picture\'s left edge is not the frame\'s.',
+  );
+  if (id === 'I2' || id === 'J3' || id === 'K2') lines.push('The east edge of the frame cuts Hokkaido (the frame ends at 145 degrees east): that is the frame, not a missing piece.');
+  lines.push(
     `Source line (spec §3.4, as the card prints it): ${source}`,
     'Nothing on this map gives the puzzle away: it holds place names and numbers only (no dates, no "selection", no "spread"). The card is a "before" card: students see it before the plot.',
-  ];
+  );
+  return lines;
 }
 
 interface Options { ids: string[]; out: string; cards: boolean }
@@ -152,8 +192,9 @@ async function main(argv: string[]): Promise<void> {
   Object.assign(globalThis, { document: dom.window.document, window: dom.window });
   const { DATA } = await import('../src/data');
   const { A1_CONFIRMED_LABELS, DISTRIBUTION_MAP_GENE, mapSpec, MAP_SPECS_BUILT, specA1 } = await import('../src/maps');
-  const { renderMap } = await import('../src/plots/map');
-  const { CARDS, distributionRows } = await import('../src/cards');
+  const { dotRadius, renderMap } = await import('../src/plots/map');
+  const { CARDS, DISTRIBUTION_SCALE_MAX, distributionRows } = await import('../src/cards');
+  const { sourceWithMapSuffix } = await import('../src/cardView');
   const { IRELAND_FOOTNOTE } = await import('../src/content');
   const { SVG_NS } = await import('../src/plots/svg');
   for (const id of options.ids) {
@@ -192,9 +233,13 @@ async function main(argv: string[]): Promise<void> {
     const named = id === 'A1' && candidates.length > 0 ? drawn(specA1(DATA, candidates)) : null;
     const title = id in CARDS ? CARDS[id as keyof typeof CARDS].title : id;
     const aspect = spec.view !== undefined ? spec.view.width / spec.view.height : 1000 / 700;
-    // The distribution maps' lines are written from the real rows (Task 24); the others' are fixed words above.
-    const distribution = id === 'H2' || id === 'I2' || id === 'J3'
-      ? distributionShouldShow(id, distributionRows(DATA, DISTRIBUTION_MAP_GENE[id]), CARDS[id].source ?? '', IRELAND_FOOTNOTE) : [];
+    // The distribution maps' lines are written from the real rows (Tasks 24 and 27); the others' are fixed words above. The source line is
+    // the card's as it prints with its map: K2's spec line has no Natural Earth line and gets it (sourceWithMapSuffix, spec §6).
+    const distribution = id === 'H2' || id === 'I2' || id === 'J3' || id === 'K2' || id === 'L3'
+      ? distributionShouldShow(
+        id, distributionRows(DATA, DISTRIBUTION_MAP_GENE[id]), sourceWithMapSuffix(CARDS[id].source, true) ?? '', IRELAND_FOOTNOTE,
+        (copies) => dotRadius(copies, DISTRIBUTION_SCALE_MAX[DISTRIBUTION_MAP_GENE[id]]),
+      ) : [];
     // On the card the rows without coordinates sit in a side list beside the picture, which this picture of the svg alone does not draw.
     const sideNote = (spec.sideList ?? []).length > 0
       ? ` On the card the side list sits beside it: ${(spec.sideList ?? []).map((r) => `${r.label} ${r.display}`).join(', ')}.` : '';

@@ -8,6 +8,7 @@ import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 import { PORTRAIT_HEIGHT, THUMB_WIDTH } from '../scripts/fetch-assets.mjs';
 import { CARDS } from '../src/cards';
+import { MAP_SPECS_BUILT } from '../src/maps';
 import { CARD_IDS } from '../src/types';
 import { a1LabelCandidates, forceImages, forceMaps, IMAGE_CARD_IDS, MAP_CARD_IDS, PHOTO_SIZES, standInPicture } from '../e2e/mapBuild';
 
@@ -24,8 +25,10 @@ const MANIFEST_ID = '/repo/assets/manifest.json';
 const MAPS_ID = '/repo/src/maps.ts';
 
 describe('forceMaps: the flags (src/features.ts)', () => {
-  it('covers the seven map cards built so far', () => {
-    expect([...MAP_CARD_IDS]).toEqual(['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3']);
+  it('covers the nine map cards built so far, and every one is in MAP_SPECS_BUILT (the seam cannot force a map that has no spec)', () => {
+    expect([...MAP_CARD_IDS]).toEqual(['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3']);
+    for (const id of MAP_CARD_IDS) expect(MAP_SPECS_BUILT.has(id), id).toBe(true);
+    expect([...MAP_SPECS_BUILT].filter((id) => !MAP_CARD_IDS.includes(id)), 'a built map the proofs do not cover').toEqual([]);
   });
 
   it('sets the map flags to true and changes no other line of the module', () => {
@@ -285,7 +288,7 @@ describe('PHOTO_SIZES: the stand-ins\' table', () => {
 });
 
 describe('forceMaps and forceImages together (the build the layout matrix uses)', () => {
-  it('turn the seven map flags and the eight image flags on, and nothing else, whichever runs first', () => {
+  it('turn the nine map flags and the eight image flags on, and nothing else, whichever runs first', () => {
     const both = imagesOf()(transformOf()(featuresTs, FEATURES_ID)!.code, FEATURES_ID)!.code;
     const reverse = transformOf()(imagesOf()(featuresTs, FEATURES_ID)!.code, FEATURES_ID)!.code;
     expect(reverse).toBe(both);

@@ -128,6 +128,54 @@ describe('npm run preview-maps', () => {
     expect(sha(MANIFEST)).toBe(before);
   });
 
+  // Task 27: K2 (TYK2, Old World frame, one decimal, fixed 0-15 scale) and L3 (HLA-DQ2, Europe only, Europe-west frame), written from the real rows.
+  it('K2, L3: what to look for from the real rows, the one decimal and the fixed scale, the side lists, the source line as the card prints it with its map, and the maps drawn with their words', () => {
+    const before = sha(MANIFEST);
+    const r = preview('K2', 'L3');
+    expect(r.status, r.stderr).toBe(0);
+    const html = readFileSync(join(r.dir, 'maps.html'), 'utf8');
+    const text = unescape(html);
+    for (const id of ['K2', 'L3']) expect(text).toContain(`<section id="${id}">`);
+    expect(text).toContain('npm run visual-check -- K2 L3</code>');
+    // K2: seven 1000 Genomes places with one decimal, the four zeros as rings, the three gnomAD rows in the side list, the fixed scale.
+    expect(text).toContain('One dot for each of 7 places where 1000 Genomes took its samples');
+    expect(text).toContain('Spain 3.3, Tuscany 2.8, Britain 2.7, China 0.0, Japan 0.0, Nigeria 0.0, Kenya 0.0');
+    expect(text).toContain('Britain, Tuscany and Spain in Europe; China (Beijing) and Japan (Tokyo) in East Asia; Nigeria (Ibadan) and Kenya (Webuye) in Africa.');
+    expect(text).toContain('China, Japan, Nigeria, Kenya print 0.0 and are the small hollow rings');
+    expect(text).toContain('even the smallest (Britain 2.7), is a filled dot about twice as wide as a ring');
+    expect(text).toContain('The scale of this map is fixed at 0 to 15 copies in every 100');
+    expect(text).toContain('Europe (large sample) 4.4, Middle East 3.1, Finland 2.9: no point for them');
+    expect(text).toContain('On the card the side list sits beside it: Europe (large sample) 4.4, Middle East 3.1, Finland 2.9.');
+    expect(text).toContain('The side list\'s "Finland" is the gnomAD Finnish sample');
+    expect(text).toContain('>Spain 3.3</text>');
+    expect(text).toContain('>Britain 2.7</text>');
+    // Spec §3.4's K2 line has no Natural Earth line; the card adds it when its map is drawn (§6), and the page says the line as printed.
+    expect(text).toContain('Source line (spec §3.4, as the card prints it): Data: gnomAD; 1000 Genomes Project. Europe (large sample) = gnomAD non-Finnish Europeans; Finland = gnomAD Finnish. Map outline: Made with Natural Earth.');
+    // L3: four places, whole numbers, Europe only on its own frame, one row in the side list.
+    expect(text).toContain('One dot for each of 4 places where 1000 Genomes took its samples');
+    expect(text).toContain('Spain 25, Tuscany 21, Britain 16, Finland 9');
+    expect(text).toContain('Britain, Finland, Tuscany and Spain in Europe. Each dot in its own country or city.');
+    expect(text).toContain('No number here is 0, so there are no hollow rings: even the smallest (Finland 9) is a filled dot');
+    expect(text).toContain('This map shows Europe only, on its own western-Europe frame');
+    expect(text).toContain('Europe (large sample) 22: no point for it');
+    expect(text).toContain('On the card the side list sits beside it: Europe (large sample) 22.');
+    expect(text).toContain('>Spain 25</text>');
+    expect(text).toContain('Source line (spec §3.4, as the card prints it): Data: 1000 Genomes Project; gnomAD. Europe (large sample) = gnomAD non-Finnish Europeans. Map outline: Made with Natural Earth.');
+    // Both are "before" cards: nothing on the page may say what the plot shows. (The words of the instructions below the maps, not the maps.)
+    for (const id of ['K2', 'L3']) {
+      const section = text.slice(text.indexOf(`<section id="${id}">`), text.indexOf('</section>', text.indexOf(`<section id="${id}">`)));
+      expect(section, id).toContain('Nothing on this map gives the puzzle away');
+      expect(section, `${id}: the map's own words`).not.toMatch(/>[^<]*(selection|advantage|spread|rose|once more common)[^<]*<\/text>/i);
+    }
+    // Each is drawn once per lab screen, on its own frame (the Europe-west outline is the one L3 draws).
+    expect(html.match(/data-map="K2"/g)).toHaveLength(2);
+    expect(html.match(/data-map="L3"/g)).toHaveLength(2);
+    expect(html.match(/data-frame="europeWest"/g)).toHaveLength(2);
+    expect(html.match(/data-frame="oldWorld"/g)).toHaveLength(2);
+    expect(html).not.toMatch(/<script/i);
+    expect(sha(MANIFEST)).toBe(before);
+  });
+
   it('refuses a map that is not built, and an option it does not know, and writes nothing', () => {
     const unbuilt = preview('F1inset');
     expect(unbuilt.status).toBe(1);

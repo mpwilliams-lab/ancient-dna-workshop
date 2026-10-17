@@ -9,27 +9,29 @@ import { DATA, idle, intersects, prompt, screenViolations, settle, watch, type R
 import { ALLOWED_FITS, CASES as cases, withPage } from './viewports';
 
 /**
- * The map cards A1 (Task 23), D1, E1 and G1 (Task 20), and the distribution cards H2, I2 and J3 (Task 24), in their MAP form. The shipped
- * build draws their text form until the instructor has checked the maps, so this spec builds its own copy of the app with the seven map
- * flags forced on and the seven maps recorded as checked, and A1's label list filled with the eight names the data build chose
- * (e2e/mapBuild.ts: an in-memory change while Vite reads three modules, into a temporary directory; nothing in the repo is written and
- * the shipped flags and the empty A1 list stay as committed). It then asks what spec §5.2 and §5.4 ask of every card, of these seven:
+ * The map cards A1 (Task 23), D1, E1 and G1 (Task 20), and the distribution cards H2, I2 and J3 (Task 24) and K2 and L3 (Task 27), in
+ * their MAP form. The shipped build draws their text form until the instructor has checked the maps, so this spec builds its own copy of
+ * the app with the nine map flags forced on and the nine maps recorded as checked, and A1's label list filled with the eight names the
+ * data build chose (e2e/mapBuild.ts: an in-memory change while Vite reads three modules, into a temporary directory; nothing in the repo
+ * is written and the shipped flags and the empty A1 list stay as committed). It then asks what spec §5.2 and §5.4 ask of every card, of these nine:
  * no page scroll, title, first body line and every footer button on screen, the prompt and hint line uncovered, and no `dense` at the
  * lab-standard screens at 100% (`normal`); plus what only a map can get wrong: a label cut off or overlapped, a picture too small to
  * read, rule violations in the map text, and for A1 a dot cut off by its window or hidden under a word. A1's window does not depend on
  * its labels (src/maps.ts specA1), so the card is the same size with the map labelled or not, and the labelled build proves both.
  * The distribution maps (the real data's rows, in the real browser) are asked for a dot for every row with coordinates (a ring exactly
- * where the number prints 0, a dot of at least 4 map units otherwise), no word over any dot or over another word, every word whole
- * inside the picture, the side list for the rows without coordinates in view beside it, and H2's Ireland footnote under the map.
+ * where the number prints 0, or 0.0 for K2, a dot of at least 4 map units otherwise), no word over any dot or over another word, every
+ * word whole inside the picture, the side list for the rows without coordinates in view beside it, and H2's Ireland footnote under the map.
+ * K2 draws on the Old World frame with one decimal on the fixed 0-15 scale (its dots are about 6 units, its four zeros are rings); L3 on the
+ * Europe-west frame, four dots and a one-row side list, the picture taller than wide.
  *
  * The viewport matrix is e2e/viewports.ts's, the one e2e/layout.spec.ts runs too (26 cases plus LAB_VIEWPORTS).
  */
 
-/** The map cards built so far, in card order (Task 27 adds its own for K2 and L3). */
-const IDS = ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3'] as const satisfies readonly CardId[];
+/** The map cards built so far, in card order (Task 29 adds the Roman inset). */
+const IDS = ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3'] as const satisfies readonly CardId[];
 type MapCardId = (typeof IDS)[number];
-type DistributionCardId = 'H2' | 'I2' | 'J3';
-const isDistribution = (id: MapCardId): id is DistributionCardId => id === 'H2' || id === 'I2' || id === 'J3';
+type DistributionCardId = 'H2' | 'I2' | 'J3' | 'K2' | 'L3';
+const isDistribution = (id: MapCardId): id is DistributionCardId => id in DISTRIBUTION_MAP_GENE;
 const hasCoordinates = (r: { lat?: number; lon?: number }): boolean => r.lat !== undefined && r.lon !== undefined;
 /** The rows of a distribution card from the real data, in the card's order: the ones with coordinates are dots, the others the side list. */
 const rowsOf = (id: DistributionCardId) => distributionRows(DATA, DISTRIBUTION_MAP_GENE[id]);
@@ -167,7 +169,7 @@ test.describe('map cards in their map form', () => {
     expect([...IDS]).toEqual([...MAP_CARD_IDS]);
   });
 
-  test('the scratch build differs from the shipped flags in the seven map flags only', async ({ page }) => {
+  test('the scratch build differs from the shipped flags in the nine map flags only', async ({ page }) => {
     await page.goto(`${app.url}?test&reset`);
     await expect(prompt(page)).toBeVisible();
     await idle(page);
@@ -176,7 +178,7 @@ test.describe('map cards in their map form', () => {
   });
 
   for (const c of cases) {
-    test(`A1, D1, E1, G1, H2, I2 and J3 show their map and fit: ${c.name}`, async ({ browser }, testInfo) => {
+    test(`A1, D1, E1, G1, H2, I2, J3, K2 and L3 show their map and fit: ${c.name}`, async ({ browser }, testInfo) => {
       test.setTimeout(240_000);
       await withPage(browser, c, async (page) => {
         const w = watch(page);
@@ -294,7 +296,7 @@ test.describe('map cards in their map form', () => {
             const dotRows = rows.filter(hasCoordinates);
             const sideRows = rows.filter((r) => !hasCoordinates(r));
             expect(m!.values, `${id}: a dot for every row with coordinates`).toHaveLength(dotRows.length);
-            expect(m!.values.filter((v) => v.zero), `${id}: a ring for every number that prints 0, and for no other`).toHaveLength(dotRows.filter((r) => r.display === '0').length);
+            expect(m!.values.filter((v) => v.zero), `${id}: a ring for every number that prints 0, and for no other`).toHaveLength(dotRows.filter((r) => Number(r.display) === 0).length);   // (K2 prints "0.0")
             for (const v of m!.values) {
               const at = `${v.zero ? 'ring' : 'dot'} at ${v.cx.toFixed(0)}, ${v.cy.toFixed(0)}`;
               expect(v.zero ? v.r === 3 : v.r >= 4, `${id}: the ${at} has radius ${v.r}`).toBe(true);
@@ -343,7 +345,7 @@ test.describe('map cards in their map form', () => {
     });
   }
 
-  test('the map cards are the seven and only seven cards that draw a map in this build', async ({ page }) => {
+  test('the map cards are the nine and only nine cards that draw a map in this build', async ({ page }) => {
     await page.goto(`${app.url}?test&reset`);
     await expect(prompt(page)).toBeVisible();
     await idle(page);
