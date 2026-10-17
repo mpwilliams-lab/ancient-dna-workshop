@@ -80,6 +80,12 @@
   font-style: italic;
   color: #4d4d4d;
 }
+/* The finale caption waits, hidden, until the animation ends (spec §2.3). It keeps its place while it waits: the strip would
+   otherwise grow when the caption appears, which shrinks the svg above it and, in a short window, rescales the whole plot. */
+.pca-caption[hidden] {
+  display: block;
+  visibility: hidden;
+}
 /* Chips (spec §3.5): a pill with its icon; the stem and icon carry the meaning, the colour only helps. */
 .chip {
   display: inline-flex;

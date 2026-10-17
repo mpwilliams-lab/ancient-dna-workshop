@@ -2,14 +2,14 @@
 // The shell prints RESTORED_NOTICE exactly once, after the Controller is built on a restored session,
 // and only when that restore actually took effect. The Controller (Task 10) never prints it.
 import type { CardId, WorkshopData } from './types';
-import { Controller } from './controller';
+import { Controller, type RenderOpts } from './controller';
 import { mountTerminal, type TerminalView } from './terminal';
 import { mountCardView, type CardView } from './cardView';
 import { mountCredits, type CreditsView } from './credits';
 import type { AssetManifest } from './assetManifest';
 import type { ImageUrls } from './assets';
 import { FEATURES, type Features } from './features';
-import { renderPlot } from './plots/index';
+import { finishPlotAnimations, plotIsAnimating, renderPlot } from './plots/index';
 import { clearSession, loadSession, type SessionStorageLike, type SessionV2 } from './session';
 import {
   APP_TITLE, BACK_BUTTON, BACK_BUTTON_LABEL, CREDITS_LINK, RESTORED_NOTICE, WRAP_BUTTON, WRAP_CLOSE, WRAP_CREDIT, WRAP_LINE,
@@ -146,7 +146,12 @@ export function boot(env: BootEnv): Booted {
   }, features, env.assets);
   const deps = {
     data, terminal, store,
-    renderPlot: (p: Parameters<typeof renderPlot>[2], opts?: { animate?: boolean }) => renderPlot(plotHost, data, p, opts),
+    // The plot router reads the flag set from its options (the finale needs finaleAnimation); restore and Back add animate: false.
+    renderPlot: (p: Parameters<typeof renderPlot>[2], opts?: RenderOpts) => renderPlot(plotHost, data, p, { ...opts, features }),
+    // The finale (spec §2.3) is the one plot animation a key can cut short: a blank Enter, a new command and Back (spec §4.4, §4.5 test 6)
+    // ask the plot host whether it is still playing and, if so, jump it to the final frame.
+    plotAnimating: () => plotIsAnimating(plotHost),
+    finishPlotAnimation: () => finishPlotAnimations(plotHost),
     cards: cardView,
     features,
     // The header Back button is disabled on the first screen. The Controller reports every change of screen, its last

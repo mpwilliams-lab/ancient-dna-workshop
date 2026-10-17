@@ -99,8 +99,10 @@ export function frameTransition(from: PcaScale, to: PcaScale): string {
   return `matrix(${s}, 0, 0, ${s}, ${tx}, ${ty})`;
 }
 
-function reducedMotion(): boolean {
-  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** True when the visitor asked the system for less motion: the frame change and the finale are then drawn at once. */
+export function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 interface LegendItem { key: string; tip: string; text: string; mark: (x: number, y: number) => SVGElement }
@@ -357,7 +359,7 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState, 
   wireTips(svg);
 
   // 7. A live frame change animates (~0.5 s) where the browser supports it; restore and Back pass animate: false.
-  if (opts.animate !== false && prev && prevFrameId !== p.frame && typeof world.animate === 'function' && !reducedMotion()) {
+  if (opts.animate !== false && prev && prevFrameId !== p.frame && typeof world.animate === 'function' && !prefersReducedMotion()) {
     world.animate(
       [{ transform: frameTransition(makeScale(prev), sc) }, { transform: 'matrix(1, 0, 0, 1, 0, 0)' }],
       { duration: 500, easing: 'ease-in-out' },
@@ -385,4 +387,58 @@ export function renderPcaCaptions(doc: Document, items: PcaCaptionItem[]): HTMLD
     div.append(p);
   }
   return div;
+}
+
+// ---- Finale (spec §2.3, P2 flag finaleAnimation): run_pca(period = "all") played live ----
+export const FINALE_TIMING = { fadeMs: 250, stepMs: 600, pauseMs: 900 } as const;
+/** Britain today's single pulse ring: grows from 20% to full radius while it fades out. */
+export const FINALE_PULSE = { ms: 600, r: 60, strokeWidth: 3 } as const;
+const FINALE_ANCIENT: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking'];
+
+/** When each period layer starts to fade in (ms after the plot is drawn): oldest first, Britain today last. */
+export function finaleSchedule(): { layer: PeriodId; delay: number }[] {
+  const steps = FINALE_ANCIENT.map((layer, i) => ({ layer, delay: i * FINALE_TIMING.stepMs }));
+  const lastEnd = (FINALE_ANCIENT.length - 1) * FINALE_TIMING.stepMs + FINALE_TIMING.fadeMs;
+  steps.push({ layer: 'Today', delay: lastEnd + FINALE_TIMING.pauseMs });
+  return steps;
+}
+
+/** Whole finale, first fade to the end of the pulse ring (5,350 ms). */
+export function finaleTotalMs(): number {
+  const s = finaleSchedule();
+  return s[s.length - 1]!.delay + Math.max(FINALE_TIMING.fadeMs, FINALE_PULSE.ms);
+}
+
+/**
+ * Starts the finale on an svg that renderPca has just drawn for focus 'all'. Returns the animations in schedule
+ * order with the pulse ring last (it ends last). Only Web Animations are used: finish() lands on the final frame,
+ * and no timer is ever started. Returns [] when the browser cannot animate.
+ */
+export function animateFinale(svg: SVGSVGElement, data: WorkshopData): Animation[] {
+  const out: Animation[] = [];
+  const schedule = finaleSchedule();
+  for (const { layer, delay } of schedule) {
+    const g = svg.querySelector<SVGGElement>(`g.layer.period[data-layer="${layer}"]`);
+    if (!g || typeof g.animate !== 'function') continue;
+    out.push(g.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: FINALE_TIMING.fadeMs, delay, fill: 'backwards', easing: 'ease-out',
+    }));
+  }
+  const today = data.periods.find((pi) => pi.id === 'Today')?.centre;
+  if (today && out.length > 0) {
+    const sc = makeScale(data.frames.europe); // focus 'all' always uses the Europe frame
+    const ring = svgEl('circle', {
+      class: 'finale-pulse', cx: sc.toX(today.x), cy: sc.toY(today.y), r: FINALE_PULSE.r,
+      fill: 'none', stroke: TODAY_RING.stroke, 'stroke-width': FINALE_PULSE.strokeWidth,
+      opacity: '0', 'pointer-events': 'none', style: 'transform-box: fill-box; transform-origin: center',
+    });
+    (svg.querySelector('g.world') ?? svg).append(ring);
+    if (typeof ring.animate === 'function') {
+      out.push(ring.animate(
+        [{ opacity: 0.9, transform: 'scale(0.2)' }, { opacity: 0, transform: 'scale(1)' }],
+        { duration: FINALE_PULSE.ms, delay: schedule[schedule.length - 1]!.delay, easing: 'ease-out' },
+      ));
+    }
+  }
+  return out;
 }

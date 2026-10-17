@@ -6,10 +6,13 @@ import { renderCardBody } from '../src/cardView';
 import { execute } from '../src/commands';
 import { ALL_OFF, ALL_ON, FEATURE_FLAGS, FEATURES, withFeatures, type FeatureFlag } from '../src/features';
 import { CONSUMER_BARS_LOG, HELP_LINES, helpLines } from '../src/content';
+import { INITIAL_PLOT, reducePlot } from '../src/plotState';
+import { plotIsAnimating, renderPlot } from '../src/plots/index';
 import { ruleViolations } from './contentRules';
 import { FIXTURE } from './fixtures/fixture';
 import { checkedManifest } from './helpers/assetEnv';
 import { cardCtx, flagSet, openOnCard } from './helpers/cardCtx';
+import { installFakeAnimate } from './helpers/fakeAnimation';
 
 // The flags switched on so far, in landing order (spec §10.3). Each P2/P3 task appends its own flag(s) in its last commit;
 // the release task (31) removes any that are cut at the merge cutoff.
@@ -189,4 +192,48 @@ describe('images.E2 / images.F1 / images.G2 (Task 21, spec §10.3)', () => {
       for (const s of srcs) expect(s).toMatch(/^data:image\/jpeg;base64,/);
     });
   }
+});
+
+describe('finaleAnimation (Task 22, spec §10.3)', () => {
+  const all = reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'all' }, FIXTURE);
+  /** run_pca(period = "all") drawn live (no animate option) under the given flag set, with Web Animations recorded. */
+  function drawLive(features: ReturnType<typeof withFeatures>) {
+    const fake = installFakeAnimate();
+    const host = document.createElement('div');
+    try {
+      renderPlot(host, FIXTURE, all, { features });
+      return {
+        finale: fake.created.filter((a) => a.target.matches('g.layer.period, circle.finale-pulse')).length,
+        animating: host.querySelector('svg.plot-svg')!.hasAttribute('data-animating'),
+        captionHidden: host.querySelector<HTMLElement>('p.pca-caption[data-caption="FINALE_CAPTION"]')!.hidden,
+        layers: host.querySelectorAll('g.layer.period').length,
+        host,
+      };
+    } finally {
+      fake.restore();
+    }
+  }
+
+  it('false: run_pca(period = "all") is the static plot with FINALE_CAPTION at once', () => {
+    const r = drawLive(withFeatures({ finaleAnimation: false }));
+    expect(r.finale).toBe(0);
+    expect(r.animating).toBe(false);
+    expect(r.captionHidden).toBe(false);
+    expect(r.layers).toBe(8);
+    expect(plotIsAnimating(r.host)).toBe(false);
+  });
+  it('true: the same call plays the finale (eight fades and the pulse ring) and holds the caption back', () => {
+    const r = drawLive(withFeatures({ finaleAnimation: true }));
+    expect(r.finale).toBe(9);
+    expect(r.animating).toBe(true);
+    expect(r.captionHidden).toBe(true);
+    expect(r.layers).toBe(8);
+    expect(plotIsAnimating(r.host)).toBe(true);
+  });
+  it('the flag changes nothing but the animation: the false path and the true path draw the same layers and captions', () => {
+    const off = drawLive(withFeatures({ finaleAnimation: false })).host;
+    const on = drawLive(withFeatures({ finaleAnimation: true })).host;
+    const shape = (h: HTMLElement): string[] => [...h.querySelectorAll('g.layer, .pca-captions > *')].map((e) => `${e.tagName}:${e.getAttribute('data-layer') ?? e.getAttribute('data-caption') ?? e.getAttribute('data-chip') ?? ''}`);
+    expect(shape(on)).toEqual(shape(off));
+  });
 });

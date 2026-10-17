@@ -205,13 +205,15 @@ describe('renderPlot router', () => {
     }
   });
 
-  it('plotIsAnimating is false for every static plot and reads svg[data-animating="true"]', () => {
+  it('plotIsAnimating is false for every static plot, and reports the finale run: a data-animating mark set by hand does not count (Task 22)', () => {
     const d = data();
     const h = host();
-    renderPlot(h, d, reducePlot(INITIAL_PLOT, pca('all'), d));
+    renderPlot(h, d, reducePlot(INITIAL_PLOT, pca('all'), d)); // jsdom has no Web Animations, so the finale is the static plot
+    expect(plotIsAnimating(h)).toBe(false);
+    renderPlot(h, d, reducePlot(INITIAL_PLOT, pca('IronAge'), d));
     expect(plotIsAnimating(h)).toBe(false);
     h.querySelector('svg.plot-svg')!.setAttribute('data-animating', 'true');
-    expect(plotIsAnimating(h)).toBe(true);
+    expect(plotIsAnimating(h)).toBe(false);                    // the mark is only what a running finale leaves; the run is what reports
   });
 
   it('finishPlotAnimations finishes every running animation under the host, and is safe without the API', () => {
