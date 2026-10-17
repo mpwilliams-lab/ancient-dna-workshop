@@ -8,13 +8,13 @@
     { "id": "Roman", "order": 4, "frame": "britain", "n_pca": 3, "n_admix": 2, "centre": { "x": 0.0163, "y": 0.02907 } },
     { "id": "AngloSaxon", "order": 5, "frame": "britain", "n_pca": 4, "n_admix": 4, "centre": { "x": 0.01975, "y": 0.0325 } },
     { "id": "Viking", "order": 6, "frame": "britain", "n_pca": 3, "n_admix": 3, "centre": { "x": 0.0197, "y": 0.03377 } },
-    { "id": "Today", "order": 7, "frame": "europe", "n_pca": 4, "n_admix": 4, "centre": { "x": 0.01825, "y": 0.03 } }
+    { "id": "Today", "order": 7, "frame": "britain", "n_pca": 4, "n_admix": 4, "centre": { "x": 0.01825, "y": 0.03 } }
   ],
   "points": [
     { "period": "FirstFarmers", "points": [{ "x": -0.014, "y": -0.029 }, { "x": -0.01, "y": -0.031 }, { "x": -0.012, "y": -0.028 }] },
     { "period": "BellBeaker", "points": [{ "x": 0.018, "y": 0.036 }, { "x": 0.022, "y": 0.034 }, { "x": 0.02, "y": 0.037 }, { "x": 0.021, "y": 0.033 }] },
     { "period": "BronzeAge", "points": [{ "x": 0.016, "y": 0.032 }, { "x": 0.02, "y": 0.03 }, { "x": 0.018, "y": 0.033 }] },
-    { "period": "IronAge", "points": [{ "x": 0.014, "y": 0.029 }, { "x": 0.018, "y": 0.027 }, { "x": 0.016, "y": 0.03 }, { "x": 0.017, "y": 0.026 }] },
+    { "period": "IronAge", "points": [{ "x": 0.014, "y": 0.029, "region": "ENG_S" }, { "x": 0.018, "y": 0.027, "region": "ENG_M" }, { "x": 0.016, "y": 0.03, "region": "SCO" }, { "x": 0.017, "y": 0.026, "region": "WAL" }] },
     { "period": "Roman", "points": [{ "x": 0.0143, "y": 0.0294 }, { "x": 0.0183, "y": 0.0274 }, { "x": 0.0163, "y": 0.0304 }] },
     { "period": "AngloSaxon", "points": [{ "x": 0.0175, "y": 0.0335, "east": true }, { "x": 0.0215, "y": 0.0315, "east": false }, { "x": 0.0195, "y": 0.0345, "east": true }, { "x": 0.0205, "y": 0.0305, "east": false }] },
     { "period": "Viking", "points": [{ "x": 0.0177, "y": 0.0341 }, { "x": 0.0217, "y": 0.0321 }, { "x": 0.0197, "y": 0.0351 }] },
@@ -156,5 +156,75 @@
     { "t": 700, "key": "Medieval" },
     { "t": 0, "key": "Today" }
   ],
-  "logs": { "snps_total": 579720, "snps_used": 496901, "pca_samples_used": 1163, "admix_snps": 78188, "admix_individuals": 1194 }
+  "logs": { "snps_total": 579720, "snps_used": 496901, "pca_samples_used": 1163, "admix_snps": 78188, "admix_individuals": 1194, "pca_people_unique": 950 },
+  "trait_maps": {
+    "LCT": [
+      { "label_key": "country:Ireland", "lat": 53.3, "lon": -8.0, "value": 0.93, "dataset": "liebert2017" },
+      { "label_key": "country:Norway", "lat": 61.0, "lon": 9.0, "value": 0.85, "dataset": "liebert2017" },
+      { "label_key": "country:UK", "lat": 54.0, "lon": -2.0, "value": 0.75, "dataset": "liebert2017" },
+      { "label_key": "country:Sweden", "lat": 62.0, "lon": 15.0, "value": 0.81, "dataset": "liebert2017" },
+      { "label_key": "country:Netherlands", "lat": 52.2, "lon": 5.5, "value": 0.83, "dataset": "liebert2017" },
+      { "label_key": "country:Finland", "lat": 64.0, "lon": 26.0, "value": 0.62, "dataset": "liebert2017" },
+      { "label_key": "country:France", "lat": 46.6, "lon": 2.4, "value": 0.53, "dataset": "liebert2017" },
+      { "label_key": "country:Germany", "lat": 51.2, "lon": 10.4, "value": 0.66, "dataset": "liebert2017" },
+      { "label_key": "country:Estonia", "lat": 58.7, "lon": 25.0, "value": 0.64, "dataset": "liebert2017" },
+      { "label_key": "country:Hungary", "lat": 47.2, "lon": 19.4, "value": 0.38, "dataset": "liebert2017" },
+      { "label_key": "country:Portugal", "lat": 39.6, "lon": -8.0, "value": 0.31, "dataset": "liebert2017" },
+      { "label_key": "country:Spain", "lat": 40.2, "lon": -3.7, "value": 0.29, "dataset": "liebert2017" },
+      { "label_key": "country:Poland", "lat": 52.1, "lon": 19.4, "value": 0.42, "dataset": "liebert2017" },
+      { "label_key": "country:Russia", "lat": 55.8, "lon": 37.6, "value": 0.36, "dataset": "liebert2017" },
+      { "label_key": "country:Romania", "lat": 45.9, "lon": 24.9, "value": 0.24, "dataset": "liebert2017" },
+      { "label_key": "country:Macedonia", "lat": 41.6, "lon": 21.7, "value": 0.18, "dataset": "liebert2017" },
+      { "label_key": "country:Belarus", "lat": 53.7, "lon": 27.9, "value": 0.49, "dataset": "liebert2017" },
+      { "label_key": "country:Ukraine", "lat": 49.0, "lon": 31.4, "value": 0.33, "dataset": "liebert2017" },
+      { "label_key": "country:Italy", "lat": 42.8, "lon": 12.6, "value": 0.12, "dataset": "liebert2017" },
+      { "label_key": "country:Greece", "lat": 39.1, "lon": 22.0, "value": 0.07, "dataset": "liebert2017" }
+    ],
+    "SLC45A2": [
+      { "label_key": "1kg:GBR", "lat": 52.5, "lon": -1.5, "value": 0.978, "dataset": "1000g", "allele_count": 178 },
+      { "label_key": "1kg:TSI", "lat": 43.5, "lon": 11.0, "value": 0.893, "dataset": "1000g", "allele_count": 191 },
+      { "label_key": "1kg:FIN", "lat": 61.0, "lon": 25.0, "value": 0.97, "dataset": "1000g", "allele_count": 196 },
+      { "label_key": "1kg:IBS", "lat": 40.4, "lon": -3.7, "value": 0.958, "dataset": "1000g", "allele_count": 205 },
+      { "label_key": "gnomad:mid", "value": 0.4694, "dataset": "gnomad", "allele_count": 138 },
+      { "label_key": "1kg:PJL", "lat": 31.5, "lon": 74.3, "value": 0.37, "dataset": "1000g", "allele_count": 71 },
+      { "label_key": "1kg:BEB", "lat": 23.8, "lon": 90.4, "value": 0.2, "dataset": "1000g", "allele_count": 35 },
+      { "label_key": "1kg:CHB", "lat": 39.9, "lon": 116.4, "value": 0.01, "dataset": "1000g", "allele_count": 2 },
+      { "label_key": "1kg:LWK", "lat": 0.6, "lon": 34.8, "value": 0.005, "dataset": "1000g", "allele_count": 1 },
+      { "label_key": "1kg:JPT", "lat": 35.7, "lon": 139.7, "value": 0, "dataset": "1000g", "allele_count": 0 },
+      { "label_key": "1kg:YRI", "lat": 7.4, "lon": 3.9, "value": 0, "dataset": "1000g", "allele_count": 0 }
+    ],
+    "HERC2": [
+      { "label_key": "1kg:FIN", "lat": 61.0, "lon": 25.0, "value": 0.854, "dataset": "1000g", "allele_count": 169 },
+      { "label_key": "1kg:GBR", "lat": 52.5, "lon": -1.5, "value": 0.692, "dataset": "1000g", "allele_count": 126 },
+      { "label_key": "1kg:TSI", "lat": 43.5, "lon": 11.0, "value": 0.322, "dataset": "1000g", "allele_count": 69 },
+      { "label_key": "1kg:IBS", "lat": 40.4, "lon": -3.7, "value": 0.36, "dataset": "1000g", "allele_count": 77 },
+      { "label_key": "gnomad:mid", "value": 0.11, "dataset": "gnomad", "allele_count": 32 },
+      { "label_key": "1kg:PJL", "lat": 31.5, "lon": 74.3, "value": 0.13, "dataset": "1000g", "allele_count": 25 },
+      { "label_key": "1kg:BEB", "lat": 23.8, "lon": 90.4, "value": 0.04, "dataset": "1000g", "allele_count": 7 },
+      { "label_key": "1kg:CHB", "lat": 39.9, "lon": 116.4, "value": 0, "dataset": "1000g", "allele_count": 0 },
+      { "label_key": "1kg:JPT", "lat": 35.7, "lon": 139.7, "value": 0, "dataset": "1000g", "allele_count": 0 },
+      { "label_key": "1kg:YRI", "lat": 7.4, "lon": 3.9, "value": 0, "dataset": "1000g", "allele_count": 0 },
+      { "label_key": "1kg:LWK", "lat": 0.6, "lon": 34.8, "value": 0, "dataset": "1000g", "allele_count": 0 }
+    ],
+    "TYK2": [
+      { "label_key": "gnomad:nfe", "value": 0.044, "dataset": "gnomad", "allele_count": 2990 },
+      { "label_key": "1kg:IBS", "lat": 40.4, "lon": -3.7, "value": 0.0514, "dataset": "1000g", "allele_count": 11 },
+      { "label_key": "gnomad:mid", "value": 0.0185, "dataset": "gnomad", "allele_count": 6 },
+      { "label_key": "gnomad:fin", "value": 0.0287, "dataset": "gnomad", "allele_count": 305 },
+      { "label_key": "1kg:TSI", "lat": 43.5, "lon": 11.0, "value": 0.0327, "dataset": "1000g", "allele_count": 7 },
+      { "label_key": "1kg:GBR", "lat": 52.5, "lon": -1.5, "value": 0.02747, "dataset": "1000g", "allele_count": 5 },
+      { "label_key": "1kg:CHB", "lat": 39.9, "lon": 116.4, "value": 0, "dataset": "1000g", "allele_count": 0 },
+      { "label_key": "1kg:JPT", "lat": 35.7, "lon": 139.7, "value": 0, "dataset": "1000g", "allele_count": 0 },
+      { "label_key": "1kg:YRI", "lat": 7.4, "lon": 3.9, "value": 0, "dataset": "1000g", "allele_count": 0 },
+      { "label_key": "1kg:LWK", "lat": 0.6, "lon": 34.8, "value": 0, "dataset": "1000g", "allele_count": 0 }
+    ],
+    "HLA-DQ2": [
+      { "label_key": "1kg:IBS", "lat": 40.4, "lon": -3.7, "value": 0.25, "dataset": "1000g", "allele_count": 53 },
+      { "label_key": "gnomad:nfe", "value": 0.21, "dataset": "gnomad", "allele_count": 1500 },
+      { "label_key": "1kg:TSI", "lat": 43.5, "lon": 11.0, "value": 0.23, "dataset": "1000g", "allele_count": 49 },
+      { "label_key": "1kg:GBR", "lat": 52.5, "lon": -1.5, "value": 0.19, "dataset": "1000g", "allele_count": 35 },
+      { "label_key": "1kg:FIN", "lat": 61.0, "lon": 25.0, "value": 0.12, "dataset": "1000g", "allele_count": 24 }
+    ]
+  },
+  "spread_check": { "ia_hicov_median_d": 0.00304, "bb_hicov_median_d": 0.00301 }
 }

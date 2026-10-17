@@ -1,10 +1,12 @@
 import raw from '@workshop-data';
 import {
-  CONSUMER_LABELS, FRAME_IDS, GENE_IDS, MAP_GROUP_IDS, PERIOD_FRAME, PERIOD_IDS, TICK_KEYS,
+  CONSUMER_LABELS, FRAME_IDS, GENE_IDS, MAP_GROUP_IDS, PERIOD_FRAME, PERIOD_IDS, REGION_IDS, TICK_KEYS,
+  TRAIT_MAP_DATASETS, TRAIT_MAP_ORDER,
 } from './types';
 import type {
-  AdmixBar, AdmixShares, AxisTick, ConsumerShare, Frame, FrameId, GeneId, LogNumbers, MapGroup,
-  PeriodId, PeriodInfo, PeriodPoints, PersonPt, Pt, Trait, TraitPoint, WorkshopData,
+  AdmixBar, AdmixShares, AxisTick, ConsumerShare, EuropeFit, EuropePop, Frame, FrameId, GeneId, LogNumbers, MapGroup,
+  NamedPoint, PeriodId, PeriodInfo, PeriodPoints, PersonPt, Pt, SpreadCheck, Trait, TraitMapDataset, TraitMapRow, TraitMaps,
+  TraitPoint, WorkshopData,
 } from './types';
 
 /** The variant each trait must plot (spec §5.4). A JSON that names any other variant or allele is rejected. */
@@ -106,6 +108,12 @@ function validatePoints(v: unknown, periods: PeriodInfo[]): PeriodPoints[] {
         if (period !== 'AngloSaxon') throw new DataError(`${qp}.east`, 'east is only allowed on AngloSaxon points');
         if (typeof qo.east !== 'boolean') throw new DataError(`${qp}.east`, 'expected true or false');
         out.east = qo.east;
+      }
+      if (qo.region !== undefined) {
+        if (period !== 'IronAge') throw new DataError(`${qp}.region`, 'region is only allowed on IronAge points');
+        out.region = oneOf(qo.region, REGION_IDS, `${qp}.region`);
+      } else if (period === 'IronAge') {
+        throw new DataError(`${qp}.region`, 'every IronAge point needs a region');
       }
       return out;
     });
@@ -269,10 +277,138 @@ function validateLogs(v: unknown): LogNumbers {
     pca_samples_used: count(o.pca_samples_used, 'logs.pca_samples_used'),
     admix_snps: count(o.admix_snps, 'logs.admix_snps'),
     admix_individuals: count(o.admix_individuals, 'logs.admix_individuals'),
+    pca_people_unique: count(o.pca_people_unique, 'logs.pca_people_unique'),
   };
   for (const [k, n] of Object.entries(out)) if (n === 0) throw new DataError(`logs.${k}`, 'must be greater than 0');
   if (out.snps_used > out.snps_total) throw new DataError('logs.snps_used', 'cannot exceed snps_total');
+  if (out.pca_people_unique > out.pca_samples_used) {
+    throw new DataError('logs.pca_people_unique', 'pca_people_unique cannot exceed pca_samples_used');
+  }
   return out;
+}
+
+// ---- v3 fields (Task 7, CONTRACT §2.1) ----
+const DATASET_OF_PREFIX: Readonly<Record<string, TraitMapDataset>> = { country: 'liebert2017', '1kg': '1000g', gnomad: 'gnomad' };
+
+function unitFreq(v: unknown, path: string): number {
+  const f = num(v, path);
+  if (f < 0 || f > 1) throw new DataError(path, `expected a frequency between 0 and 1, got ${f}`);
+  return f;
+}
+function latitude(v: unknown, path: string): number {
+  const x = num(v, path);
+  if (x < -90 || x > 90) throw new DataError(path, `expected a latitude between -90 and 90, got ${x}`);
+  return x;
+}
+function longitude(v: unknown, path: string): number {
+  const x = num(v, path);
+  if (x < -180 || x > 180) throw new DataError(path, `expected a longitude between -180 and 180, got ${x}`);
+  return x;
+}
+function bool(v: unknown, path: string): boolean {
+  if (typeof v !== 'boolean') throw new DataError(path, 'expected true or false');
+  return v;
+}
+function label(v: unknown, path: string): string {
+  if (typeof v !== 'string' || v.trim() === '') throw new DataError(path, 'expected a non-empty string');
+  return v;
+}
+
+function validateTraitMaps(v: unknown): TraitMaps {
+  const o = obj(v, 'trait_maps');
+  sameSet(Object.keys(o), GENE_IDS, 'trait_maps');
+  const out = {} as TraitMaps;
+  for (const gene of GENE_IDS) {
+    const path = `trait_maps.${gene}`;
+    const seen = new Set<string>();
+    const rows = arr(o[gene], path).map((r, i): TraitMapRow => {
+      const rp = `${path}[${i}]`;
+      const ro = obj(r, rp);
+      const label_key = oneOf(ro.label_key, TRAIT_MAP_ORDER[gene], `${rp}.label_key`);
+      if (seen.has(label_key)) throw new DataError(`${rp}.label_key`, `${label_key} appears twice`);
+      seen.add(label_key);
+      const dataset = oneOf(ro.dataset, TRAIT_MAP_DATASETS, `${rp}.dataset`);
+      const want = DATASET_OF_PREFIX[label_key.slice(0, label_key.indexOf(':'))];
+      if (dataset !== want) throw new DataError(`${rp}.dataset`, `${label_key} must come from ${want}, got ${dataset}`);
+      const row: TraitMapRow = { label_key, value: unitFreq(ro.value, `${rp}.value`), dataset };
+      if (dataset === 'gnomad') {
+        if (ro.lat !== undefined || ro.lon !== undefined) throw new DataError(rp, 'gnomAD rows have no coordinates');
+      } else {
+        row.lat = latitude(ro.lat, `${rp}.lat`);
+        row.lon = longitude(ro.lon, `${rp}.lon`);
+      }
+      if (ro.allele_count !== undefined) {
+        if (dataset === 'liebert2017') throw new DataError(`${rp}.allele_count`, 'country rows have no allele count');
+        row.allele_count = count(ro.allele_count, `${rp}.allele_count`);
+      }
+      if (dataset !== 'liebert2017' && row.value === 0 && row.allele_count !== 0) {
+        throw new DataError(`${rp}.allele_count`, 'a zero frequency needs allele_count 0 (a snapshot-proven zero)');
+      }
+      return row;
+    });
+    if (rows.length === 0) throw new DataError(path, 'no rows');
+    out[gene] = rows;
+  }
+  return out;
+}
+
+function validateSpreadCheck(v: unknown): SpreadCheck {
+  const o = obj(v, 'spread_check');
+  const out: SpreadCheck = {
+    ia_hicov_median_d: num(o.ia_hicov_median_d, 'spread_check.ia_hicov_median_d'),
+    bb_hicov_median_d: num(o.bb_hicov_median_d, 'spread_check.bb_hicov_median_d'),
+  };
+  for (const [k, d] of Object.entries(out)) if (!(d > 0)) throw new DataError(`spread_check.${k}`, 'must be greater than 0');
+  return out;
+}
+
+function validateEurope(pops: unknown, fit: unknown): { pops: EuropePop[]; fit: EuropeFit } {
+  if (pops === undefined || fit === undefined) throw new DataError('europe_pops', 'europe_pops and europe_fit come together');
+  const list = arr(pops, 'europe_pops').map((p, i): EuropePop => {
+    const path = `europe_pops[${i}]`;
+    const o = obj(p, path);
+    const pop: EuropePop = {
+      id: label(o.id, `${path}.id`), label: label(o.label, `${path}.label`), n: count(o.n, `${path}.n`),
+      lat: latitude(o.lat, `${path}.lat`), lon: longitude(o.lon, `${path}.lon`),
+      x: num(o.x, `${path}.x`), y: num(o.y, `${path}.y`), map_x: num(o.map_x, `${path}.map_x`), map_y: num(o.map_y, `${path}.map_y`),
+      isolate: bool(o.isolate, `${path}.isolate`), map_label: bool(o.map_label, `${path}.map_label`),
+    };
+    if (pop.n === 0) throw new DataError(`${path}.n`, 'must be greater than 0');
+    if (pop.isolate && pop.map_label) throw new DataError(`${path}.map_label`, 'an isolate is never labelled');
+    return pop;
+  });
+  const fo = obj(fit, 'europe_fit');
+  const corr = (x: unknown, path: string): number => {
+    const r = num(x, path);
+    if (r < -1 || r > 1) throw new DataError(path, `expected a correlation between -1 and 1, got ${r}`);
+    return r;
+  };
+  const f: EuropeFit = {
+    n_pops: count(fo.n_pops, 'europe_fit.n_pops'), n_people: count(fo.n_people, 'europe_fit.n_people'),
+    r_lat: corr(fo.r_lat, 'europe_fit.r_lat'), r_lon: corr(fo.r_lon, 'europe_fit.r_lon'),
+  };
+  const fitted = list.filter((p) => !p.isolate);
+  if (f.n_pops !== fitted.length) {
+    throw new DataError('europe_fit.n_pops', `expected ${fitted.length} (non-isolate populations), got ${f.n_pops}`);
+  }
+  const people = fitted.reduce((a, p) => a + p.n, 0);
+  if (f.n_people !== people) {
+    throw new DataError('europe_fit.n_people', `expected ${people} (people in the non-isolate populations), got ${f.n_people}`);
+  }
+  return { pops: list, fit: f };
+}
+
+function validateNamed(v: unknown): NamedPoint[] {
+  return arr(v, 'named').map((p, i): NamedPoint => {
+    const path = `named[${i}]`;
+    const o = obj(p, path);
+    return {
+      key: oneOf(o.key, ['york_traveller'] as const, `${path}.key`),
+      period: oneOf(o.period, ['Roman'] as const, `${path}.period`),
+      x: num(o.x, `${path}.x`),
+      y: num(o.y, `${path}.y`),
+    };
+  });
 }
 
 /** Checks every field the app relies on and returns a typed copy. Throws DataError naming the first bad field. */
@@ -281,7 +417,7 @@ export function validateData(raw: unknown): WorkshopData {
   if (o.version !== 1) throw new DataError('version', `expected 1, got ${JSON.stringify(o.version)}`);
   const periods = validatePeriods(o.periods);
   const ns = obj(o.north_sea, 'north_sea');
-  return {
+  const out: WorkshopData = {
     version: 1,
     periods,
     points: validatePoints(o.points, periods),
@@ -293,7 +429,16 @@ export function validateData(raw: unknown): WorkshopData {
     traits: validateTraits(o.traits),
     trait_ticks: validateTicks(o.trait_ticks),
     logs: validateLogs(o.logs),
+    trait_maps: validateTraitMaps(o.trait_maps),
+    spread_check: validateSpreadCheck(o.spread_check),
   };
+  if (o.europe_pops !== undefined || o.europe_fit !== undefined) {
+    const e = validateEurope(o.europe_pops, o.europe_fit);
+    out.europe_pops = e.pops;
+    out.europe_fit = e.fit;
+  }
+  if (o.named !== undefined) out.named = validateNamed(o.named);
+  return out;
 }
 
 /** The workshop data bundled into the page. Under Vitest '@workshop-data' resolves to tests/fixtures/data.fixture.json. */

@@ -14,7 +14,10 @@ export interface PeriodInfo { id: PeriodId; order: number; frame: FrameId; n_pca
 //   order: FirstFarmers 0, BellBeaker 1, BronzeAge 2, IronAge 3, Roman 4, AngloSaxon 5, Viking 6, Today 7
 //   frame: europe for FirstFarmers/BellBeaker; britain for BronzeAge/IronAge/Roman/AngloSaxon/Viking; Today europe (v2.1 JSON)
 //   or britain (from the Sun 18 data run). The app never draws from this field: reducePlot uses PERIOD_FRAME below.
-export interface PersonPt extends Pt { east?: boolean }            // east only on AngloSaxon points (eastern-England highlight)
+export interface PersonPt extends Pt {
+  east?: boolean;          // AngloSaxon points only (eastern-England highlight)
+  region?: RegionId;       // v3: present on EVERY IronAge point, on no other period's points
+}
 export interface PeriodPoints { period: PeriodId; points: PersonPt[] }
 export interface MapGroup { id: MapGroupId; n: number; centre: Pt; points: Pt[] }   // rescaled to projected scale, then rotated
 export interface Frame { xmin: number; xmax: number; ymin: number; ymax: number }
@@ -32,6 +35,7 @@ export interface AxisTick { t: number; key: 'BellBeaker' | 'BronzeAge' | 'IronAg
 export interface LogNumbers {
   snps_total: number; snps_used: number; pca_samples_used: number;   // from noGBR.log
   admix_snps: number; admix_individuals: number;                     // from the fastmixture pilot
+  pca_people_unique: number;   // v3: unique Individual IDs among the 36 axis populations after dedup (950); <= pca_samples_used
 }
 export interface WorkshopData {
   version: 1;
@@ -45,6 +49,11 @@ export interface WorkshopData {
   traits: Trait[];                       // exactly 5, in GeneId order above
   trait_ticks: AxisTick[];
   logs: LogNumbers;
+  trait_maps: TraitMaps;          // v3: modern allele frequencies per gene (rows in TRAIT_MAP_ORDER)
+  spread_check: SpreadCheck;      // v3: backs E3 bullet 3
+  europe_pops?: EuropePop[];      // v3, optional: only after a run that includes Task 2 (35 rows)
+  europe_fit?: EuropeFit;         // present iff europe_pops is
+  named?: NamedPoint[];           // P3 run only (Task 28)
 }
 
 // ---- Runtime id lists (Task 6). Single source for every module that needs to iterate ids. ----
@@ -97,3 +106,62 @@ export type ImageId =
 export type MapId = 'A1' | 'D1' | 'E1' | 'G1' | 'H2' | 'I2' | 'J3' | 'K2' | 'L3' | 'F1inset';
 export type DiagramId = 'fatherMotherLines';
 export type DistributionId = GeneId;
+
+// ---- v3 JSON additions (Task 7, CONTRACT §2.1) ----
+export type RegionId = 'ENG_S' | 'ENG_M' | 'ENG_N' | 'SCO' | 'WAL';
+export const REGION_IDS: readonly RegionId[] = ['ENG_S', 'ENG_M', 'ENG_N', 'SCO', 'WAL'];
+
+export type TraitMapDataset = 'liebert2017' | '1000g' | 'gnomad';
+export const TRAIT_MAP_DATASETS: readonly TraitMapDataset[] = ['liebert2017', '1000g', 'gnomad'];
+export type TraitMapLabelKey =
+  | 'country:Ireland' | 'country:Norway' | 'country:UK' | 'country:Sweden' | 'country:Netherlands'
+  | 'country:Finland' | 'country:France' | 'country:Germany' | 'country:Estonia' | 'country:Hungary'
+  | 'country:Portugal' | 'country:Spain' | 'country:Poland' | 'country:Russia' | 'country:Romania'
+  | 'country:Macedonia' | 'country:Belarus' | 'country:Ukraine' | 'country:Italy' | 'country:Greece'
+  | '1kg:GBR' | '1kg:FIN' | '1kg:TSI' | '1kg:IBS' | '1kg:PJL' | '1kg:BEB' | '1kg:CHB' | '1kg:JPT' | '1kg:YRI' | '1kg:LWK'
+  | 'gnomad:nfe' | 'gnomad:mid' | 'gnomad:fin';
+export const TRAIT_MAP_LABEL_KEYS: readonly TraitMapLabelKey[] = [
+  'country:Ireland', 'country:Norway', 'country:UK', 'country:Sweden', 'country:Netherlands',
+  'country:Finland', 'country:France', 'country:Germany', 'country:Estonia', 'country:Hungary',
+  'country:Portugal', 'country:Spain', 'country:Poland', 'country:Russia', 'country:Romania',
+  'country:Macedonia', 'country:Belarus', 'country:Ukraine', 'country:Italy', 'country:Greece',
+  '1kg:GBR', '1kg:FIN', '1kg:TSI', '1kg:IBS', '1kg:PJL', '1kg:BEB', '1kg:CHB', '1kg:JPT', '1kg:YRI', '1kg:LWK',
+  'gnomad:nfe', 'gnomad:mid', 'gnomad:fin',
+];
+/** CONTRACT §2.3: the rows each gene may carry, in display order for ties (same as the R constant TRAIT_MAP_ORDER). */
+export const TRAIT_MAP_ORDER: Readonly<Record<GeneId, readonly TraitMapLabelKey[]>> = {
+  LCT: [
+    'country:Ireland', 'country:Norway', 'country:UK', 'country:Sweden', 'country:Netherlands', 'country:Finland',
+    'country:France', 'country:Germany', 'country:Estonia', 'country:Hungary', 'country:Portugal', 'country:Spain',
+    'country:Poland', 'country:Russia', 'country:Romania', 'country:Macedonia', 'country:Belarus', 'country:Ukraine',
+    'country:Italy', 'country:Greece',
+  ],
+  SLC45A2: ['1kg:GBR', '1kg:TSI', '1kg:FIN', '1kg:IBS', 'gnomad:mid', '1kg:PJL', '1kg:BEB', '1kg:CHB', '1kg:LWK', '1kg:JPT', '1kg:YRI'],
+  HERC2: ['1kg:FIN', '1kg:GBR', '1kg:TSI', '1kg:IBS', 'gnomad:mid', '1kg:PJL', '1kg:BEB', '1kg:CHB', '1kg:JPT', '1kg:YRI', '1kg:LWK'],
+  TYK2: ['gnomad:nfe', '1kg:IBS', 'gnomad:mid', 'gnomad:fin', '1kg:TSI', '1kg:GBR', '1kg:CHB', '1kg:JPT', '1kg:YRI', '1kg:LWK'],
+  'HLA-DQ2': ['1kg:IBS', 'gnomad:nfe', '1kg:TSI', '1kg:GBR', '1kg:FIN'],
+};
+
+export interface TraitMapRow {
+  label_key: TraitMapLabelKey;
+  lat?: number; lon?: number;      // country rows: CSV lat/lon; 1kg rows: the §6 site table; gnomad rows: absent
+  /** Allele frequency in [0, 1]. Country (LCT: column f_13910T) and gnomad rows: the CSV cell. 1kg rows: allele_count / (2 x
+   *  sample size) at 5 decimals (O1), so TYK2 Britain is 5 of 182 = 0.02747 and shows as 2.7. */
+  value: number;
+  dataset: TraitMapDataset;
+  allele_count?: number;           // 1kg/gnomad: CSV allele_count (0 for a snapshot-proven zero); country rows: absent
+}
+export type TraitMaps = Record<GeneId, TraitMapRow[]>;
+
+export interface SpreadCheck { ia_hicov_median_d: number; bb_hicov_median_d: number }   // |difference| < 0.0005
+
+export interface EuropePop {
+  id: string;            // smartpca population label (never rendered)
+  label: string;         // plain-English display label (rendered)
+  n: number; lat: number; lon: number;
+  x: number; y: number;          // genetic centroid, rotated PC units
+  map_x: number; map_y: number;  // after the similarity Procrustes fit, in §6 Europe projection units
+  isolate: boolean; map_label: boolean;
+}
+export interface EuropeFit { n_pops: number; n_people: number; r_lat: number; r_lon: number }
+export interface NamedPoint { key: 'york_traveller'; period: 'Roman'; x: number; y: number }

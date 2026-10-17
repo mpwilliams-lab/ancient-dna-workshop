@@ -6,7 +6,7 @@ import { execute, formatCount, roundPercents, asciiBar, DEFAULT_EXEC_CONTEXT, ty
 import {
   PERIOD_LABELS, MAP_GROUP_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION, HOOK_NOTE, CONSUMER_NOTE, CONSUMER_TAKEAWAY,
   ROMAN_LOG_LINE, K_REFUSAL, traitSourceLabel, EUROPE_HELD_BACK, EUROPE_ALREADY_SHOWN, TODAY_PLACED, ALL_PROJECTING,
-  ALL_TODAY_LAST, ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN,
+  ALL_TODAY_LAST, ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN, mapAxesLine, axesLine,
 } from '../src/content';
 import { FEATURES } from '../src/features';
 
@@ -17,7 +17,9 @@ const GENES: GeneId[] = ['LCT', 'SLC45A2', 'HERC2', 'TYK2', 'HLA-DQ2'];
 // Measured 2026-10-15 from R/data-pca-time/smartpca_noGBR/noGBR.log
 // ("number of samples used: 1163 number of snps used: 579720"; "killed in pass: 82819  used: 496901")
 // and R/data-admixture/fmA/fm.log ("Loaded 1194 samples and 78188 SNPs.").
-const REAL_LOGS = { snps_total: 579720, snps_used: 496901, pca_samples_used: 1163, admix_snps: 78188, admix_individuals: 1194 };
+const REAL_LOGS = {
+  snps_total: 579720, snps_used: 496901, pca_samples_used: 1163, admix_snps: 78188, admix_individuals: 1194, pca_people_unique: 950,
+};
 const real: WorkshopData = { ...fixture, logs: REAL_LOGS };
 
 function withN(d: WorkshopData, id: PeriodId, n_pca: number, n_admix: number): WorkshopData {
@@ -132,7 +134,6 @@ describe('execute: log templates', () => {
     const lines = execute({ name: 'load_genomes' }, d).lines;
     expect(lines).toContain('Reading genotypes: 579,720 SNPs');
     expect(lines).toContain('Quality filter: 496,901 SNPs kept');
-    expect(lines).toContain('Map axes: built from 1,163 present-day Europeans (Britain left out)');
     expect(lines).toContain('Ancestry run: 1,194 people, 78,188 SNPs');
     expect(lines).toContain(`  ${PERIOD_LABELS.IronAge.padEnd(36)}281`);
     expect(lines).toContain(`  ${PERIOD_LABELS.FirstFarmers.padEnd(36)}${d.periods[0]!.n_pca}`);
@@ -143,7 +144,6 @@ describe('execute: log templates', () => {
     const lines = execute({ name: 'run_pca', period: 'Roman' }, d).lines;
     expect(lines[0]).toBe('$ smartpca -p britain.par');
     expect(lines).toContain('Genotypes: 579,720 SNPs; 496,901 used after quality filter');
-    expect(lines).toContain('Axes: 1,163 present-day Europeans (Britain left out)');
     expect(lines).toContain('Projecting Roman onto the axes: 15 people');
     expect(lines[lines.length - 1]).toBe('Done: PC1 and PC2 written.');
   });
@@ -381,5 +381,38 @@ describe('execute: spec §6 rule 1 holds for every log line of every period', ()
     expect(rule1Violations('started about 2,000 years ago')).toEqual([]);
     expect(rawIdViolations('Projecting IronAge')).not.toEqual([]);
     expect(rawIdViolations('Try ancestry_test(person = "IronAge")')).toEqual([]);
+  });
+});
+
+describe('axes lines read logs.pca_people_unique (Task 7, spec §3.5)', () => {
+  const MAP_AXES = 'Map axes: built from about 950 present-day Europeans. Britons are left out, then placed on the map the same way as ancient Britons.';
+  const AXES = 'Axes: about 950 present-day Europeans. Britons are left out, then placed on the map the same way as ancient Britons.';
+
+  it('the content functions give the spec wording', () => {
+    expect(mapAxesLine(950)).toBe(MAP_AXES);
+    expect(axesLine(950)).toBe(AXES);
+  });
+
+  it('load_genomes prints the map-axes line, and the old 1,163 line is gone', () => {
+    const lines = execute({ name: 'load_genomes' }, real).lines;
+    expect(lines).toContain(MAP_AXES);
+    expect(lines.join('\n')).not.toContain('1,163');
+    expect(lines.join('\n')).not.toContain('(Britain left out)');
+  });
+
+  it('every run_pca prints the axes line, Europe and all included', () => {
+    const periods = ['Europe', 'all', ...PERIODS] as const;
+    for (const period of periods) {
+      const lines = execute({ name: 'run_pca', period }, real).lines;
+      expect(lines, period).toContain(AXES);
+      expect(lines.join('\n'), period).not.toContain('1,163');
+    }
+  });
+
+  it('rounds pca_people_unique to the nearest 10', () => {
+    const at = (n: number) => execute({ name: 'load_genomes' }, { ...real, logs: { ...REAL_LOGS, pca_people_unique: n } }).lines;
+    expect(at(947)).toContain(mapAxesLine(950));
+    expect(at(955)).toContain(mapAxesLine(960));
+    expect(at(944)).toContain(mapAxesLine(940));
   });
 });

@@ -5,7 +5,7 @@ import {
   PERIOD_LABELS, MAP_GROUP_LABELS, SOURCE_LABELS, HELP_LINES, ME_RESULT, ME_HEADING, HOOK_QUESTION,
   CONSUMER_NOTE, CONSUMER_TAKEAWAY, HOOK_NOTE, ROMAN_LOG_LINE, K_REFUSAL, consumerTitle, traitSourceLabel,
   europeProjectingLine, EUROPE_HELD_BACK, EUROPE_ALREADY_SHOWN, TODAY_PLACED, ALL_PROJECTING, ALL_TODAY_LAST,
-  ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN,
+  ADMIX_TODAY_HIDDEN, ADMIX_TODAY_SHOWN, mapAxesLine, axesLine,
 } from './content';
 import { FEATURES, type Features } from './features';
 
@@ -38,6 +38,11 @@ function refuse(lines: string[]): CommandResult { return { lines, plot: NONE, re
 /** 496901 -> "496,901" (locale-independent). */
 export function formatCount(n: number): string {
   return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/** "about 950": the axes people count is shown rounded to the nearest 10 (spec §3.5). */
+function round10(n: number): number {
+  return Math.round(n / 10) * 10;
 }
 
 /** Whole percents by largest remainder, so they add up to round(100 * sum(shares)). Ties go to the earlier entry. */
@@ -79,7 +84,7 @@ function loadGenomes(data: WorkshopData): CommandResult {
     '$ load_genomes',
     `Reading genotypes: ${formatCount(L.snps_total)} SNPs`,
     `Quality filter: ${formatCount(L.snps_used)} SNPs kept`,
-    `Map axes: built from ${formatCount(L.pca_samples_used)} present-day Europeans (Britain left out)`,
+    mapAxesLine(round10(L.pca_people_unique)),
     `Ancestry run: ${formatCount(L.admix_individuals)} people, ${formatCount(L.admix_snps)} SNPs`,
     'People in Britain, by period:',
     ...PERIOD_IDS.map((id) => periodRow(PERIOD_LABELS[id], nPca(data, id))),
@@ -92,7 +97,7 @@ function runPca(data: WorkshopData, period: PcaPeriod, ctx: ExecContext): Comman
   const head = [
     '$ smartpca -p britain.par',
     `Genotypes: ${formatCount(L.snps_total)} SNPs; ${formatCount(L.snps_used)} used after quality filter`,
-    `Axes: ${formatCount(L.pca_samples_used)} present-day Europeans (Britain left out)`,
+    axesLine(round10(L.pca_people_unique)),
   ];
   let body: string[];
   if (period === 'Europe') {

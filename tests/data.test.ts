@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DATA, DataError, TRAIT_SPECS, validateData } from '../src/data';
-import { GENE_IDS, PERIOD_IDS } from '../src/types';
+import { GENE_IDS, PERIOD_IDS, REGION_IDS, TRAIT_MAP_LABEL_KEYS, TRAIT_MAP_ORDER } from '../src/types';
 import { FIXTURE, rawFixture } from './fixtures/fixture';
 
 describe('validateData on the fixture', () => {
@@ -14,7 +14,9 @@ describe('validateData on the fixture', () => {
 
   it('DATA is the fixture under Vitest (the @workshop-data alias)', () => {
     expect(DATA).toEqual(FIXTURE);
-    expect(DATA.logs).toEqual({ snps_total: 579720, snps_used: 496901, pca_samples_used: 1163, admix_snps: 78188, admix_individuals: 1194 });
+    expect(DATA.logs).toEqual({
+      snps_total: 579720, snps_used: 496901, pca_samples_used: 1163, admix_snps: 78188, admix_individuals: 1194, pca_people_unique: 950,
+    });
   });
 
   it('fixture shape that later tasks rely on', () => {
@@ -25,6 +27,16 @@ describe('validateData on the fixture', () => {
     expect(Object.keys(FIXTURE.admixture.people)).toEqual(['BellBeaker']);
     expect(Object.keys(FIXTURE.consumer)).toEqual([...PERIOD_IDS]);
     expect(FIXTURE.consumer.Today).toEqual([{ label: 'British', share: 0.75 }, { label: 'Scandinavian', share: 0.25 }]);
+    // v3 (Task 7)
+    expect(FIXTURE.periods.find((p) => p.id === 'Today')!.frame).toBe('britain');
+    for (const pp of FIXTURE.points) {
+      for (const q of pp.points) expect(q.region !== undefined, pp.period).toBe(pp.period === 'IronAge');
+    }
+    expect(FIXTURE.points.find((p) => p.period === 'IronAge')!.points.map((q) => q.region)).toEqual(['ENG_S', 'ENG_M', 'SCO', 'WAL']);
+    for (const gene of GENE_IDS) expect(FIXTURE.trait_maps[gene].map((r) => r.label_key), gene).toEqual([...TRAIT_MAP_ORDER[gene]]);
+    expect(FIXTURE.spread_check).toEqual({ ia_hicov_median_d: 0.00304, bb_hicov_median_d: 0.00301 });
+    expect(FIXTURE.europe_pops).toBeUndefined();
+    expect(FIXTURE.named).toBeUndefined();
   });
 });
 
@@ -78,6 +90,27 @@ const BREAKERS: Breaker[] = [
   ['ticks not getting more recent', (d) => { d.trait_ticks[2].t = 9000; }, /tick times must decrease/],
   ['zero SNPs in the log', (d) => { d.logs.snps_used = 0; }, /logs\.snps_used: must be greater than 0/],
   ['more SNPs used than exist', (d) => { d.logs.snps_used = d.logs.snps_total + 1; }, /cannot exceed snps_total/],
+  ['pca_people_unique missing', (d) => { delete d.logs.pca_people_unique; }, /logs\.pca_people_unique: expected a finite number/],
+  ['pca_people_unique above pca_samples_used', (d) => { d.logs.pca_people_unique = 2000; }, /pca_people_unique cannot exceed pca_samples_used/],
+  ['region on a non-IronAge point', (d) => { d.points[2].points[0].region = 'ENG_S'; }, /region is only allowed on IronAge points/],
+  ['an IronAge point without a region', (d) => { delete d.points[3].points[0].region; }, /points\[3\]\.points\[0\]\.region: every IronAge point needs a region/],
+  ['an unknown region', (d) => { d.points[3].points[1].region = 'NIR'; }, /points\[3\]\.points\[1\]\.region: expected one of ENG_S/],
+  ['trait_maps missing a gene', (d) => { delete d.trait_maps.TYK2; }, /trait_maps: expected exactly/],
+  ['a trait-map key the gene does not use', (d) => { d.trait_maps.TYK2[1].label_key = '1kg:PJL'; }, /trait_maps\.TYK2\[1\]\.label_key: expected one of/],
+  ['a trait-map key twice', (d) => { d.trait_maps.LCT[1].label_key = 'country:Ireland'; }, /trait_maps\.LCT\[1\]\.label_key: country:Ireland appears twice/],
+  ['a trait-map value above 1', (d) => { d.trait_maps.LCT[0].value = 1.2; }, /trait_maps\.LCT\[0\]\.value: expected a frequency between 0 and 1/],
+  ['a negative trait-map value', (d) => { d.trait_maps.HERC2[0].value = -0.01; }, /trait_maps\.HERC2\[0\]\.value: expected a frequency between 0 and 1/],
+  ['a dataset that does not match the key', (d) => { d.trait_maps.LCT[0].dataset = '1000g'; }, /trait_maps\.LCT\[0\]\.dataset: country:Ireland must come from liebert2017/],
+  ['a gnomAD row with coordinates', (d) => { d.trait_maps.SLC45A2[4].lat = 30; }, /trait_maps\.SLC45A2\[4\]: gnomAD rows have no coordinates/],
+  ['a country row without lat', (d) => { delete d.trait_maps.LCT[1].lat; }, /trait_maps\.LCT\[1\]\.lat: expected a finite number/],
+  ['a latitude out of range', (d) => { d.trait_maps.LCT[2].lat = 95; }, /trait_maps\.LCT\[2\]\.lat: expected a latitude/],
+  ['an allele count on a country row', (d) => { d.trait_maps.LCT[0].allele_count = 10; }, /trait_maps\.LCT\[0\]\.allele_count: country rows have no allele count/],
+  ['a zero row that is not snapshot-proven', (d) => { d.trait_maps.SLC45A2[9].allele_count = 3; }, /trait_maps\.SLC45A2\[9\]\.allele_count: a zero frequency needs allele_count 0/],
+  ['a gene with no rows', (d) => { d.trait_maps['HLA-DQ2'] = []; }, /trait_maps\.HLA-DQ2: no rows/],
+  ['spread_check missing', (d) => { delete d.spread_check; }, /spread_check: expected an object/],
+  ['spread_check not positive', (d) => { d.spread_check.bb_hicov_median_d = 0; }, /spread_check\.bb_hicov_median_d: must be greater than 0/],
+  ['europe_fit without europe_pops', (d) => { d.europe_fit = { n_pops: 0, n_people: 0, r_lat: 0, r_lon: 0 }; }, /europe_pops and europe_fit come together/],
+  ['a named point with another key', (d) => { d.named = [{ key: 'I1234', period: 'Roman', x: 0, y: 0 }]; }, /named\[0\]\.key: expected one of york_traveller/],
 ];
 
 describe('validateData rejects bad data', () => {
@@ -126,5 +159,46 @@ describe('validateData rejects bad data', () => {
       TYK2: { rsid: 'rs34536443', variant_id: '19_10463118_G_C', allele: 'C' },
       'HLA-DQ2': { rsid: 'rs3891176', variant_id: '6_32634318_C_A', allele: 'A' },
     });
+  });
+});
+
+describe('v3 optional fields (CONTRACT §2.1)', () => {
+  const europe = () => ({
+    europe_pops: [
+      { id: 'Italian_North', label: 'North Italian', n: 37, lat: 45.1, lon: 10.2, x: 0.0049, y: -0.0167, map_x: -3.9, map_y: 45.6, isolate: false, map_label: true },
+      { id: 'French', label: 'French', n: 60, lat: 46.6, lon: 2.4, x: 0.002, y: 0.004, map_x: -8.6, map_y: 46.9, isolate: false, map_label: false },
+      { id: 'Sardinian', label: 'Sardinian', n: 27, lat: 40.1, lon: 9.0, x: -0.01, y: -0.03, map_x: -4.6, map_y: 39.0, isolate: true, map_label: false },
+    ],
+    europe_fit: { n_pops: 2, n_people: 97, r_lat: 0.91, r_lon: 0.74 },
+  });
+
+  it('accepts europe_pops with a matching europe_fit, and a york_traveller named point', () => {
+    const d = { ...rawFixture(), ...europe(), named: [{ key: 'york_traveller', period: 'Roman', x: 0.0412, y: -0.0301 }] };
+    const v = validateData(d);
+    expect(v.europe_pops).toHaveLength(3);
+    expect(v.europe_fit).toEqual({ n_pops: 2, n_people: 97, r_lat: 0.91, r_lon: 0.74 });
+    expect(v.named).toEqual([{ key: 'york_traveller', period: 'Roman', x: 0.0412, y: -0.0301 }]);
+  });
+
+  it.each<[string, (d: any) => void, RegExp]>([
+    ['n_pops not the non-isolate count', (d) => { d.europe_fit.n_pops = 3; }, /europe_fit\.n_pops: expected 2 \(non-isolate populations\), got 3/],
+    ['n_people not their sum', (d) => { d.europe_fit.n_people = 124; }, /europe_fit\.n_people: expected 97 \(people in the non-isolate populations\), got 124/],
+    ['a labelled isolate', (d) => { d.europe_pops[2].map_label = true; }, /europe_pops\[2\]\.map_label: an isolate is never labelled/],
+    ['a correlation above 1', (d) => { d.europe_fit.r_lat = 1.2; }, /europe_fit\.r_lat: expected a correlation between -1 and 1/],
+    ['an empty label', (d) => { d.europe_pops[0].label = ''; }, /europe_pops\[0\]\.label: expected a non-empty string/],
+    ['europe_pops without europe_fit', (d) => { delete d.europe_fit; }, /europe_pops and europe_fit come together/],
+  ])('rejects %s', (_name, breakIt, message) => {
+    const d = { ...rawFixture(), ...europe() };
+    breakIt(d);
+    expect(() => validateData(d)).toThrow(message);
+  });
+
+  it('REGION_IDS and TRAIT_MAP_LABEL_KEYS are the contract lists', () => {
+    expect(REGION_IDS).toEqual(['ENG_S', 'ENG_M', 'ENG_N', 'SCO', 'WAL']);
+    expect(TRAIT_MAP_LABEL_KEYS).toHaveLength(33);
+    for (const gene of GENE_IDS) for (const k of TRAIT_MAP_ORDER[gene]) expect(TRAIT_MAP_LABEL_KEYS).toContain(k);
+    expect(TRAIT_MAP_ORDER.TYK2).not.toContain('1kg:PJL');
+    expect(TRAIT_MAP_ORDER.TYK2).not.toContain('1kg:FIN');
+    expect(TRAIT_MAP_ORDER['HLA-DQ2']).toEqual(['1kg:IBS', 'gnomad:nfe', '1kg:TSI', '1kg:GBR', '1kg:FIN']);
   });
 });
