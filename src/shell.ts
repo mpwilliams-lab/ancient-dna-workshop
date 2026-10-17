@@ -92,7 +92,10 @@ export function boot(env: BootEnv): Booted {
     onEsc: () => controller?.escape(),
     onTab: (partial) => (controller ? controller.tab(partial) : partial),
   });
-  const deps = { data, terminal, renderPlot: (p: Parameters<typeof renderPlot>[2]) => renderPlot(plotHost, data, p), store };
+  const deps = {
+    data, terminal, store,
+    renderPlot: (p: Parameters<typeof renderPlot>[2], opts?: { animate?: boolean }) => renderPlot(plotHost, data, p, opts),
+  };
 
   try {
     controller = new Controller(deps, restoredSession);

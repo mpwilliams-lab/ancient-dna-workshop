@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fixture from './fixtures/data.fixture.json';
-import type { PeriodId, WorkshopData } from '../src/types';
-import { INITIAL_PLOT, type PlotState } from '../src/plotState';
-import { PCA_VIEW, clampToFrame, frameTransition, makeScale, renderPca } from '../src/plots/pca';
-import { INK, OKABE_ITO, PERIOD_COLORS, PERIOD_SHAPES, f1, textBlock, wrapText } from '../src/plots/svg';
-import { EAST_ENGLAND_LEGEND, MAP_GROUP_LABELS, NORTH_SEA_LABEL, PCA_CAPTION, PERIOD_LABELS, withN } from '../src/content';
+import type { ChipKey, PeriodId, WorkshopData } from '../src/types';
+import { INITIAL_PLOT, layerOpacity, type PcaCaptionItem, type PlotState } from '../src/plotState';
+import {
+  PCA_VIEW, TODAY_RING, clampToFrame, frameTransition, makeScale, renderPca, renderPcaCaptions,
+} from '../src/plots/pca';
+import { INK, MAP_GREY, OKABE_ITO, PERIOD_COLORS, PERIOD_SHAPES, f1, textBlock, wrapText } from '../src/plots/svg';
+import { CHIP_ICON_PATHS, chipElement } from '../src/icons';
+import {
+  CHIP_TEXT, EAST_ENGLAND_LEGEND, EUROPE_CAPTION, LEGEND_ANCIENT, LEGEND_LIVING, MAP_GROUP_LABELS, NORTH_SEA_LABEL,
+  PCA_CAPTION, PERIOD_LABELS, withN, zoomNote,
+} from '../src/content';
 
 // The shared fixture supplies everything else; the PCA geometry is pinned here so the
 // expected pixel values below do not depend on how the fixture's points were chosen.
@@ -45,6 +51,18 @@ function makeData(): WorkshopData {
   return d;
 }
 
+/** The real build's counts (CONTRACT §2.2), so legend widths are realistic. */
+function withRealCounts(d: WorkshopData): WorkshopData {
+  const n: Record<PeriodId, number> = {
+    FirstFarmers: 118, BellBeaker: 77, BronzeAge: 83, IronAge: 371, Roman: 17, AngloSaxon: 206, Viking: 37, Today: 108,
+  };
+  const m = { Sardinian: 27, Spanish: 173, ItalianNorth: 37, French: 60, Norwegian: 12 } as const;
+  d.periods = d.periods.map((p) => ({ ...p, n_pca: n[p.id] }));
+  d.map_groups = d.map_groups.map((g) => ({ ...g, n: m[g.id] }));
+  return d;
+}
+
+const ALL: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
 const pca = (over: Partial<PlotState>): PlotState => ({ ...INITIAL_PLOT, view: 'pca', ...over });
 
 function newSvg(): SVGSVGElement {
@@ -58,6 +76,11 @@ const layerIds = (svg: SVGSVGElement) =>
 const countIn = (svg: SVGSVGElement, layer: string) =>
   svg.querySelectorAll(`g.layer[data-layer="${layer}"] .pt`).length;
 const num = (el: Element | null, attr: string) => Number(el?.getAttribute(attr));
+const opacityOf = (svg: SVGSVGElement, id: PeriodId) =>
+  svg.querySelector(`g.layer.period[data-layer="${id}"]`)?.getAttribute('opacity');
+const groupTexts = (svg: SVGSVGElement, group: 'ancient' | 'living') =>
+  [...svg.querySelectorAll(`g.legend-group[data-legend-group="${group}"] .legend-item`)].map((t) => t.textContent);
+const eastItem = (svg: SVGSVGElement) => svg.querySelector('.legend .legend-item[data-legend="east"]');
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -102,48 +125,117 @@ describe('wrapText / textBlock', () => {
   });
 });
 
-describe('renderPca', () => {
-  it('sets a fixed viewBox, aspect handling and the caption', () => {
+describe('renderPca v3: frame, layers, focus and fading', () => {
+  it('uses the 1000 x 760 viewBox, marks frame and focus, and keeps every caption out of the svg', () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({}));
-    expect(svg.getAttribute('viewBox')).toBe('0 0 1000 700');
+    renderPca(svg, makeData(), pca({ layers: ['FirstFarmers'], focus: 'FirstFarmers' }));
+    expect(PCA_VIEW).toEqual({ width: 1000, height: 760, left: 20, right: 980, top: 20, bottom: 590, legendTop: 616, legendRow: 22 });
+    expect(svg.getAttribute('viewBox')).toBe('0 0 1000 760');
     expect(svg.getAttribute('preserveAspectRatio')).toBe('xMidYMid meet');
+    expect(svg.getAttribute('data-view')).toBe('pca');
     expect(svg.getAttribute('data-frame')).toBe('europe');
-    expect(svg.querySelector('.pca-caption')?.textContent).toBe(PCA_CAPTION);
+    expect(svg.getAttribute('data-focus')).toBe('FirstFarmers');
+    expect(svg.getAttribute('aria-label')).toBe(PCA_CAPTION);
+    expect(svg.querySelector('.pca-caption, .zoom-note, .chip')).toBeNull();
+    expect(svg.textContent).not.toContain(PCA_CAPTION);
+    renderPca(svg, makeData(), pca({ layers: [] }));
+    expect(svg.hasAttribute('data-focus')).toBe(false);
   });
 
-  it('always draws the Today base layer: 5 map groups (labelled) + Britain today, even with no layers run', () => {
+  it('always draws the five continental map groups; no Britons before a period is run', () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: [] }));
+    renderPca(svg, makeData(), pca({ layers: [], focus: 'Europe' }));
     expect(svg.querySelectorAll('g.layer.map-group')).toHaveLength(5);
     expect(svg.querySelectorAll('g.layer.map-group .pt')).toHaveLength(15);
-    expect(countIn(svg, 'Today')).toBe(4);
-    expect([...svg.querySelectorAll('.map-label')].map((t) => t.textContent).sort())
-      .toEqual(Object.values(MAP_GROUP_LABELS).sort());
-    expect(layerIds(svg)).toEqual(['Today']);
+    expect([...svg.querySelectorAll('.map-label')].map((t) => t.textContent).sort()).toEqual(Object.values(MAP_GROUP_LABELS).sort());
+    expect(layerIds(svg)).toEqual([]);
+    expect(svg.querySelectorAll('.today-ring')).toHaveLength(0);
     expect(svg.querySelectorAll('.centre, .arrow, [data-marker="north-sea"]')).toHaveLength(0);
-    expect([...svg.querySelectorAll('.legend-item')].map((t) => t.textContent))
-      .toEqual([withN(PERIOD_LABELS.Today, 4)]);
+    expect(svg.querySelector('g.legend-group[data-legend-group="ancient"]')).toBeNull();
+    expect(svg.querySelector('g.legend-group[data-legend-group="living"] .legend-heading')?.textContent).toBe(LEGEND_LIVING);
+    expect(groupTexts(svg, 'living')).toEqual(
+      (['Sardinian', 'Spanish', 'ItalianNorth', 'French', 'Norwegian'] as const).map((id) => withN(MAP_GROUP_LABELS[id], 3)));
   });
 
-  it('europe frame: period layers in time order, no centre markers or arrows', () => {
+  it('draws Britain today only once it is in layers, as hollow rings (r 3.5, stroke 1.5, #3A3A3A)', () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ['BellBeaker', 'Today', 'FirstFarmers'], frame: 'europe' }));
-    expect(layerIds(svg)).toEqual(['Today', 'FirstFarmers', 'BellBeaker']);
+    const d = makeData();
+    renderPca(svg, d, pca({ layers: ['IronAge'], focus: 'IronAge', frame: 'britain' }));
+    expect(svg.querySelectorAll('.today-ring')).toHaveLength(0);
+    expect(svg.querySelector('g.layer[data-layer="Today"]')).toBeNull();
+    renderPca(svg, d, pca({ layers: ['IronAge', 'Today'], focus: 'Today', frame: 'britain' }));
+    expect(TODAY_RING).toEqual({ r: 3.5, strokeWidth: 1.5, stroke: '#3A3A3A' });
+    const rings = [...svg.querySelectorAll('g.layer[data-layer="Today"] path.pt.today-ring')];
+    expect(rings).toHaveLength(4);
+    for (const r of rings) {
+      expect(r.getAttribute('fill')).toBe('none');
+      expect(r.getAttribute('stroke')).toBe('#3A3A3A');
+      expect(r.getAttribute('stroke-width')).toBe('1.5');
+      expect(r.getAttribute('d')).toContain('a3.5 3.5');
+    }
+    expect(svg.querySelector('.centre[data-centre="Today"]')).toBeNull();
+  });
+
+  it('fades by focus with string opacities: focus 1, Iron Age 0.6 behind Today/Roman/Anglo-Saxon, others 0.3', () => {
+    const cases: [PlotState, Partial<Record<PeriodId, string>>][] = [
+      [pca({ layers: ['FirstFarmers', 'BellBeaker'], focus: 'BellBeaker' }), { FirstFarmers: '0.3', BellBeaker: '1' }],
+      [pca({ layers: ['BronzeAge', 'IronAge', 'Today'], focus: 'Today', frame: 'britain' }), { BronzeAge: '0.3', IronAge: '0.6', Today: '1' }],
+      [pca({ layers: ['IronAge', 'Roman'], focus: 'Roman', frame: 'britain' }), { IronAge: '0.6', Roman: '1' }],
+      [pca({ layers: ['BellBeaker', 'IronAge', 'AngloSaxon'], focus: 'AngloSaxon', frame: 'britain' }), { BellBeaker: '0.3', IronAge: '0.6', AngloSaxon: '1' }],
+      [pca({ layers: ['BronzeAge', 'IronAge'], focus: 'IronAge', frame: 'britain' }), { BronzeAge: '0.3', IronAge: '1' }],
+    ];
+    const svg = newSvg();
+    for (const [s, want] of cases) {
+      renderPca(svg, makeData(), s);
+      for (const [id, o] of Object.entries(want) as [PeriodId, string][]) {
+        expect(opacityOf(svg, id), `${s.focus}: ${id}`).toBe(o);
+        expect(opacityOf(svg, id), `${s.focus}: ${id}`).toBe(layerOpacity(s, id));
+      }
+    }
+  });
+
+  it('does not fade when the focus is Europe, all or not set', () => {
+    const svg = newSvg();
+    for (const focus of ['Europe', 'all', undefined] as const) {
+      renderPca(svg, makeData(), pca({ layers: ALL, focus, frame: 'europe' }));
+      for (const id of ALL) expect(opacityOf(svg, id), `${focus}: ${id}`).toBe('1');
+    }
+  });
+
+  it('draws the non-focus layers in time order, then the focus layer on top, marked data-focus', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Today'], focus: 'BronzeAge', frame: 'britain' }));
+    expect(layerIds(svg)).toEqual(['FirstFarmers', 'BellBeaker', 'IronAge', 'Today', 'BronzeAge']);
+    expect([...svg.querySelectorAll('g.layer.period[data-focus="true"]')].map((g) => g.getAttribute('data-layer'))).toEqual(['BronzeAge']);
+  });
+
+  it('keeps centre markers, centre labels and arrows at full opacity, outside the faded layers', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ['IronAge', 'Roman', 'AngloSaxon'], focus: 'AngloSaxon', frame: 'britain', showNorthSea: true }));
+    const marks = [...svg.querySelectorAll('.centre, .centre-label, g.arrow, [data-marker="north-sea"]')];
+    expect(marks.length).toBeGreaterThan(5);
+    for (const el of marks) {
+      expect(el.closest('g.layer')).toBeNull();
+      expect(el.hasAttribute('opacity')).toBe(false);
+    }
+  });
+
+  it('europe frame: period layers in time order with the focus last, no centre markers or arrows', () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ['BellBeaker', 'Today', 'FirstFarmers'], focus: 'BellBeaker', frame: 'europe' }));
+    expect(layerIds(svg)).toEqual(['FirstFarmers', 'Today', 'BellBeaker']);
     expect(countIn(svg, 'FirstFarmers')).toBe(4);
     expect(countIn(svg, 'BellBeaker')).toBe(4);
     expect(svg.querySelectorAll('.centre, .arrow')).toHaveLength(0);
   });
 
-  it('britain frame: centre markers, Iron Age arrows, clipping and off-frame map groups hidden', () => {
+  it('britain frame: centre markers, Iron Age arrows, the focus layer\'s ghost and off-frame map groups hidden', () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ['IronAge', 'Roman', 'AngloSaxon'], frame: 'britain', showNorthSea: true }));
-    expect([...svg.querySelectorAll('.centre')].map((c) => c.getAttribute('data-centre')))
-      .toEqual(['IronAge', 'Roman', 'AngloSaxon']);
+    renderPca(svg, makeData(), pca({ layers: ['IronAge', 'Roman', 'AngloSaxon'], focus: 'IronAge', frame: 'britain', showNorthSea: true }));
+    expect([...svg.querySelectorAll('.centre')].map((c) => c.getAttribute('data-centre'))).toEqual(['IronAge', 'Roman', 'AngloSaxon']);
     expect([...svg.querySelectorAll('.centre-label')].map((c) => c.textContent))
       .toEqual(expect.arrayContaining([PERIOD_LABELS.IronAge, PERIOD_LABELS.Roman, PERIOD_LABELS.AngloSaxon]));
-    const arrows = [...svg.querySelectorAll('g.arrow')];
-    expect(arrows.map((a) => a.getAttribute('data-arrow'))).toEqual(['Roman', 'AngloSaxon']);
+    expect([...svg.querySelectorAll('g.arrow')].map((a) => a.getAttribute('data-arrow'))).toEqual(['Roman', 'AngloSaxon']);
     const as = svg.querySelector('g.arrow[data-arrow="AngloSaxon"] line');
     // tail = Iron Age centre (1, 3); head stops 14 px short of the Anglo-Saxon centre (1.6, 3.8)
     expect(num(as, 'x1')).toBe(344.5);
@@ -151,11 +243,10 @@ describe('renderPca', () => {
     expect(num(as, 'x2')).toBe(491.6);
     expect(num(as, 'y2')).toBe(290.3);
     expect(svg.querySelectorAll('.arrow-tail')).toHaveLength(0);
-    // the IronAge point at x = 6 is pinned to the right edge (x = 2.7 -> 785 px)
+    // the Iron Age point at x = 6 is the focus layer's: pinned to the right edge (x = 2.7 -> 785 px) as a ghost
     const clipped = svg.querySelectorAll('g.layer[data-layer="IronAge"] .pt.clipped');
     expect(clipped).toHaveLength(1);
-    expect(clipped[0].getAttribute('d')).toMatch(/^M780 /);
-    // map-group points outside the British frame are not drawn (Norwegian y >= 4.9 > 4.8)
+    expect(clipped[0]!.getAttribute('d')).toMatch(/^M780 /);
     expect(svg.querySelectorAll('g.layer.map-group .pt')).toHaveLength(0);
     expect(svg.querySelectorAll('.map-label')).toHaveLength(0);
     expect(svg.querySelector('[data-marker="north-sea"]')?.textContent).toBe(NORTH_SEA_LABEL);
@@ -163,15 +254,15 @@ describe('renderPca', () => {
 
   it('centre labels never sit closer than 18 px vertically', () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ['BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking'], frame: 'britain' }));
+    renderPca(svg, makeData(), pca({ layers: ['BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking'], focus: 'Viking', frame: 'britain' }));
     const ys = [...svg.querySelectorAll('.centre-label')].map((t) => num(t, 'y')).sort((a, b) => a - b);
     expect(ys).toHaveLength(5);
-    for (let i = 1; i < ys.length; i += 1) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(17.95);
+    for (let i = 1; i < ys.length; i += 1) expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(17.95);
   });
 
   it('RF2: Roman before Iron Age still draws the arrow from the Iron Age centre, with a tail ring', () => {
     const svg = newSvg();
-    expect(() => renderPca(svg, makeData(), pca({ layers: ['Roman'], frame: 'britain' }))).not.toThrow();
+    expect(() => renderPca(svg, makeData(), pca({ layers: ['Roman'], focus: 'Roman', frame: 'britain' }))).not.toThrow();
     const line = svg.querySelector('g.arrow[data-arrow="Roman"] line');
     expect(num(line, 'x1')).toBe(344.5);
     expect(num(line, 'y1')).toBe(486.4);
@@ -179,49 +270,42 @@ describe('renderPca', () => {
     expect(svg.querySelector('.centre[data-centre="IronAge"]')).toBeNull();
   });
 
-  it('RF2: any combination of layers and frames renders exactly the layers in the state', () => {
+  it('RF2: any combination of layers, focus and frame renders exactly the layers in the state, focus last', () => {
     const cases: PlotState[] = [
-      pca({ layers: ['Roman', 'BellBeaker'], frame: 'europe' }),
-      pca({ layers: ['IronAge', 'FirstFarmers'], frame: 'europe' }),
-      pca({ layers: ['FirstFarmers', 'IronAge'], frame: 'britain' }),
-      pca({ layers: ['Viking'], frame: 'britain', showNorthSea: true }),
-      pca({ layers: ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'], frame: 'europe', showNorthSea: true }),
-      pca({ layers: ['AngloSaxon', 'AngloSaxon'], frame: 'britain', showNorthSea: true }),
+      pca({ layers: ['Roman', 'BellBeaker'], focus: 'Roman', frame: 'europe' }),
+      pca({ layers: ['IronAge', 'FirstFarmers'], focus: 'FirstFarmers', frame: 'europe' }),
+      pca({ layers: ['FirstFarmers', 'IronAge'], focus: 'IronAge', frame: 'britain' }),
+      pca({ layers: ['Viking'], focus: 'Viking', frame: 'britain', showNorthSea: true }),
+      pca({ layers: ALL, focus: 'all', frame: 'europe', showNorthSea: true }),
+      pca({ layers: ['AngloSaxon', 'AngloSaxon'], focus: 'AngloSaxon', frame: 'britain', showNorthSea: true }),
+      pca({ layers: ['IronAge', 'Today'], focus: 'Today', frame: 'britain' }),
+      pca({ layers: [], focus: 'Europe', frame: 'europe' }),
+      pca({ layers: ['Today'], focus: 'Europe', frame: 'europe' }),
     ];
     const svg = newSvg();
-    const order: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking'];
     for (const s of cases) {
       expect(() => renderPca(svg, makeData(), s)).not.toThrow();
-      expect(layerIds(svg)).toEqual(['Today', ...order.filter((id) => s.layers.includes(id))]);
+      const inOrder = ALL.filter((id) => s.layers.includes(id));
+      const f = inOrder.find((id) => id === s.focus);
+      expect(layerIds(svg)).toEqual(f ? [...inOrder.filter((id) => id !== f), f] : inOrder);
       expect(svg.querySelectorAll('[data-marker="north-sea"]')).toHaveLength(s.showNorthSea ? 1 : 0);
       expect(svg.querySelectorAll('.centre').length > 0).toBe(s.frame === 'britain');
     }
   });
 
-  it('outlines eastern-England Anglo-Saxon burials only', () => {
-    const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ['AngloSaxon'], frame: 'britain', showNorthSea: true }));
-    expect(svg.querySelectorAll('g.layer[data-layer="AngloSaxon"] .pt.east')).toHaveLength(2);
-    expect(svg.querySelectorAll('.pt.east')).toHaveLength(2);
-    expect(svg.querySelector('.pt.east')?.getAttribute('stroke')).toBe('#1A1A1A');
-  });
-
   it('shows the n of every layer in the legend (Roman n on screen)', () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ['IronAge', 'Roman'], frame: 'britain' }));
-    expect([...svg.querySelectorAll('.legend-item')].map((t) => t.textContent)).toEqual([
-      withN(PERIOD_LABELS.Today, 4),
-      withN(PERIOD_LABELS.IronAge, 5),
-      withN(PERIOD_LABELS.Roman, 3),
-    ]);
+    renderPca(svg, makeData(), pca({ layers: ['IronAge', 'Roman'], focus: 'Roman', frame: 'britain' }));
+    expect(groupTexts(svg, 'ancient')).toEqual([withN(PERIOD_LABELS.IronAge, 5), withN(PERIOD_LABELS.Roman, 3)]);
     expect(svg.textContent).toContain('Roman (n = 3)');
   });
 
   it('tap/hover shows only the period or group name; no per-sample data anywhere', () => {
     const svg = newSvg();
-    const addListener = vi.spyOn(svg, 'addEventListener'); // installed before the first render, so every attachment is counted
+    const addListener = vi.spyOn(svg, 'addEventListener');
     const d = makeData();
-    renderPca(svg, d, pca({ layers: ['AngloSaxon'], frame: 'europe' }));
+    const s = pca({ layers: ['AngloSaxon', 'Today'], focus: 'AngloSaxon', frame: 'europe' });
+    renderPca(svg, d, s);
     const tip = () => svg.querySelector('.plot-tip')?.textContent;
     svg.querySelector('g.layer[data-layer="AngloSaxon"] .pt')!.dispatchEvent(new Event('pointerover', { bubbles: true }));
     expect(tip()).toBe(PERIOD_LABELS.AngloSaxon);
@@ -230,18 +314,15 @@ describe('renderPca', () => {
     svg.dispatchEvent(new Event('pointerleave'));
     expect(tip()).toBe('');
     expect(svg.querySelectorAll('[data-id], title')).toHaveLength(0);
-    // re-rendering must not stack listeners. Stacked handlers would all write the same text, so a tip check cannot
-    // see them; count the attachments instead: pointerover, click and pointerleave, once across both renders.
-    renderPca(svg, d, pca({ layers: ['AngloSaxon'], frame: 'europe' }));
+    renderPca(svg, d, s);
     expect(addListener).toHaveBeenCalledTimes(3);
-    // the tip of the new render still works
     svg.querySelector('g.layer[data-layer="Today"] .pt')!.dispatchEvent(new Event('pointerover', { bubbles: true }));
     expect(tip()).toBe(PERIOD_LABELS.Today);
   });
 
   it('re-rendering replaces content instead of stacking it', () => {
     const svg = newSvg();
-    const s = pca({ layers: ['IronAge'], frame: 'britain' });
+    const s = pca({ layers: ['IronAge'], focus: 'IronAge', frame: 'britain' });
     renderPca(svg, makeData(), s);
     const n = svg.querySelectorAll('*').length;
     renderPca(svg, makeData(), s);
@@ -249,44 +330,48 @@ describe('renderPca', () => {
   });
 
   it('animates a frame change once (500 ms) and maps old pixels onto new ones', () => {
-    const animate = vi.fn();
-    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'animate');
-    Object.defineProperty(Element.prototype, 'animate', { value: animate, configurable: true, writable: true });
-    try {
+    withFakeAnimate((animate) => {
       const d = makeData();
       const svg = newSvg();
       renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'europe' }));
-      expect(animate).not.toHaveBeenCalled(); // first render: nothing to animate from
+      expect(animate).not.toHaveBeenCalled();
       renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'britain' }));
       expect(animate).toHaveBeenCalledTimes(1);
-      expect(animate.mock.calls[0][1]).toEqual({ duration: 500, easing: 'ease-in-out' });
+      expect(animate.mock.calls[0]![1]).toEqual({ duration: 500, easing: 'ease-in-out' });
       renderPca(svg, d, pca({ layers: ['IronAge', 'Roman'], frame: 'britain' }));
-      expect(animate).toHaveBeenCalledTimes(1); // same frame: no animation
-      // the start transform puts the Iron Age centre (drawn in britain pixels) back at its europe pixels
+      expect(animate).toHaveBeenCalledTimes(1);
       const from = makeScale(d.frames.europe);
       const to = makeScale(d.frames.britain);
-      const m = frameTransition(from, to).match(/matrix\(([^)]+)\)/)![1].split(',').map(Number);
+      const m = frameTransition(from, to).match(/matrix\(([^)]+)\)/)![1]!.split(',').map(Number);
       const [s, , , , tx, ty] = m;
-      expect(s * to.toX(1) + tx).toBeCloseTo(from.toX(1), 6);
-      expect(s * to.toY(3) + ty).toBeCloseTo(from.toY(3), 6);
-    } finally {
-      if (original) Object.defineProperty(Element.prototype, 'animate', original);
-      else delete (Element.prototype as unknown as { animate?: unknown }).animate;
-    }
+      expect(s! * to.toX(1) + tx!).toBeCloseTo(from.toX(1), 6);
+      expect(s! * to.toY(3) + ty!).toBeCloseTo(from.toY(3), 6);
+    });
+  });
+
+  it('animate: false (restore, Back) never starts the frame transition', () => {
+    withFakeAnimate((animate) => {
+      const d = makeData();
+      const svg = newSvg();
+      renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'europe' }));
+      renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'britain' }), { animate: false });
+      expect(animate).not.toHaveBeenCalled();
+      renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'europe' }));
+      expect(animate).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('draws the seven periods in seven distinct Okabe-Ito hues', () => {
     const hues = Object.values(OKABE_ITO) as string[];
-    const periods: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking'];
+    const periods = ALL.filter((id) => id !== 'Today');
     for (const id of periods) expect(hues).toContain(PERIOD_COLORS[id]);
     expect(new Set(periods.map((id) => PERIOD_COLORS[id])).size).toBe(7);
   });
 
   it('§6 rule 1: no dates, ages, Group IDs or raw ids in any rendered PCA text', () => {
     const svg = newSvg();
-    const all: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
-    for (const frame of ['europe', 'britain'] as const) {
-      renderPca(svg, makeData(), pca({ layers: all, frame, showNorthSea: true }));
+    for (const [frame, focus] of [['europe', 'all'], ['britain', 'AngloSaxon'], ['britain', 'Today'], ['europe', 'Europe']] as const) {
+      renderPca(svg, makeData(), pca({ layers: ALL, focus, frame, showNorthSea: true }));
       const text = svg.textContent ?? '';
       expect(text).not.toMatch(/\d[\d,.]*\s*(BCE|BC|BP|CE|kya|ya|years?|generations?)\b/i);
       expect(text).not.toMatch(/Mesolithic|Neolithic|Pal(a)?eolithic|Megalithic|Ice Age/i);
@@ -346,37 +431,42 @@ function withCentre(d: WorkshopData, id: PeriodId, centre: { x: number; y: numbe
   return d;
 }
 
-describe('layers outside the frame', () => {
-  it('a layer whose centre is outside the frame is still drawn, as ghosts on the edge, but gets no centre marker or label', () => {
+describe('ghosts: only the focus layer in the British frame (spec §2.3)', () => {
+  it("a non-focus layer's clipped points are not drawn, and with none in frame it leaves the legend", () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ['FirstFarmers', 'IronAge'], frame: 'britain' }));
+    renderPca(svg, makeData(), pca({ layers: ['FirstFarmers', 'IronAge'], focus: 'IronAge', frame: 'britain' }));
+    expect(svg.querySelector('g.layer.period[data-layer="FirstFarmers"]')).not.toBeNull(); // the (empty) layer is kept
+    expect(countIn(svg, 'FirstFarmers')).toBe(0);
+    expect(svg.querySelector('.legend-item[data-legend="FirstFarmers"]')).toBeNull();
+    expect(svg.querySelector('.centre[data-centre="FirstFarmers"]')).toBeNull();
+    expect(svg.querySelectorAll('.pt.clipped')).toHaveLength(1); // only the focus layer's Iron Age point at x = 6
+  });
+
+  it("the focus layer's clipped points are hollow, faint edge ghosts, and the legend still names it", () => {
+    const svg = newSvg();
+    renderPca(svg, makeData(), pca({ layers: ['FirstFarmers', 'IronAge'], focus: 'FirstFarmers', frame: 'britain' }));
     const ff = [...svg.querySelectorAll('g.layer[data-layer="FirstFarmers"] .pt')];
-    expect(ff).toHaveLength(4); // the layer is still drawn (spec 4.4)
+    expect(ff).toHaveLength(4);
     for (const pt of ff) {
-      // clamped to the frame edge as before (spec 5.1), but hollow and faint so it does not read as data
       expect(pt.classList.contains('clipped')).toBe(true);
       expect(pt.getAttribute('fill')).toBe('none');
       expect(pt.getAttribute('stroke')).toBe(PERIOD_COLORS.FirstFarmers);
-      // svgEl rounds numbers to one decimal, so only a string keeps the second decimal
       expect(pt.getAttribute('opacity')).toBe('0.35');
     }
     expect(svg.querySelector('.centre[data-centre="FirstFarmers"]')).toBeNull();
-    expect(svg.querySelector('[data-centre-label="FirstFarmers"]')).toBeNull();
-    expect([...svg.querySelectorAll('.centre-label')].map((t) => t.textContent)).toEqual([PERIOD_LABELS.IronAge]);
-    // the legend still names the layer, so the ghosts are identified
-    expect(svg.querySelector('.legend-item[data-legend="FirstFarmers"]')?.textContent)
-      .toBe(withN(PERIOD_LABELS.FirstFarmers, 4));
+    expect(svg.querySelector('.legend-item[data-legend="FirstFarmers"]')?.textContent).toBe(withN(PERIOD_LABELS.FirstFarmers, 4));
+    expect(countIn(svg, 'IronAge')).toBe(4); // the non-focus Iron Age layer drops its clipped point
   });
 
-  it('a partly clipped layer keeps its centre marker and label; only its clipped points are ghosts', () => {
+  it('a partly clipped focus layer keeps its centre marker and label; only its clipped points are ghosts', () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ['IronAge'], frame: 'britain' }));
+    renderPca(svg, makeData(), pca({ layers: ['IronAge'], focus: 'IronAge', frame: 'britain' }));
     const pts = [...svg.querySelectorAll('g.layer[data-layer="IronAge"] .pt')];
     const ghosts = pts.filter((p) => p.classList.contains('clipped'));
     const solid = pts.filter((p) => !p.classList.contains('clipped'));
-    expect(ghosts).toHaveLength(1); // the point at x = 6
+    expect(ghosts).toHaveLength(1);
     expect(solid).toHaveLength(4);
-    expect(ghosts[0].getAttribute('fill')).toBe('none');
+    expect(ghosts[0]!.getAttribute('fill')).toBe('none');
     for (const p of solid) {
       expect(p.getAttribute('fill')).toBe(PERIOD_COLORS.IronAge);
       expect(p.hasAttribute('opacity')).toBe(false);
@@ -385,10 +475,18 @@ describe('layers outside the frame', () => {
     expect(svg.querySelector('.centre-label[data-centre-label="IronAge"]')?.textContent).toBe(PERIOD_LABELS.IronAge);
   });
 
+  it('the Europe frame keeps ghosts for every layer', () => {
+    const d = makeData();
+    d.points.find((p) => p.period === 'IronAge')!.points.push({ x: 9, y: 0 });
+    const svg = newSvg();
+    renderPca(svg, d, pca({ layers: ['BellBeaker', 'IronAge'], focus: 'BellBeaker', frame: 'europe' }));
+    expect(svg.querySelectorAll('g.layer[data-layer="IronAge"] .pt.clipped')).toHaveLength(1);
+  });
+
   it('skips the arrow whose head centre is outside the frame and keeps the others', () => {
     const svg = newSvg();
     const d = withCentre(makeData(), 'AngloSaxon', { x: 6, y: 3.8 });
-    renderPca(svg, d, pca({ layers: ['IronAge', 'Roman', 'AngloSaxon'], frame: 'britain' }));
+    renderPca(svg, d, pca({ layers: ['IronAge', 'Roman', 'AngloSaxon'], focus: 'AngloSaxon', frame: 'britain' }));
     expect([...svg.querySelectorAll('g.arrow')].map((a) => a.getAttribute('data-arrow'))).toEqual(['Roman']);
     expect([...svg.querySelectorAll('.centre')].map((c) => c.getAttribute('data-centre'))).toEqual(['IronAge', 'Roman']);
   });
@@ -396,10 +494,68 @@ describe('layers outside the frame', () => {
   it('draws no arrow, and no tail ring, when the Iron Age centre (the tail) is outside the frame', () => {
     const svg = newSvg();
     const d = withCentre(makeData(), 'IronAge', { x: -4, y: -2 });
-    renderPca(svg, d, pca({ layers: ['Roman', 'AngloSaxon'], frame: 'britain' }));
+    renderPca(svg, d, pca({ layers: ['Roman', 'AngloSaxon'], focus: 'AngloSaxon', frame: 'britain' }));
     expect(svg.querySelectorAll('g.arrow')).toHaveLength(0);
     expect(svg.querySelectorAll('.arrow-tail')).toHaveLength(0);
     expect([...svg.querySelectorAll('.centre')].map((c) => c.getAttribute('data-centre'))).toEqual(['Roman', 'AngloSaxon']);
+  });
+});
+
+// Britain today follows the same ghost rule as every period (spec §2.3), drawn as rings; and a frame change honours
+// prefers-reduced-motion. Neither is pinned by the blocks above.
+describe('Britain today at the frame edge, and reduced motion', () => {
+  const withFarToday = (): WorkshopData => {
+    const d = makeData();
+    d.points.find((g) => g.period === 'Today')!.points.push({ x: 9, y: 3 }); // outside both frames (Europe xmax 8, Britain xmax 2.7)
+    return d;
+  };
+  const todayRings = (svg: SVGSVGElement) => [...svg.querySelectorAll('g.layer[data-layer="Today"] path.pt.today-ring')];
+
+  it('in the British frame a clipped ring is a faint edge ghost only while Britain today is the focus', () => {
+    const svg = newSvg();
+    const d = withFarToday();
+    renderPca(svg, d, pca({ layers: ['IronAge', 'Today'], focus: 'Today', frame: 'britain' }));
+    expect(todayRings(svg)).toHaveLength(5);
+    const ghosts = todayRings(svg).filter((r) => r.classList.contains('clipped'));
+    expect(ghosts).toHaveLength(1);
+    expect(ghosts[0]!.getAttribute('fill')).toBe('none');
+    expect(ghosts[0]!.getAttribute('stroke')).toBe(TODAY_RING.stroke);
+    expect(ghosts[0]!.getAttribute('opacity')).toBe('0.35');
+    expect(ghosts[0]!.getAttribute('d')).toMatch(/^M781\.5 /); // pinned to x = 2.7 (785 px), minus the ring radius 3.5
+    for (const r of todayRings(svg).filter((x) => !x.classList.contains('clipped'))) expect(r.hasAttribute('opacity')).toBe(false);
+    // another period in focus: Britain today stays on the map as faded rings, but its clipped point is not drawn
+    renderPca(svg, d, pca({ layers: ['IronAge', 'Today'], focus: 'IronAge', frame: 'britain' }));
+    expect(todayRings(svg)).toHaveLength(4);
+    expect(svg.querySelectorAll('g.layer[data-layer="Today"] .clipped')).toHaveLength(0);
+    expect(svg.querySelector('g.layer[data-layer="Today"]')?.getAttribute('opacity')).toBe('0.3');
+  });
+
+  it('the Europe frame keeps the ghost of a clipped ring whatever the focus', () => {
+    const svg = newSvg();
+    renderPca(svg, withFarToday(), pca({ layers: ['BellBeaker', 'Today'], focus: 'BellBeaker', frame: 'europe' }));
+    expect(todayRings(svg)).toHaveLength(5);
+    expect(todayRings(svg).filter((r) => r.classList.contains('clipped'))).toHaveLength(1);
+  });
+
+  it('prefers-reduced-motion: a frame change is drawn at once, with no transition', () => {
+    withFakeAnimate((animate) => {
+      const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+      Object.defineProperty(window, 'matchMedia', {
+        value: (query: string) => ({ matches: query.includes('prefers-reduced-motion'), media: query }),
+        configurable: true, writable: true,
+      });
+      try {
+        const d = makeData();
+        const svg = newSvg();
+        renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'europe' }));
+        renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'britain' }));
+        expect(svg.getAttribute('data-frame')).toBe('britain');
+        expect(animate).not.toHaveBeenCalled();
+      } finally {
+        if (original) Object.defineProperty(window, 'matchMedia', original);
+        else delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+      }
+    });
   });
 });
 
@@ -568,120 +724,159 @@ describe('palette: shapes back up the colours', () => {
   });
 });
 
-// ---------- final review: the outlined eastern-England points get a legend item (Beat 3) ----------
-// The Anglo-Saxon layer outlines the burials flagged `east` in black. Nothing on screen said what the outline meant,
-// so a student who asked "why are some of them black-edged?" had no answer in the plot itself.
-describe('the legend explains the outlined eastern-England points', () => {
-  const ALL_LAYERS: PeriodId[] = ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Viking', 'Today'];
-  const eastItem = (svg: SVGSVGElement) => svg.querySelector('.legend .legend-item[data-legend="east"]');
-  const legendTexts = (svg: SVGSVGElement) => [...svg.querySelectorAll('.legend-item')].map((t) => t.textContent);
-
-  it('the label is "Anglo-Saxon burials, eastern England (outlined)" (v3 §3.5), written once in content.ts', () => {
+// ---------- v3 legend: two headings, living groups, the east outline only with Anglo-Saxon focus ----------
+describe('legend (spec §2.3, §3.5)', () => {
+  it('the eastern-England legend label is the v3 text', () => {
     expect(EAST_ENGLAND_LEGEND).toBe('Anglo-Saxon burials, eastern England (outlined)');
+    expect(LEGEND_ANCIENT).toBe('Ancient Britons');
+    expect(LEGEND_LIVING).toBe('People living today');
   });
 
-  it('adds exactly one item, straight after the Anglo-Saxon one, when that layer is drawn and a point carries east', () => {
+  it('groups items under two headings, each group on its own row: Ancient Britons, then People living today', () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ['IronAge', 'AngloSaxon', 'Viking'], frame: 'britain' }));
-    expect(legendTexts(svg)).toEqual([
-      withN(PERIOD_LABELS.Today, 4),
-      withN(PERIOD_LABELS.IronAge, 5),
-      withN(PERIOD_LABELS.AngloSaxon, 5),
-      EAST_ENGLAND_LEGEND,
-      withN(PERIOD_LABELS.Viking, 2),
+    renderPca(svg, makeData(), pca({ layers: ['FirstFarmers', 'BellBeaker', 'Today'], focus: 'BellBeaker' }));
+    const groups = [...svg.querySelectorAll('g.legend-group')];
+    expect(groups.map((g) => g.getAttribute('data-legend-group'))).toEqual(['ancient', 'living']);
+    expect(groups.map((g) => g.querySelector('text.legend-heading')?.textContent)).toEqual([LEGEND_ANCIENT, LEGEND_LIVING]);
+    expect(groupTexts(svg, 'ancient')).toEqual([withN(PERIOD_LABELS.FirstFarmers, 4), withN(PERIOD_LABELS.BellBeaker, 4)]);
+    expect([...groups[1]!.querySelectorAll('.legend-item')].map((i) => i.getAttribute('data-legend')))
+      .toEqual(['Sardinian', 'Spanish', 'ItalianNorth', 'French', 'Norwegian', 'Today']);
+    expect(groupTexts(svg, 'living').at(-1)).toBe(withN(PERIOD_LABELS.Today, 4));
+    const heading = (g: Element) => num(g.querySelector('text.legend-heading'), 'y');
+    expect(heading(groups[0]!)).toBe(PCA_VIEW.legendTop);
+    expect(heading(groups[1]!)).toBeGreaterThan(heading(groups[0]!));
+    const todayMark = svg.querySelector('.legend-item[data-legend="Today"] path')!;
+    expect(todayMark.getAttribute('fill')).toBe('none');
+    expect(todayMark.getAttribute('stroke')).toBe(TODAY_RING.stroke);
+    expect(svg.querySelector('.legend-item[data-legend="French"] path')?.getAttribute('fill')).toBe(MAP_GREY);
+  });
+
+  it('in the British frame a non-focus layer or map group with no point in the frame is left out; the focus layer never is', () => {
+    const svg = newSvg();
+    const d = makeData();
+    renderPca(svg, d, pca({ layers: ['FirstFarmers', 'IronAge', 'Today'], focus: 'IronAge', frame: 'britain' }));
+    expect(groupTexts(svg, 'ancient')).toEqual([withN(PERIOD_LABELS.IronAge, 5)]);
+    expect(groupTexts(svg, 'living')).toEqual([withN(PERIOD_LABELS.Today, 4)]);
+    renderPca(svg, d, pca({ layers: ['FirstFarmers', 'IronAge', 'Today'], focus: 'FirstFarmers', frame: 'britain' }));
+    expect(groupTexts(svg, 'ancient')).toEqual([withN(PERIOD_LABELS.FirstFarmers, 4), withN(PERIOD_LABELS.IronAge, 5)]);
+  });
+
+  it('outlines the eastern-England points, with their legend item, only while Anglo-Saxon is the focus', () => {
+    const svg = newSvg();
+    const d = makeData();
+    renderPca(svg, d, pca({ layers: ['IronAge', 'AngloSaxon', 'Viking'], focus: 'AngloSaxon', frame: 'britain' }));
+    expect(groupTexts(svg, 'ancient')).toEqual([
+      withN(PERIOD_LABELS.IronAge, 5), withN(PERIOD_LABELS.AngloSaxon, 5), EAST_ENGLAND_LEGEND, withN(PERIOD_LABELS.Viking, 2),
     ]);
-    expect(svg.querySelectorAll('.legend-item[data-legend="east"]')).toHaveLength(1);
-    // the plot itself has the outlined points the item talks about
-    expect(svg.querySelectorAll('.pt.east')).toHaveLength(2);
-  });
-
-  it('appears on the Europe frame too, and once even when the layer is listed twice', () => {
-    const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ['AngloSaxon', 'AngloSaxon'], frame: 'europe' }));
-    expect(legendTexts(svg)).toEqual([withN(PERIOD_LABELS.Today, 4), withN(PERIOD_LABELS.AngloSaxon, 5), EAST_ENGLAND_LEGEND]);
-  });
-
-  it('is absent whenever the Anglo-Saxon layer is not drawn (nothing is outlined, so nothing to explain)', () => {
-    const cases: PeriodId[][] = [[], ['IronAge', 'Roman'], ['FirstFarmers', 'BellBeaker'], ['BronzeAge', 'Viking'], ['Today']];
-    for (const frame of ['europe', 'britain'] as const) {
-      for (const layers of cases) {
-        const svg = newSvg();
-        renderPca(svg, makeData(), pca({ layers, frame, showNorthSea: true }));
-        const what = `${frame}: ${layers.join(', ') || 'no layers'}`;
-        expect(legendTexts(svg), what).not.toContain(EAST_ENGLAND_LEGEND);
-        expect(eastItem(svg), what).toBeNull();
-        expect(svg.querySelectorAll('.pt.east'), what).toHaveLength(0);
-      }
+    expect(svg.querySelectorAll('g.layer[data-layer="AngloSaxon"] .pt.east')).toHaveLength(2);
+    for (const focus of ['Viking', 'IronAge', undefined] as const) {
+      renderPca(svg, d, pca({ layers: ['IronAge', 'AngloSaxon', 'Viking'], focus, frame: 'britain' }));
+      expect(svg.querySelectorAll('.pt.east'), String(focus)).toHaveLength(0);
+      expect(eastItem(svg), String(focus)).toBeNull();
     }
+    renderPca(svg, d, pca({ layers: ALL, focus: 'all', frame: 'europe', showNorthSea: true }));
+    expect(svg.querySelectorAll('.pt.east')).toHaveLength(0);
+    expect(eastItem(svg)).toBeNull();
   });
 
-  it('is absent when the Anglo-Saxon layer is drawn but no point carries east (nothing is outlined)', () => {
+  it('has no east item when no Anglo-Saxon point carries east', () => {
     const d = makeData();
     for (const g of d.points) for (const pt of g.points) delete (pt as { east?: boolean }).east;
     const svg = newSvg();
-    renderPca(svg, d, pca({ layers: ['AngloSaxon'], frame: 'britain' }));
+    renderPca(svg, d, pca({ layers: ['AngloSaxon'], focus: 'AngloSaxon', frame: 'britain' }));
     expect(svg.querySelectorAll('.pt.east')).toHaveLength(0);
     expect(eastItem(svg)).toBeNull();
-    expect(legendTexts(svg)).toEqual([withN(PERIOD_LABELS.Today, 4), withN(PERIOD_LABELS.AngloSaxon, 5)]);
-    // east: false everywhere is the same
-    const e = makeData();
-    for (const pt of e.points.find((g) => g.period === 'AngloSaxon')!.points) pt.east = false;
-    const svg2 = newSvg();
-    renderPca(svg2, e, pca({ layers: ['AngloSaxon'], frame: 'britain' }));
-    expect(eastItem(svg2)).toBeNull();
-  });
-
-  it('is gone again when a later render drops the Anglo-Saxon layer (a redraw never keeps a stale item)', () => {
-    const svg = newSvg();
-    const d = makeData();
-    renderPca(svg, d, pca({ layers: ['AngloSaxon'], frame: 'britain' }));
-    expect(eastItem(svg)).not.toBeNull();
-    renderPca(svg, d, pca({ layers: ['IronAge'], frame: 'britain' }));
-    expect(eastItem(svg)).toBeNull();
-    expect(svg.querySelectorAll('.legend-item[data-legend="east"]')).toHaveLength(0);
   });
 
   it('its mark looks like the plotted points it explains: an Anglo-Saxon triangle in its colour with the same black outline', () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ['AngloSaxon'], frame: 'britain' }));
+    renderPca(svg, makeData(), pca({ layers: ['AngloSaxon'], focus: 'AngloSaxon', frame: 'britain' }));
     const mark = eastItem(svg)!.querySelector('path')!;
     const plotted = svg.querySelector('.pt.east')!;
     const plain = svg.querySelector('.legend-item[data-legend="AngloSaxon"] path')!;
-    expect(PERIOD_SHAPES.AngloSaxon).toBe('triangle');
     expect(mark.getAttribute('stroke')).toBe(INK);
     expect(mark.getAttribute('stroke')).toBe(plotted.getAttribute('stroke'));
     expect(mark.getAttribute('stroke-width')).toBe(plotted.getAttribute('stroke-width'));
     expect(mark.getAttribute('fill')).toBe(PERIOD_COLORS.AngloSaxon);
     expect(mark.getAttribute('fill')).toBe(plotted.getAttribute('fill'));
-    // the same shape as the plain Anglo-Saxon item beside it (path commands only: M, L, L, Z for a triangle)
     const commands = (el: Element) => (el.getAttribute('d') ?? '').replace(/[^A-Za-z]/g, '');
+    expect(PERIOD_SHAPES.AngloSaxon).toBe('triangle');
     expect(commands(mark)).toBe('MLLZ');
     expect(commands(mark)).toBe(commands(plain));
-    // and the plain item keeps its plain look: no outline
     expect(plain.getAttribute('stroke')).toBeNull();
+    expect(eastItem(svg)!.getAttribute('data-tip')).toBe(EAST_ENGLAND_LEGEND);
   });
 
-  it('has a hover tip with the same words, and flows into the legend rows: never past the right edge or into the caption', () => {
+  it('renders all (Viking included) and Anglo-Saxon focus with no legend item past the viewBox (spec §9.1)', () => {
+    const d = withRealCounts(makeData());
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ALL_LAYERS, frame: 'britain' }));
-    const item = eastItem(svg)!;
-    expect(item.getAttribute('data-tip')).toBe(EAST_ENGLAND_LEGEND);
-    item.querySelector('path')!.dispatchEvent(new Event('pointerover', { bubbles: true }));
-    expect(svg.querySelector('.plot-tip')?.textContent).toBe(EAST_ENGLAND_LEGEND);
-    // nine items (eight layers and this one) now share the rows under the plot box
-    expect(svg.querySelectorAll('.legend-item')).toHaveLength(9);
-    const captionY = num(svg.querySelector('.pca-caption'), 'y');
-    for (const t of svg.querySelectorAll('.legend text')) {
-      expect(num(t, 'y'), t.textContent ?? '').toBeLessThan(captionY - 14);
-      expect(num(t, 'x') + (t.textContent ?? '').length * 7.6, t.textContent ?? '').toBeLessThanOrEqual(PCA_VIEW.right + 1);
+    const cases = [
+      pca({ layers: ALL, focus: 'all', frame: 'europe', showNorthSea: true }),
+      pca({ layers: ALL, focus: 'AngloSaxon', frame: 'britain', showNorthSea: true }),
+      pca({ layers: ALL, focus: 'Today', frame: 'britain', showNorthSea: true }),
+    ];
+    for (const s of cases) {
+      renderPca(svg, d, s);
+      if (s.focus === 'all') {
+        expect(layerIds(svg)).toEqual(ALL); // Britain today drawn last
+        expect(svg.querySelector('.legend-item[data-legend="Viking"]')?.textContent).toBe(withN(PERIOD_LABELS.Viking, 37));
+      }
+      const texts = [...svg.querySelectorAll('.legend text')];
+      expect(texts.length).toBeGreaterThan(4);
+      for (const t of texts) {
+        const w = (t.textContent ?? '').length * (t.classList.contains('legend-heading') ? 8.4 : 7.6);
+        expect(num(t, 'x') + w, `${s.focus}: ${t.textContent}`).toBeLessThanOrEqual(PCA_VIEW.right + 1);
+        expect(num(t, 'y') + 4, `${s.focus}: ${t.textContent}`).toBeLessThanOrEqual(PCA_VIEW.height);
+        expect(num(t, 'y'), `${s.focus}: ${t.textContent}`).toBeLessThanOrEqual(PCA_VIEW.legendTop + 5 * PCA_VIEW.legendRow);
+      }
     }
   });
 
-  it('adds no text that breaks a §6 rule (no ages, no Group or sample IDs)', () => {
+  it('adds no legend text that breaks a §6 rule (no ages, no Group or sample IDs)', () => {
     const svg = newSvg();
-    renderPca(svg, makeData(), pca({ layers: ALL_LAYERS, frame: 'europe', showNorthSea: true }));
-    const text = eastItem(svg)?.textContent ?? '';
-    expect(text).toBe(EAST_ENGLAND_LEGEND);
-    expect(text).not.toMatch(/\d|BCE|BC\b|BP\b|years|ago|Neolithic|Mesolithic|_/i);
+    renderPca(svg, withRealCounts(makeData()), pca({ layers: ALL, focus: 'AngloSaxon', frame: 'britain', showNorthSea: true }));
+    const text = svg.querySelector('.legend')?.textContent ?? '';
+    expect(text).toContain(EAST_ENGLAND_LEGEND);
+    expect(text).not.toMatch(/BCE|BC\b|BP\b|years|ago|Neolithic|Mesolithic|_/i);
+  });
+});
+
+describe('caption strip and chips (renderPcaCaptions, icons.ts)', () => {
+  it('builds div.pca-captions in item order: captions, a chip with its icon, the zoom note', () => {
+    const items: PcaCaptionItem[] = [
+      { kind: 'caption', key: 'PCA_CAPTION', text: PCA_CAPTION },
+      { kind: 'caption', key: 'EUROPE_CAPTION', text: EUROPE_CAPTION },
+      { kind: 'chip', key: 'CHIP_DNA_CHANGED', text: CHIP_TEXT.CHIP_DNA_CHANGED, icon: 'dna' },
+      { kind: 'zoom', text: zoomNote(5) },
+    ];
+    const strip = renderPcaCaptions(document, items);
+    expect(strip.tagName).toBe('DIV');
+    expect(strip.className).toBe('pca-captions');
+    const kids = [...strip.children];
+    expect(kids.map((k) => k.tagName.toLowerCase())).toEqual(['p', 'p', 'span', 'p']);
+    expect(kids[0]!.className).toBe('pca-caption');
+    expect(kids[0]!.getAttribute('data-caption')).toBe('PCA_CAPTION');
+    expect(kids[0]!.textContent).toBe(PCA_CAPTION);
+    expect(kids[1]!.getAttribute('data-caption')).toBe('EUROPE_CAPTION');
+    expect(kids[1]!.textContent).toBe('Each dot is a person living in Europe today. Britain is held back for now.');
+    expect(kids[2]!.matches('span.chip.chip--dna[data-chip="CHIP_DNA_CHANGED"]')).toBe(true);
+    expect(kids[2]!.textContent).toBe('DNA changed: new people');
+    expect(kids[2]!.querySelector('svg.chip-icon')?.getAttribute('aria-hidden')).toBe('true');
+    expect(kids[3]!.className).toBe('zoom-note');
+    expect(kids[3]!.textContent).toBe('Zoomed in about 5× on Britain');
+    expect(renderPcaCaptions(document, []).children).toHaveLength(0);
+  });
+
+  it('every chip carries the icon of its stem: DNA changed -> helix, Culture changed -> pot', () => {
+    for (const key of Object.keys(CHIP_TEXT) as ChipKey[]) {
+      const el = chipElement(document, key);
+      const icon = CHIP_TEXT[key].startsWith('DNA changed') ? 'dna' : 'pot';
+      expect(CHIP_TEXT[key].startsWith('DNA changed') || CHIP_TEXT[key].startsWith('Culture changed'), key).toBe(true);
+      expect(el.className).toBe(`chip chip--${icon}`);
+      expect(el.getAttribute('data-chip')).toBe(key);
+      expect(el.querySelector('svg.chip-icon path')?.getAttribute('d')).toBe(CHIP_ICON_PATHS[icon]);
+      expect(el.querySelector('svg.chip-icon')?.getAttribute('viewBox')).toBe('0 0 24 24');
+      expect(el.textContent).toBe(CHIP_TEXT[key]);
+    }
   });
 });

@@ -57,3 +57,51 @@
   color: #4d4d4d;
   font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
 }
+
+/* PCA caption strip (spec §2.3): HTML under the svg, styled like .traj-caption. */
+.pca-captions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 4px 12px 8px;
+  background: #ffffff;
+  color: #1a1a1a;
+  font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+}
+.pca-caption,
+.zoom-note {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+.zoom-note {
+  font-style: italic;
+  color: #4d4d4d;
+}
+/* Chips (spec §3.5): a pill with its icon; the stem and icon carry the meaning, the colour only helps. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1.5px solid currentColor;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.chip--dna {
+  background: #e6f0fa;
+  color: #00507d;
+}
+.chip--pot {
+  background: #fff3dd;
+  color: #7a4f00;
+}
+.chip-icon {
+  flex: none;
+  width: 1.15em;
+  height: 1.15em;
+}
