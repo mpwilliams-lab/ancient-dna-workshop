@@ -79,7 +79,11 @@ describe('creditsGroups (D-L5: every image and map in the build)', () => {
     const all = groups.flatMap((g) => g.lines).join('\n');
     expect(all).not.toContain('Shrewton');
     expect(all).not.toContain('Keith Weller');
-    expect(all).toContain('Couleur');
+    // The milk photo is bundled in this build, so its author is credited. The author is read from the manifest, not typed: the instructor may
+    // switch the milk to its §7.1 fallback (another author) at the image check.
+    const milk = ASSET_MANIFEST.images.find((e) => e.id === 'milk')!;
+    expect(milk.author, 'the milk entry names an author').not.toBe('');
+    expect(all).toContain(milk.author);
   });
   it('an own drawing has its attribution line and no URL', () => {
     const b1 = creditsGroups(uncheckedManifest(), fakeUrls()).find((g) => g.cardId === 'B1')!;
