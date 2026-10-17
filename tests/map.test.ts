@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 // Spec §6 projection, drawing, points and arrows; CONTRACT §4.13 src/plots/map.ts.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  ARROW_WIDTH, DOT_MAX_RADIUS, MAP_FRAMES, MAP_VIEW, WIDE_ARROW_WIDTH, ZERO_RING_RADIUS, catmullRomPath,
-  catmullRomSegments, dotRadius, frameOutline, makeProjection, mapBase, project, projectUnits, renderMap, roundsToZero,
+  ARROW_WIDTH, DOT_MAX_RADIUS, MAP_COLOURS, MAP_FRAMES, MAP_VIEW, MIN_VALUE_RADIUS, WIDE_ARROW_WIDTH, ZERO_RING_RADIUS, catmullRomPath,
+  catmullRomSegments, dotRadius, frameOutline, makeProjection, mapBase, project, projectUnits, renderMap, roundsToZero, valueColour,
   type MapFrameId, type MapSpec, type MapView,
 } from '../src/plots/map';
+import { formatCopies } from '../src/cards';
 import { EUROPE_LAND } from '../src/generated/map-europe';
 import { OLDWORLD_LAND } from '../src/generated/map-oldworld';
 
@@ -69,6 +72,129 @@ describe('dots (spec §6 points)', () => {
     expect([roundsToZero(0.04, 15), roundsToZero(0.05, 15)]).toEqual([true, false]);
     expect(dotRadius(0.4, 100)).toBe(3);
     expect(dotRadius(0, 15)).toBe(3);
+  });
+});
+
+// ---- Task 24 (controller ruling after the Task 19 review): a small number must read as present, not weaker than zero ----
+describe('the dot rule: a value that does not round to 0 is never drawn smaller than "zero" (Task 24)', () => {
+  /** WCAG 2.x contrast ratio of two #rrggbb colours. */
+  const luminance = (hex: string): number => {
+    const channel = (i: number): number => {
+      const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+  };
+  const contrast = (a: string, b: string): number => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi! + 0.05) / (lo! + 0.05);
+  };
+  const css = readFileSync(resolve(__dirname, '../src/style.css'), 'utf8');
+  const token = (name: string): string => {
+    const m = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`).exec(css);
+    if (!m) throw new Error(`style.css has no --${name} colour`);
+    return m[1]!;
+  };
+
+  it('the smallest filled dot is 4, strictly larger than the 3 px zero ring', () => {
+    expect(MIN_VALUE_RADIUS).toBe(4);
+    expect(MIN_VALUE_RADIUS).toBeGreaterThan(ZERO_RING_RADIUS);
+    expect(dotRadius(0.6, 100)).toBe(MIN_VALUE_RADIUS);       // 1 copy in every 100, once rounded: the smallest number the cards print
+    expect(dotRadius(0.4, 100)).toBe(ZERO_RING_RADIUS);       // prints 0
+  });
+
+  it('every whole number of copies from 1 to 100 draws a dot bigger than the zero ring, and the number it prints is not 0', () => {
+    for (let n = 1; n <= 100; n++) {
+      expect(dotRadius(n, 100), `${n} in 100`).toBeGreaterThan(ZERO_RING_RADIUS);
+      expect(dotRadius(n, 100), `${n} in 100`).toBeGreaterThanOrEqual(MIN_VALUE_RADIUS);
+      expect(formatCopies('LCT', n / 100), `${n} in 100`).toBe(String(n));
+    }
+  });
+
+  it('a share the data really holds that prints 1 (Kenya 0.5, China 1.5 in 100) is a dot, and one that prints 0 is the ring', () => {
+    expect(dotRadius(0.505, 100)).toBe(MIN_VALUE_RADIUS);
+    expect(dotRadius(1.456, 100)).toBe(MIN_VALUE_RADIUS);
+    expect(dotRadius(0, 100)).toBe(ZERO_RING_RADIUS);
+  });
+
+  it('above the floor the area-true formula is unchanged: 14 sqrt(value / scale), capped at the scale', () => {
+    // 14 sqrt(v / 100) reaches 4 at v = 8.16: below that the floor decides, above it the formula does.
+    expect(dotRadius(8, 100)).toBe(MIN_VALUE_RADIUS);
+    expect(dotRadius(9, 100)).toBeCloseTo(14 * Math.sqrt(0.09), 12);
+    expect(dotRadius(25, 100)).toBeCloseTo(7, 12);
+    expect(dotRadius(75, 100)).toBeCloseTo(14 * Math.sqrt(0.75), 12);
+    expect(dotRadius(100, 100)).toBe(14);
+    expect(dotRadius(150, 100)).toBe(14);
+  });
+
+  it('a bigger value never draws a smaller dot (the floor flattens the smallest values, it never reorders them)', () => {
+    for (const scale of [100, 15]) {
+      let previous = 0;
+      for (let i = 0; i <= scale * 10; i++) {
+        const r = dotRadius(i / 10, scale);
+        expect(r, `${i / 10} on 0-${scale}`).toBeGreaterThanOrEqual(previous);
+        previous = r;
+      }
+    }
+  });
+
+  it('on the TYK2 scale (0-15, one decimal) the same rule holds: 0.1 in 100 is a dot of 4, 0.04 is the ring', () => {
+    expect(dotRadius(0.05, 15)).toBe(MIN_VALUE_RADIUS);
+    expect(dotRadius(0.1, 15)).toBe(MIN_VALUE_RADIUS);
+    expect(dotRadius(0.04, 15)).toBe(ZERO_RING_RADIUS);
+    expect(dotRadius(2.7, 15)).toBeCloseTo(14 * Math.sqrt(2.7 / 15), 12);
+  });
+
+  it('renderMap draws a 1-copy value as a filled dot of 4 and a 0 as the hollow ring of 3', () => {
+    const s = svg();
+    renderMap(s, { id: 'I2', frame: 'oldWorld', scaleMax: 100, points: [
+      { lat: 0.6, lon: 34.8, value: 0.505, role: 'value' }, { lat: 35.7, lon: 139.7, value: 0, role: 'value' }, { lat: 52.5, lon: -1.5, value: 97.8, role: 'value' },
+    ] });
+    const dots = [...s.querySelectorAll('circle.map-dot')];
+    // (the svg writes a number to one decimal)
+    expect(dots.map((d) => [d.getAttribute('class'), d.getAttribute('r'), d.getAttribute('fill') === 'none'])).toEqual([
+      ['map-dot map-dot--value', '4', false], ['map-dot map-dot--zero', '3', true], ['map-dot map-dot--value', String(Math.round(dotRadius(97.8, 100) * 10) / 10), false],
+    ]);
+    // As drawn, strokes included (a stroke is centred on the circle's edge): the smallest dot still reaches further out than the ring.
+    const reach = (d: Element): number => Number(d.getAttribute('r')) + Number(d.getAttribute('stroke-width')) / 2;
+    expect(reach(dots[0]!)).toBeGreaterThan(reach(dots[1]!));
+  });
+
+  it('MAP_COLOURS holds the map colours (spec §6), with the light end of the value scale darkened for land (Task 24)', () => {
+    expect(MAP_COLOURS).toEqual({
+      arrow: '#9B2226', ink: '#1A1A1A', halo: '#FFFFFF', trueDot: '#8C8C8C', geneticDot: '#0072B2', link: '#8C8C8C',
+      ring: '#08519C', low: '#3182BD', high: '#08306B',
+    });
+  });
+
+  it('valueColour runs from the low colour to the high one by the square root of the share of the scale, and clamps', () => {
+    expect(valueColour(0, 100)).toBe('#3182BD');
+    expect(valueColour(100, 100)).toBe('#08306B');
+    expect(valueColour(25, 100)).toBe('#1D5994');             // t = 0.5: (49+8)/2, (130+48)/2, (189+107)/2 rounded
+    expect(valueColour(7.5, 15)).toBe(valueColour(50, 100));  // the share of the scale decides, not the scale
+    expect(valueColour(-5, 100)).toBe(valueColour(0, 100));
+    expect(valueColour(250, 100)).toBe(valueColour(100, 100));
+    expect(valueColour(40, 100)).toMatch(/^#[0-9A-F]{6}$/);
+  });
+
+  it('the lightest colour a dot can have is at least 3:1 against the land (--map-land) and against the card background, at every value', () => {
+    const land = token('map-land');
+    const sea = token('card-bg');
+    expect(contrast(MAP_COLOURS.low, land)).toBeGreaterThanOrEqual(3);
+    expect(contrast(MAP_COLOURS.low, sea)).toBeGreaterThanOrEqual(3);
+    for (const scale of [100, 15]) {
+      for (let i = 0; i <= 150; i++) {
+        const c = valueColour((i / 150) * scale, scale);
+        expect(contrast(c, land), `${c} (${i}/150 of 0-${scale}) on land`).toBeGreaterThanOrEqual(3);
+        expect(contrast(c, sea), `${c} on the sea`).toBeGreaterThanOrEqual(3);
+      }
+    }
+    // The zero ring is drawn in its own colour: it too must show on land.
+    expect(contrast(MAP_COLOURS.ring, land)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the check bites: the pale blue the scale started from was 1.1:1 against the land', () => {
+    expect(contrast('#C6DBEF', token('map-land'))).toBeLessThan(1.2);
   });
 });
 

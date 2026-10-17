@@ -73,6 +73,10 @@ export const DOT_MAX_RADIUS = 14;
 /** Font size of every map label (MapText). Task 20's label placer (src/maps.ts) re-exports and measures with it. */
 export const MAP_LABEL_FONT_PX = 20;
 export const ZERO_RING_RADIUS = 3;
+/** Task 24 (controller ruling after the Task 19 review): the smallest filled dot. Area-true, 1 to 8 copies in every 100 would draw a dot of
+ *  1.4 to 4 (2.8 for 4 in 100), smaller than the 3 px ring that means "zero": a small number would read as weaker than none. Any value that
+ *  does not round to 0 is therefore at least this big, strictly larger than the ring. The printed number stays exact. */
+export const MIN_VALUE_RADIUS = 4;
 export const ARROW_WIDTH: Readonly<Record<ArrowStyle, number>> = { main: 5, minor: 2.5, idea: 2.5 };
 export const WIDE_ARROW_WIDTH = 12;
 /** Arrowhead size in stroke widths (the marker is markerWidth x markerHeight of these, markerUnits strokeWidth). */
@@ -82,9 +86,12 @@ export const ARROW_HEAD_SIZE = { normal: 3.2, wide: 1.8 } as const;
 export function arrowReach(a: MapArrow): number {
   return ((a.wide ? WIDE_ARROW_WIDTH : ARROW_WIDTH[a.style]) * (a.wide ? ARROW_HEAD_SIZE.wide : ARROW_HEAD_SIZE.normal)) / 2;
 }
+/** `low` and `high` are the two ends of the value scale. Task 24 (same ruling): the light end was #C6DBEF, 1.1 : 1 against the land
+ *  (--map-land in src/style.css), so a small number's dot all but vanished; #3182BD is 3.2 : 1 against the land and 4.0 : 1 against the
+ *  card background, and every colour between it and #08306B is darker still (tests/map.test.ts pins 3 : 1 at every value). */
 export const MAP_COLOURS = {
   arrow: '#9B2226', ink: '#1A1A1A', halo: '#FFFFFF', trueDot: '#8C8C8C', geneticDot: '#0072B2', link: '#8C8C8C',
-  ring: '#08519C', low: '#C6DBEF', high: '#08306B',
+  ring: '#08519C', low: '#3182BD', high: '#08306B',
 } as const;
 
 /** Same rounding as formatCopies (Task 10): one decimal when scaleMax < 100 (TYK2), whole copies otherwise. */
@@ -93,10 +100,11 @@ export function roundsToZero(value: number, scaleMax: number): boolean {
   return !(value > 0) || Math.round(value * scale) === 0;
 }
 
-/** Spec §6: radius = 14 sqrt(value / scaleMax) (area-true, capped at the scale); a value that rounds to 0 is a 3 px ring. */
+/** Spec §6: radius = 14 sqrt(value / scaleMax) (area-true, capped at the scale); a value that rounds to 0 is a 3 px ring. Task 24: no
+ *  value that does not round to 0 is drawn smaller than MIN_VALUE_RADIUS (a bigger value never gets a smaller dot). */
 export function dotRadius(value: number, scaleMax: number): number {
   if (roundsToZero(value, scaleMax)) return ZERO_RING_RADIUS;
-  return DOT_MAX_RADIUS * Math.sqrt(Math.min(value, scaleMax) / scaleMax);
+  return Math.max(MIN_VALUE_RADIUS, DOT_MAX_RADIUS * Math.sqrt(Math.min(value, scaleMax) / scaleMax));
 }
 
 /** One sequential scale, light to dark blue, by the share of the scale's maximum. */

@@ -138,6 +138,24 @@ describe('generated outlines (src/generated, committed)', () => {
     expect(onLand(OLDWORLD_LAND, project(OLDWORLD_PROJECTION, 52.5, -1.5))).toBe(true);
     expect(onLand(EUROPE_LAND, project(EUROPE_PROJECTION, 55, 3))).toBe(false);
   });
+  // Task 19 review (asserted by Task 24): an inland sea is a hole in the land, drawn with the even-odd rule, so a point in it is sea.
+  it('the Caspian Sea is a hole in the Old World land: its middle is sea, and the steppe east of it and the Iranian plateau south of it are land', () => {
+    expect(onLand(OLDWORLD_LAND, project(OLDWORLD_PROJECTION, 41.5, 50.5)), 'middle of the Caspian').toBe(false);
+    expect(onLand(OLDWORLD_LAND, project(OLDWORLD_PROJECTION, 44.5, 50.0)), 'north Caspian').toBe(false);
+    expect(onLand(OLDWORLD_LAND, project(OLDWORLD_PROJECTION, 45.0, 62.0)), 'Kazakhstan').toBe(true);
+    expect(onLand(OLDWORLD_LAND, project(OLDWORLD_PROJECTION, 33.0, 52.0)), 'Iran').toBe(true);
+  });
+  // Task 19 review (asserted by Task 24): the generated file says which Natural Earth file it came from, and that is the pinned one.
+  it('each generated outline names its Natural Earth file and records the pinned SHA-256 of it (the header equals NE_SHA256)', () => {
+    for (const o of OUTPUTS) {
+      const text = readFileSync(resolve(ROOT, o.file), 'utf8');
+      const [first, second] = text.split('\n');
+      expect(first, o.file).toContain(`Natural Earth v5.1.2 ${o.source}`);
+      const recorded = /Source SHA-256 ([0-9a-f]{64})\./.exec(second ?? '')?.[1];
+      expect(recorded, `${o.file}: the header has a source hash`).toBeDefined();
+      expect(recorded, `${o.file}: the header's hash is the pinned one`).toBe(NE_SHA256[o.source]);
+    }
+  });
   it('the Europe outline keeps Orkney, Shetland, the Isle of Man and Malta', () => {
     for (const box of KEEP_ISLANDS) expect(keptIsland(EUROPE_LAND, EUROPE_PROJECTION, box), box.name).toBe(true);
   });
