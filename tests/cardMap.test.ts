@@ -258,6 +258,26 @@ describe('distribution cards with their maps (Task 24, spec §3.4)', () => {
       expect(openOnCard(id, d, flagSet(flag, true, ALL_OFF), checkedManifest()).querySelector('.card-credits')).toBeNull();
     });
 
+    // Task 26 (carry-forward from the Task 24 review): the card used to draw a map with overlapping numbers, laid out by the greedy
+    // fallback, when placeDotLabels found no clear place for every label. Now such data leaves the card in its value bars.
+    it(`${id}: a card whose rows cannot all be labelled clear of each other (two rows on one spot) keeps its value bars, footer included`, () => {
+      const d = cloneFixture();
+      const [a, b] = d.trait_maps[gene].filter((r) => r.lat !== undefined && r.lon !== undefined);
+      d.trait_maps[gene] = d.trait_maps[gene].map((r) => (r.label_key === b!.label_key ? { ...r, lat: a!.lat, lon: a!.lon } : r));
+      const el = renderCardBody(document, CARDS[id], cardCtx(d, flagSet(flag, true, ALL_OFF), checkedManifest(), { placement: 'before' }));
+      expect(el.querySelector('.card-map')).toBeNull();
+      expect(el.querySelectorAll('.card-values .value-row').length).toBe(distributionRows(d, gene).length);
+      expect(openOnCard(id, d, flagSet(flag, true, ALL_OFF), checkedManifest()).querySelector('.card-credits')).toBeNull();
+    });
+
+    it(`${id}: the map is named by the card's title and every number on it, "<place> <copies>" in the value list's order, as a screen reader gets it`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest(), { placement: 'before' }));
+      const svg = el.querySelector('svg.map-svg')!;
+      expect(svg.getAttribute('role')).toBe('img');
+      expect(svg.getAttribute('aria-label')).toBe(`${CARDS[id].title}: ${placed(gene).map((r) => `${r.label} ${r.display}`).join(', ')}`);
+      expect(svg.hasAttribute('aria-hidden')).toBe(false);
+    });
+
     it(`${id}: each distribution map has its own flag: with only another map's flag on, ${id} keeps its value bars`, () => {
       const other = id === 'H2' ? 'map.I2' : 'map.H2';
       const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(other, true, ALL_OFF), checkedManifest(), { placement: 'before' }));

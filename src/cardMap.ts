@@ -18,11 +18,15 @@ export function renderCardMap(doc: Document, card: Card, data: WorkshopData): HT
   const svg = doc.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
   svg.classList.add('map-svg');
   renderMap(svg, spec);
-  // renderMap hides the svg from assistive technology; on a card the map is a picture named by the card's title, so it is
-  // exposed as one (its text labels are then presentational children of the image, never read out one by one).
+  // renderMap hides the svg from assistive technology; on a card the map is a picture named by the card's title (and, for a
+  // distribution map, its numbers), so it is exposed as one (its text labels are then presentational children of the image, never
+  // read out one by one).
   svg.removeAttribute('aria-hidden');
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', card.title);
+  // A distribution map is the only place its numbers are written (the value bars of the text form are replaced by it), so its name
+  // lists them, "<place> <copies>", as its labels do; the rows with no place on the map are the side list beside it, real text.
+  const numbers = (spec.points ?? []).some((p) => p.role === 'value') ? (spec.texts ?? []).map((t) => t.text) : [];
+  svg.setAttribute('aria-label', numbers.length > 0 ? `${card.title}: ${numbers.join(', ')}` : card.title);
   wrap.append(svg);
   if (spec.sideList && spec.sideList.length > 0) {
     const ul = doc.createElement('ul');

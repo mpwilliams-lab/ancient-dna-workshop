@@ -497,10 +497,17 @@ function dotMapView(frame: MapFrameId, box: LabelBox): MapView {
  * without coordinates (the gnomAD groups) are not drawn: they are the side list the card shows beside the picture.
  *
  * The labels are placed by placeDotLabels (no label over another label or a dot, each nearest its own dot); the window is cut to what
- * is drawn. If no clear layout exists the greedy placeLabels' is drawn instead: never no map, and the tests on the shipped data say
- * that case does not occur there.
+ * is drawn. If no clear layout exists this returns the greedy placeLabels' instead, so it never throws, but mapDataReady says no for
+ * such data (Task 26): a card does not draw a map whose numbers overlap, it keeps its value bars. The tests on the shipped data say
+ * the case does not occur there (tests/maps.test.ts on the fixture, REAL_DATA on the real rows, e2e/maps.spec.ts in the browser).
  */
 export function distributionSpec(id: DistributionMapId, data: WorkshopData): MapSpec {
+  return distributionLayout(id, data).spec;
+}
+
+/** A distribution map's spec and whether its labels are laid out clear: placeDotLabels found a place for every one (false for a map with
+ *  no row that has coordinates, and for one that only the greedy placer could label). */
+function distributionLayout(id: DistributionMapId, data: WorkshopData): { spec: MapSpec; clear: boolean } {
   const gene = DISTRIBUTION_MAP_GENE[id];
   const frame = DISTRIBUTION_MAP_FRAME[id];
   const scaleMax = DISTRIBUTION_SCALE_MAX[gene];
@@ -513,7 +520,7 @@ export function distributionSpec(id: DistributionMapId, data: WorkshopData): Map
   }));
   const sideList = rows.filter((r) => !hasCoordinates(r)).map((r) => ({ label: r.label, display: r.display }));
   const base: MapSpec = { id, frame, points, texts: [], scaleMax, labelPx, ...(sideList.length > 0 ? { sideList } : {}) };
-  if (placed.length === 0) return base;
+  if (placed.length === 0) return { spec: base, clear: false };
 
   const c = projectionOf(frame);
   const f = frameBox(frame);
@@ -527,9 +534,10 @@ export function distributionSpec(id: DistributionMapId, data: WorkshopData): Map
   const left = Math.max(0, f.left - LABEL_OVERHANG);
   const right = Math.min(MAP_VIEW.width, f.right + LABEL_OVERHANG);
   const room: MapView = { x: left, y: top, width: right - left, height: bottom - top };
-  const texts = placeDotLabels(frame, items, room, labelPx) ?? placeLabels(frame, items, [], { within: room, fontPx: labelPx });
+  const found = placeDotLabels(frame, items, room, labelPx);
+  const texts = found ?? placeLabels(frame, items, [], { within: room, fontPx: labelPx });
   const spec: MapSpec = { ...base, texts };
-  return { ...spec, view: dotMapView(frame, drawingBox(spec) as LabelBox) };
+  return { spec: { ...spec, view: dotMapView(frame, drawingBox(spec) as LabelBox) }, clear: found !== null };
 }
 
 /** The map for a card (CONTRACT §4.13). Throws for a map whose spec is not built yet (see MAP_SPECS_BUILT). */
@@ -553,10 +561,11 @@ export function mapSpec(id: MapId, data: WorkshopData): MapSpec {
 }
 
 /** True when the map's spec is built and the data it needs is present (A1 needs europe_pops and europe_fit: its source line is
- *  never drawn without the fit; a distribution map needs at least one row with coordinates). */
+ *  never drawn without the fit; a distribution map needs at least one row with coordinates AND a clear place for every one of its
+ *  labels, Task 26: otherwise the card keeps its value bars, which say the same numbers without overlapping). */
 export function mapDataReady(id: MapId, data: WorkshopData): boolean {
   if (!MAP_SPECS_BUILT.has(id)) return false;
   if (id === 'A1') return (data.europe_pops?.length ?? 0) > 0 && data.europe_fit !== undefined;
-  if (isDistributionMap(id)) return distributionRows(data, DISTRIBUTION_MAP_GENE[id]).some(hasCoordinates);
+  if (isDistributionMap(id)) return distributionLayout(id, data).clear;
   return true;
 }

@@ -839,6 +839,30 @@ describe('distribution maps H2, I2, J3 (Task 24, spec §3.4, §6)', () => {
     expect(distributionSpec('H2', d).points).toEqual([]);
   });
 
+  // Task 26 (carry-forward from the Task 24 review): distributionSpec falls back to the greedy placeLabels when placeDotLabels finds no
+  // clear layout, and that used to be silent: a map with overlapping numbers was drawn, and only REAL_DATA and the browser spec would
+  // have noticed. Now such a map is not data-ready, so its card keeps its value bars, and the search finding a layout is itself pinned.
+  for (const id of IDS) {
+    it(`${id}: placeDotLabels finds a clear place for every label of the fixture's rows, so the map is data-ready and the greedy fallback is not what draws it`, () => {
+      // mapDataReady is false exactly when the search found no layout (or there is no row with coordinates), and the fixture has rows.
+      expect(distributionRows(FIXTURE, DISTRIBUTION_MAP_GENE[id]).filter(hasCoords).length).toBeGreaterThanOrEqual(10);
+      expect(mapDataReady(id, FIXTURE)).toBe(true);
+    });
+  }
+
+  it('a layout the search cannot find (two rows on one spot) is not data-ready, and the spec still has a label for every dot and never throws', () => {
+    for (const id of IDS) {
+      const gene = DISTRIBUTION_MAP_GENE[id];
+      const d = cloneFixture();
+      const withCoords = d.trait_maps[gene].filter((r) => r.lat !== undefined && r.lon !== undefined);
+      const [a, b] = [withCoords[0]!, withCoords[1]!];
+      d.trait_maps[gene] = d.trait_maps[gene].map((r) => (r.label_key === b.label_key ? { ...r, lat: a.lat, lon: a.lon } : r));
+      expect(mapDataReady(id, d), `${id}: two dots on one spot cannot both be labelled clear`).toBe(false);
+      const s = distributionSpec(id, d);
+      expect((s.texts ?? []).length, `${id}: the greedy placer still labels every dot, so nothing throws`).toBe(s.points!.length);
+    }
+  });
+
   it('K2 and L3 are not built yet (Task 27): their specs throw and they are not data-ready, whatever the data', () => {
     for (const id of ['K2', 'L3'] as const) {
       expect(MAP_SPECS_BUILT.has(id), id).toBe(false);
