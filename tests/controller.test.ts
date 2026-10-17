@@ -379,6 +379,21 @@ describe('hint pointer and plot wiring', () => {
     expect(t.map((l) => l.seq)).toEqual(t.map((_, k) => k + 1));
     expect(r.c.session.nextSeq).toBe(t.length + 1);
   });
+
+  it('history skips a line identical to the one before it, like the live terminal (Up/Down parity after a refresh); the transcript keeps both', () => {
+    const r = rig();
+    for (const line of ['help()', 'help()', 'oops', 'oops', 'help()', 'oops']) r.c.submit(line);
+    expect(r.c.session.history).toEqual(['help()', 'oops', 'help()', 'oops']);
+    expect(r.c.session.transcript.filter((l) => l.kind === 'input').map((l) => l.text))
+      .toEqual(['help()', 'help()', 'oops', 'oops', 'help()', 'oops']);
+    expect(rig({ restored: r.c.session }).term.history).toEqual(['help()', 'oops', 'help()', 'oops']);
+  });
+
+  it('history compares the line as typed, like the terminal: a line that differs only by a space is a new entry', () => {
+    const r = rig();
+    for (const line of ['help()', 'help() ', 'help()']) r.c.submit(line);
+    expect(r.c.session.history).toEqual(['help()', 'help() ', 'help()']);
+  });
 });
 
 describe('extrasTick (spec §2.2): only steps run after the script end move the extras rotation', () => {
@@ -730,6 +745,96 @@ describe('cards (spec §5.3) and the Enter/Esc rules (spec §4.4)', () => {
     expect(r.c.cardOpen).toBe('E3');
   });
 
+  it('Esc within 400 ms of the last card advance (a double or held Esc) does not fill the hinted command (spec §5.3)', () => {
+    let clock = 0;
+    const r = rig({ now: () => clock });
+    runSteps(r, 0, 7);
+    clock = 10_000;
+    r.c.submit(STEP(7)); // E1, E2, E3
+    r.c.continueCard();
+    r.c.continueCard(); // Continue clicks are never throttled; E3 is open
+    clock = 10_500;
+    r.c.escape({ repeat: false }); // closes E3
+    expect(r.c.cardOpen).toBeNull();
+    clock = 10_600;
+    r.c.escape({ repeat: false }); // the second press of a double Esc, 100 ms later
+    r.c.escape({ repeat: true }); // and a held key
+    expect(r.term.prompt).toBe('');
+    clock = 10_899;
+    r.c.escape({ repeat: false });
+    expect(r.term.prompt).toBe('');
+    clock = 10_900; // 400 ms after the advance: Esc fills script[i] again
+    r.c.escape({ repeat: false });
+    expect(r.term.prompt).toBe(STEP(8));
+  });
+
+  it('a repeat Esc after the last card closed is ignored even outside the 400 ms window (a held key repeats after about 500 ms)', () => {
+    let clock = 0;
+    const r = rig({ now: () => clock });
+    runSteps(r, 0, 7);
+    clock = 10_000;
+    r.c.submit(STEP(7));
+    r.c.continueCard();
+    r.c.continueCard();
+    clock = 10_500;
+    r.c.escape({ repeat: false }); // closes E3
+    clock = 11_100;
+    r.c.escape({ repeat: true }); // the first auto-repeat, 600 ms later
+    expect(r.term.prompt).toBe('');
+    r.c.escape({ repeat: false }); // a fresh press fills as usual
+    expect(r.term.prompt).toBe(STEP(8));
+  });
+
+  it('a Tab listing that flushes the running log opens the step\'s held after-cards, after the plot', async () => {
+    const r = rig();
+    runSteps(r, 0, 7);
+    r.term.holdPrints = true;
+    r.c.submit(STEP(7)); // run_pca(period = "IronAge"): E1, E2, E3 wait for the log
+    expect(r.term.isPrinting()).toBe(true);
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.c.tab('run_')).toBe('run_'); // no longer common prefix: lists the options
+    expect(r.term.isPrinting()).toBe(false);
+    expect(r.c.cardOpen).toBe('E1');
+    expect(r.cards.opens[r.cards.opens.length - 1]).toEqual({ id: 'E1', index: 0, count: 3, placement: 'after' });
+    expect(r.term.hint).toBe(CARD_HINT);
+    expect(r.events.lastIndexOf('render:pca')).toBeLessThan(r.events.indexOf('card:open:E1'));
+    expect(r.c.screen).toEqual({ step: 8, card: 0 }); // not skipped: the cards are still ahead of the cursor
+    const opens = r.cards.opens.length;
+    await settle(r);
+    expect(r.cards.opens).toHaveLength(opens); // the log's own end does not open them a second time
+    r.c.continueCard();
+    expect(r.c.cardOpen).toBe('E2');
+  });
+
+  it('a typed line clears the held flag (pendingAfterToken), so the cards of later steps still open', async () => {
+    const r = rig();
+    runSteps(r, 0, 7);
+    r.term.holdPrints = true;
+    r.c.submit(STEP(7)); // E1, E2, E3 held while the log prints
+    r.c.submit('help()'); // typed during the log: flushes it and skips the held cards
+    expect(r.c.screen).toEqual({ step: 8, card: 3 });
+    r.term.holdPrints = false;
+    runSteps(r, 8, 11);
+    r.c.submit(STEP(11)); // roman: the after-card F1
+    expect(r.c.cardOpen).toBe('F1');
+    expect(r.cards.current).toBe('F1');
+  });
+
+  it('a skipped after-card leaves no held flag behind for the before-cards of a later step (the step in between has no cards)', () => {
+    const r = rig();
+    runSteps(r, 0, 12);
+    r.term.holdPrints = true;
+    r.c.submit(STEP(12)); // angloSaxon: G1, G2 held while the log prints
+    r.c.submit('help()'); // typed line: the held cards are skipped
+    expect(r.c.screen).toEqual({ step: 13, card: 2 });
+    r.term.holdPrints = false;
+    runSteps(r, 13, 14); // the finale has no cards, so nothing else touches the held flag
+    r.c.submit(STEP(14)); // allele_freq(gene = "LCT"): before-cards open on acceptance, never waiting for a log
+    expect(r.c.cardOpen).toBe('H1');
+    expect(r.cards.current).toBe('H1');
+    expect(r.term.hint).toBe(CARD_HINT);
+  });
+
   it('an off-script command draws its plot but opens no card; the card opens when its step is reached', () => {
     const r = rig();
     r.c.submit('run_pca(period = "Roman")');
@@ -800,6 +905,163 @@ describe('cards (spec §5.3) and the Enter/Esc rules (spec §4.4)', () => {
     r.c.submit(STEP(7));
     r.c.continueCard();
     expect(seen[seen.length - 1]).toBe('8.1:true');
+  });
+});
+
+describe('openCardForTest (the ?test hook, spec §5.4, CONTRACT §4.9)', () => {
+  /** Everything a card could change if it were part of the session: step, cursor, hint index, transcript, plot, saved entry. */
+  const snapshot = (r: Rig): string =>
+    JSON.stringify([r.c.session, r.c.derived, r.c.screen, r.c.hintIndex, r.renders.length, loadSession(r.store)]);
+
+  it('shows card 1 of 1 and the card hint, and changes no step, cursor, hint index, transcript, plot or saved session', () => {
+    const screens: string[] = [];
+    const r = rig({ onScreen: (s, back) => screens.push(`${s.step}.${s.card}:${back}`) });
+    runSteps(r, 0, 2);
+    expect(r.term.hint).toBe(hintText(2, SCRIPT[1]!, 0));
+    const before = snapshot(r);
+    const calls = screens.length;
+    r.c.openCardForTest('L3');
+    expect(r.cards.opens[r.cards.opens.length - 1]).toEqual({ id: 'L3', index: 0, count: 1, placement: 'after' });
+    expect(r.c.cardOpen).toBe('L3');
+    expect(r.term.hint).toBe(CARD_HINT);
+    expect(snapshot(r)).toBe(before);
+    expect(screens).toHaveLength(calls); // the cursor did not move, so the shell is told nothing
+  });
+
+  it('Continue, a blank Enter and Esc each close it and bring the step hint back; Esc does not fill the prompt', () => {
+    const closers: [string, (c: Rig['c']) => void][] = [
+      ['continueCard', (c) => c.continueCard()],
+      ['blank Enter', (c) => c.submit('')],
+      ['Esc', (c) => c.escape()],
+    ];
+    for (const [name, close] of closers) {
+      const r = rig();
+      runSteps(r, 0, 2);
+      const before = snapshot(r);
+      r.c.openCardForTest('A1');
+      close(r.c);
+      expect(r.c.cardOpen, name).toBeNull();
+      expect(r.cards.current, name).toBeNull();
+      expect(r.term.hint, name).toBe(hintText(2, SCRIPT[1]!, 0));
+      expect(r.term.prompt, name).toBe('');
+      expect(snapshot(r), name).toBe(before);
+    }
+  });
+
+  it('opening and closing it writes nothing to the session store and does not arm the card repeat guard', () => {
+    let clock = 5_000;
+    const r = rig({ now: () => clock });
+    runSteps(r, 0, 2);
+    const writes: string[] = [];
+    const setItem = r.store!.setItem.bind(r.store);
+    r.store!.setItem = (k, v) => {
+      writes.push(k);
+      setItem(k, v);
+    };
+    r.c.openCardForTest('A1');
+    r.c.continueCard();
+    r.c.openCardForTest('B1');
+    r.c.submit('');
+    expect(writes).toEqual([]);
+    r.c.escape({ repeat: false }); // no card is open and none was advanced: Esc fills the hinted command at once
+    expect(r.term.prompt).toBe(STEP(2));
+  });
+
+  it('a blank Enter only closes it: it does not also end a running finale animation', () => {
+    let animating = true;
+    const finish = vi.fn(() => {
+      animating = false;
+    });
+    const r = rig({ plotAnimating: () => animating, finishPlotAnimation: finish });
+    r.c.openCardForTest('A1');
+    r.c.submit('');
+    expect(r.c.cardOpen).toBeNull();
+    expect(finish).not.toHaveBeenCalled();
+    r.c.submit('');
+    expect(finish).toHaveBeenCalledTimes(1);
+  });
+
+  it('closing it is not a card advance: the repeat guard does not apply, and the three-tries counter is untouched', () => {
+    let clock = 5_000;
+    const r = rig({ now: () => clock });
+    r.c.submit('oops');
+    expect(r.c.badTries).toBe(1);
+    r.c.openCardForTest('B1');
+    r.c.escape({ repeat: false }); // no 400 ms wait for a test card
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.c.badTries).toBe(1);
+    r.c.openCardForTest('B1');
+    clock += 1;
+    r.c.submit('', { repeat: true });
+    expect(r.c.cardOpen).toBeNull();
+  });
+
+  it('Enter with text closes it, then runs the line as usual (a bad line counts as a try)', () => {
+    const r = rig();
+    r.c.openCardForTest('A1');
+    r.c.submit('oops');
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.cards.current).toBeNull();
+    expect(r.c.badTries).toBe(1);
+    expect(r.c.session.history).toEqual(['oops']);
+    expect(r.term.hint).toBe(hintText(0, null, 0));
+    r.c.openCardForTest('A1');
+    r.c.submit(STEP(0));
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.c.hintIndex).toBe(1);
+  });
+
+  it('an unknown id is ignored', () => {
+    const r = rig();
+    const before = snapshot(r);
+    r.c.openCardForTest('Z9' as never);
+    expect(r.cards.opens).toEqual([]);
+    expect(r.c.cardOpen).toBeNull();
+    expect(snapshot(r)).toBe(before);
+  });
+
+  it('is ignored while a real card is open, and while a step\'s after-cards still wait for their log', () => {
+    const r = rig();
+    runSteps(r, 0, 7);
+    r.term.holdPrints = true;
+    r.c.submit(STEP(7)); // E1, E2, E3 held
+    r.c.openCardForTest('L3');
+    expect(r.cards.opens.filter((o) => o.id === 'L3')).toEqual([]);
+    expect(r.c.cardOpen).toBeNull();
+    r.term.flush();
+    r.c.tab('run_'); // a Tab listing opens the held cards
+    expect(r.c.cardOpen).toBe('E1');
+    r.c.openCardForTest('L3');
+    expect(r.c.cardOpen).toBe('E1');
+    expect(r.cards.current).toBe('E1');
+    expect(r.cards.opens.filter((o) => o.id === 'L3')).toEqual([]);
+  });
+
+  it('a second test card replaces the first; one Continue closes it', () => {
+    const r = rig();
+    r.c.openCardForTest('A1');
+    r.c.openCardForTest('B1');
+    expect(r.c.cardOpen).toBe('B1');
+    expect(r.cards.current).toBe('B1');
+    r.c.continueCard();
+    expect(r.c.cardOpen).toBeNull();
+    expect(r.cards.current).toBeNull();
+  });
+
+  it('works with no card host and with a card host that throws (the controller never throws into the page)', () => {
+    const none = rig({ cards: false });
+    none.c.openCardForTest('A1');
+    expect(none.c.cardOpen).toBe('A1');
+    expect(none.term.hint).toBe(CARD_HINT);
+    none.c.continueCard();
+    expect(none.c.cardOpen).toBeNull();
+    const r = rig();
+    r.cards.open = () => {
+      throw new Error('boom');
+    };
+    expect(() => r.c.openCardForTest('A1')).not.toThrow();
+    expect(() => r.c.continueCard()).not.toThrow();
+    expect(r.c.cardOpen).toBeNull();
   });
 });
 

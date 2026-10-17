@@ -231,14 +231,14 @@ describe('keys', () => {
     m.input.value = 'help()';
     const e = key(m.input, 'Enter');
     expect(e.defaultPrevented).toBe(true);
-    expect(m.onEnter).toHaveBeenCalledWith('help()');
+    expect(m.onEnter).toHaveBeenCalledWith('help()', { repeat: false });
     expect(m.input.value).toBe('');
   });
 
   it('Enter on an empty prompt still reaches the handler (controller ignores it)', () => {
     const m = mount();
     key(m.input, 'Enter');
-    expect(m.onEnter).toHaveBeenCalledWith('');
+    expect(m.onEnter).toHaveBeenCalledWith('', { repeat: false });
   });
 
   it('Enter during IME composition does nothing', () => {
@@ -302,6 +302,16 @@ describe('keys', () => {
     const e = key(m.input, 'Escape');
     expect(e.defaultPrevented).toBe(true);
     expect(m.onEsc).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes the keydown repeat flag to Enter and Esc (the card repeat guard reads it, spec §5.3)', () => {
+    const m = mount();
+    m.input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }));
+    expect(m.onEnter).toHaveBeenLastCalledWith('', { repeat: true });
+    m.input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', repeat: true, bubbles: true, cancelable: true }));
+    expect(m.onEsc).toHaveBeenLastCalledWith({ repeat: true });
+    key(m.input, 'Escape');
+    expect(m.onEsc).toHaveBeenLastCalledWith({ repeat: false });
   });
 
   it('a throwing handler is logged, never thrown into the page', () => {

@@ -1,7 +1,7 @@
 // Wires parse -> applyCommand (replay.ts) -> plot, hint line, cards and the session v2 log (spec v3 §4.1-§4.4, §5.3).
 // Live runs keep a Derived in memory and never replay; derive() is used only to restore a saved session (and, from
 // Task 17, for Back). Owns the three-tries counter, the Enter-mid-print ordering and the card repeat guard.
-import type { CardId, WorkshopData } from './types';
+import { CARD_IDS, type CardId, type WorkshopData } from './types';
 import { parse, formatCommand, completions, leadInOf, type ParseError, type ParseResult } from './parser';
 import { SCRIPT, hintCommand, hintText } from './hints';
 import type { PlotState } from './plotState';
@@ -117,6 +117,8 @@ export class Controller {
   private pendingAfterToken: number | null = null;
   private lastCardEventAt = Number.NEGATIVE_INFINITY;
   private hostShows: CardId | null = null;
+  /** A card shown by ?test openCard (spec §5.4): drawn over the current plot, never part of the session. */
+  private testCard: CardId | null = null;
 
   constructor(deps: ControllerDeps, restored: SessionV2 | null) {
     this.deps = deps;
@@ -176,8 +178,9 @@ export class Controller {
     return { ...this.cursor };
   }
 
-  /** The card on screen; null while none is open or while the step's after-cards still wait for its log. */
+  /** The card on screen (a ?test card included); null while none is open or while the step's after-cards still wait for its log. */
   get cardOpen(): CardId | null {
+    if (this.testCard !== null) return this.testCard;
     if (this.pendingAfterToken !== null) return null;
     const cards = this.currentCards();
     return this.cursor.card < cards.length ? cards[this.cursor.card]! : null;
@@ -189,6 +192,10 @@ export class Controller {
   }
 
   submit(line: string, key?: KeyInfo): void {
+    if (this.testCard !== null) {
+      this.closeTestCard();
+      if (String(line ?? '').trim() === '') return; // a blank Enter only closes the test card
+    }
     const raw = typeof line === 'string' ? line : String(line ?? '');
     if (raw.trim() === '') {
       this.blankLine(key);
@@ -199,7 +206,7 @@ export class Controller {
     const shown = raw.length > MAX_ECHO_CHARS ? `${raw.slice(0, MAX_ECHO_CHARS)}…` : raw;
     this.t.echoInput(shown);
     this.record('input', shown);
-    this.hist.push(shown);
+    if (this.hist[this.hist.length - 1] !== shown) this.hist.push(shown); // the live terminal's Up/Down history skips a repeat too
     if (this.hist.length > MAX_HISTORY) this.hist.splice(0, this.hist.length - MAX_HISTORY);
 
     let res: ParseResult;
@@ -262,10 +269,16 @@ export class Controller {
     this.save();
   }
 
-  /** Esc: a card is open -> advance one card (repeat guard); otherwise fill script[i] (v2.1). */
+  /**
+   * Esc: a card is open -> advance one card; otherwise fill script[i] (v2.1). The repeat guard covers both branches: a held
+   * or double-pressed Esc moves at most one card, and the press that arrives just after the last card closed must not fall
+   * through to filling in the hinted command (spec §5.3).
+   */
   escape(key?: KeyInfo): void {
+    if (this.closeTestCard()) return;
+    if (!this.keyAllowed(key)) return;
     if (this.cardOpen !== null) {
-      if (this.keyAllowed(key)) this.advanceCard();
+      this.advanceCard();
       return;
     }
     this.tries = 0;
@@ -274,7 +287,30 @@ export class Controller {
 
   /** The Continue button: advance one card. Never throttled. */
   continueCard(): void {
+    if (this.closeTestCard()) return;
     if (this.cardOpen !== null) this.advanceCard();
+  }
+
+  /**
+   * ?test only (spec §5.4, CONTRACT §4.9): shows card `id` over the current plot. Changes no step, cursor, transcript, plot
+   * or hint index. Ignored while a real card is open or about to open (a guided card is never hidden behind a test card).
+   * The next Continue, blank Enter or Esc closes it; Enter with text closes it and runs the line.
+   */
+  openCardForTest(id: CardId): void {
+    if (!CARD_IDS.includes(id)) return;
+    if (this.testCard === null && (this.cardOpen !== null || this.pendingAfterToken !== null)) return;
+    this.testCard = id;
+    this.hostOpen(id, 0, 1, 'after');
+    this.t.setHint(CARD_HINT);
+  }
+
+  /** Closes the ?test card. Returns true when one was open (the key press or click is then used up). */
+  private closeTestCard(): boolean {
+    if (this.testCard === null) return false;
+    this.testCard = null;
+    this.hostClose();
+    this.refreshHint();
+    return true;
   }
 
   tab(partial: string): string {

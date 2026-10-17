@@ -439,7 +439,7 @@ describe('mountCardView: isolation and geometry', () => {
     document.defaultView!.dispatchEvent(new Event('resize'));
     expect(root().style.getPropertyValue('--card-bottom')).toBe('48px');
   });
-  it('finds the hint line when the terminal is mounted after the view (the shell mounts the card view first) and observes it from the first open', () => {
+  it('finds the hint line when the terminal is mounted after the view (the view may be mounted before the terminal) and observes it from the first open', () => {
     const observed: Element[] = [];
     let hintChanged: () => void = () => undefined;
     (document.defaultView as unknown as { ResizeObserver: unknown }).ResizeObserver = class {

@@ -14,12 +14,12 @@ export interface TerminalView {
   showLines(lines: readonly { kind: 'input' | 'output' | 'notice'; text: string }[]): void;
 }
 
-/** Key details from the keydown event (Task 12 passes them to onEnter/onEsc; the card repeat guard reads `repeat`). */
+/** From the keydown event (spec §5.3): a held key repeats with repeat === true; the card repeat guard ignores those. */
 export interface KeyInfo { repeat: boolean }
 
 export interface TerminalHandlers {
-  onEnter(line: string): void;
-  onEsc(): void;
+  onEnter(line: string, key?: KeyInfo): void;   // key from the keydown event (CONTRACT §4.8)
+  onEsc(key?: KeyInfo): void;
   onTab(partial: string): string;
 }
 
@@ -125,7 +125,7 @@ export function mountTerminal(root: HTMLElement, handlers: TerminalHandlers): Te
         if (v.trim() !== '' && history[history.length - 1] !== v) history.push(v);
         cursor = history.length;
         draft = '';
-        safely(() => handlers.onEnter(v));
+        safely(() => handlers.onEnter(v, { repeat: e.repeat }));
         break;
       }
       case 'ArrowUp': {
@@ -152,7 +152,7 @@ export function mountTerminal(root: HTMLElement, handlers: TerminalHandlers): Te
       }
       case 'Escape': {
         e.preventDefault();
-        safely(() => handlers.onEsc());
+        safely(() => handlers.onEsc({ repeat: e.repeat }));
         break;
       }
     }

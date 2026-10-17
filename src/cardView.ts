@@ -231,8 +231,8 @@ export function mountCardView(root: HTMLElement, data: WorkshopData, handlers: C
   };
 
   // The hint line changes height when it switches to CARD_HINT and back, and the controller does that right after it opens a
-  // card, so the card's bottom edge has to follow it. The shell mounts this view BEFORE the terminal (Task 12), so the hint
-  // line may not exist yet: it is looked up again on every open, and the observer moves to it.
+  // card, so the card's bottom edge has to follow it. This view may be mounted before the terminal, so the hint line may not
+  // exist yet: it is looked up again on every open, and the observer moves to it.
   const RO = doc.defaultView?.ResizeObserver;   // absent in jsdom: then only window resizes refit
   const ro = RO ? new RO(() => view.refit()) : null;
   let observed: HTMLElement | null = null;

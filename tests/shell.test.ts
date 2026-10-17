@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { boot, hasReset, probeStorage, stripReset } from '../src/shell';
+import { ALL_OFF, withFeatures } from '../src/features';
 import { Controller } from '../src/controller';
 import { mountTerminal } from '../src/terminal';
 import { saveSession, loadSession, LEGACY_SESSION_KEY, SESSION_KEY, type SessionV2 } from '../src/session';
@@ -187,5 +188,83 @@ describe('boot', () => {
     document.getElementById('wrap-open')!.click();
     document.getElementById('wrap-close')!.click();
     expect(wrap.hidden).toBe(true);
+  });
+});
+
+describe('card view wiring (Task 12)', () => {
+  it('boot mounts the card view on #card, hidden, and reports the flags and the test flag', () => {
+    const b = boot(env(new MemStore()));
+    expect(b.cards.isOpen()).toBe(false);
+    expect(document.getElementById('card')!.hidden).toBe(true);
+    expect(document.getElementById('card')!.classList.contains('card')).toBe(true);
+    expect(b.test).toBe(false);
+    expect(boot(env(new MemStore(), `${FILE_URL}?test`)).test).toBe(true);
+  });
+
+  it('mounts the view after the terminal: the view already watches the hint line when boot returns', () => {
+    const win = document.defaultView as unknown as { ResizeObserver?: unknown };
+    const observed: Element[] = [];
+    win.ResizeObserver = class {
+      observe(e: Element): void {
+        observed.push(e);
+      }
+      disconnect(): void {}
+    };
+    try {
+      boot(env(new MemStore()));
+    } finally {
+      delete win.ResizeObserver;
+    }
+    // Mounted before the terminal, the view would find no hint line at mount and would only start watching at its first open.
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toBe(document.querySelector('#terminal .term-hint'));
+  });
+
+  it('gives the card view the flag set: the Back button is on the card only with the back flag', () => {
+    const on = boot({ ...env(new MemStore()), features: withFeatures({ back: true }, ALL_OFF) });
+    expect(on.features.back).toBe(true);
+    on.cards.open('A1', 0, 1, 'after');
+    expect(document.querySelector('#card .card-back')).not.toBeNull();
+    loadIndexHtml();
+    const off = boot({ ...env(new MemStore()), features: ALL_OFF });
+    off.cards.open('A1', 0, 1, 'after');
+    expect(document.querySelector('#card .card-back')).toBeNull();
+  });
+
+  it('the controller opens and closes cards through that view, and a guided card draws over #card', () => {
+    const b = boot(env(new MemStore(), `${FILE_URL}?test`));
+    b.controller.openCardForTest('A1');
+    expect(b.cards.isOpen()).toBe(true);
+    expect(b.cards.currentId()).toBe('A1');
+    expect(document.getElementById('card')!.hidden).toBe(false);
+    b.controller.continueCard();
+    expect(b.cards.isOpen()).toBe(false);
+    expect(document.getElementById('card')!.hidden).toBe(true);
+  });
+});
+
+describe('Up/Down history after a refresh (Task 12, carry-forward from the Task 6 review)', () => {
+  const input = (): HTMLInputElement => document.querySelector<HTMLInputElement>('#terminal input')!;
+  const press = (key: string): void => {
+    input().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  };
+  const typeLine = (line: string): void => {
+    input().value = line;
+    press('Enter');
+  };
+  /** What a student sees pressing Up until the oldest entry, then three more times. */
+  const walkUp = (n: number): string[] => Array.from({ length: n }, () => (press('ArrowUp'), input().value));
+
+  it('matches the live terminal: a line typed twice in a row is in the history once', () => {
+    const store = new MemStore();
+    boot(env(store));
+    for (const line of ['help()', 'help()', 'oops', 'oops', 'help()', 'help() ']) typeLine(line);   // the last differs by a space
+    const live = walkUp(6);
+    expect(live).toEqual(['help() ', 'help()', 'oops', 'help()', 'help()', 'help()']);
+
+    loadIndexHtml();                       // a refresh: new page, same sessionStorage
+    const again = boot(env(store));
+    expect(again.restored).toBe(true);
+    expect(walkUp(6)).toEqual(live);
   });
 });

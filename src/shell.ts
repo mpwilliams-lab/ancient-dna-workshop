@@ -1,9 +1,11 @@
-// App shell: storage probe, ?reset, guarded session restore + notice, wrap screen with QR, prompt focus.
+// App shell: storage probe, ?reset, ?test, card view, guarded session restore + notice, wrap screen with QR, prompt focus.
 // The shell prints RESTORED_NOTICE exactly once, after the Controller is built on a restored session,
 // and only when that restore actually took effect. The Controller (Task 10) never prints it.
-import type { WorkshopData } from './types';
+import type { CardId, WorkshopData } from './types';
 import { Controller } from './controller';
 import { mountTerminal, type TerminalView } from './terminal';
+import { mountCardView, type CardView } from './cardView';
+import { FEATURES, type Features } from './features';
 import { renderPlot } from './plots/index';
 import { clearSession, loadSession, type SessionStorageLike, type SessionV2 } from './session';
 import {
@@ -17,6 +19,8 @@ export interface BootEnv {
   getStorage: () => Storage;                     // may throw (blocked storage)
   replaceUrl: (url: string) => void;             // history.replaceState wrapper; may throw
   data: WorkshopData;
+  features?: Features;                           // default FEATURES (the shipped set); tests pass ALL_OFF / ALL_ON
+  now?: () => number;                            // default performance.now(); jsdom tests drive the card repeat guard with it
 }
 
 export interface Booted {
@@ -25,6 +29,9 @@ export interface Booted {
   store: SessionStorageLike | null;
   restored: boolean;
   reset: boolean;
+  cards: CardView;
+  features: Features;
+  test: boolean;                                 // the URL had ?test (window.__adw.openCard is attached)
 }
 
 /** Returns a working storage, or null if the getter throws or a write/remove fails. */
@@ -61,6 +68,15 @@ export function stripReset(href: string): string {
   }
 }
 
+/** True when the URL carries a `test` query parameter (`?test`, `?reset&test`). Only then does window.__adw get openCard. */
+export function hasTestFlag(href: string): boolean {
+  try {
+    return new URL(href).searchParams.has('test');
+  } catch {
+    return false;
+  }
+}
+
 function el<T extends HTMLElement>(doc: Document, id: string): T {
   const e = doc.getElementById(id);
   if (!e) throw new Error(`index.html is missing #${id}`);
@@ -69,6 +85,8 @@ function el<T extends HTMLElement>(doc: Document, id: string): T {
 
 export function boot(env: BootEnv): Booted {
   const { doc, data } = env;
+  const features = env.features ?? FEATURES;
+  const test = hasTestFlag(env.href);
   doc.title = APP_TITLE;
   el(doc, 'app-title').textContent = APP_TITLE;
 
@@ -88,19 +106,34 @@ export function boot(env: BootEnv): Booted {
   const plotHost = el(doc, 'plot');
   let controller: Controller | null = null;
   const terminal = mountTerminal(termRoot, {
-    onEnter: (line) => controller?.submit(line),
-    onEsc: () => controller?.escape(),
+    onEnter: (line, key) => controller?.submit(line, key),
+    onEsc: (key) => controller?.escape(key),
     onTab: (partial) => (controller ? controller.tab(partial) : partial),
   });
+  // The card overlay (Task 11) is the controller's CardHost. It is mounted after the terminal, so it finds the hint line at
+  // once, and before the Controller is built, because a restored session reopens its open card from the constructor (spec §4.2).
+  // A click on a card button takes focus; each handler gives the keyboard back to the prompt (spec §5.2).
+  const cardView = mountCardView(el(doc, 'card'), data, {
+    onContinue: () => {
+      controller?.continueCard();
+      focusPrompt(termRoot);
+    },
+    onBack: () => focusPrompt(termRoot),       // the Back action is wired in Task 17
+    onCredits: () => focusPrompt(termRoot),    // the credits panel is wired in Task 15
+  }, features);
   const deps = {
     data, terminal, store,
     renderPlot: (p: Parameters<typeof renderPlot>[2], opts?: { animate?: boolean }) => renderPlot(plotHost, data, p, opts),
+    cards: cardView,
+    features,
+    ...(env.now ? { now: env.now } : {}),
   };
 
   try {
     controller = new Controller(deps, restoredSession);
   } catch (err) {
-    // A saved session that the controller cannot replay must never crash the page.
+    // A saved session that the controller cannot replay must never crash the page. A card it opened before failing goes too.
+    cardView.close();
     console.error('Controller could not replay the saved session; starting fresh', err);
     clearSession(store);
     terminal.clearScreen();
@@ -120,7 +153,7 @@ export function boot(env: BootEnv): Booted {
   setupWrap(doc, termRoot);
   keepPromptFocused(doc, termRoot);
   focusPrompt(termRoot);
-  return { controller, terminal, store, restored: restoredSession !== null, reset };
+  return { controller, terminal, store, restored: restoredSession !== null, reset, cards: cardView, features, test };
 }
 
 /** True when the Controller carries anything from a saved session: typing history, transcript lines or a step. */
@@ -185,4 +218,30 @@ function setupWrap(doc: Document, termRoot: HTMLElement): void {
       hide();
     }
   });
+}
+
+/** window.__adw (CONTRACT §4.15). Read-only, except openCard, which exists only with ?test and changes no session state. */
+export interface AdwHook {
+  hintIndex(): number;
+  isPrinting(): boolean;
+  restored: boolean;
+  storage: boolean;
+  screen(): { step: number; card: number };
+  cardOpen(): CardId | null;
+  features: Features;
+  openCard?(id: CardId): void;
+}
+
+export function makeTestHook(b: Booted): AdwHook {
+  const hook: AdwHook = {
+    hintIndex: () => b.controller.hintIndex,
+    isPrinting: () => b.terminal.isPrinting(),
+    restored: b.restored,
+    storage: b.store !== null,
+    screen: () => ({ ...b.controller.screen }),
+    cardOpen: () => b.controller.cardOpen,
+    features: Object.freeze({ ...b.features }),
+  };
+  if (b.test) hook.openCard = (id: CardId) => b.controller.openCardForTest(id);
+  return hook;
 }

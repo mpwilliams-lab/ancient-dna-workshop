@@ -2,12 +2,15 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 
 // The real Controller, except that replaying a restored session throws (simulates a saved session the controller
-// cannot replay at all).
+// cannot replay at all). Like a restore that fails half way, it has already opened a card when it throws.
 vi.mock('../src/controller', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../src/controller')>();
   class ThrowOnRestore extends mod.Controller {
     constructor(deps: ConstructorParameters<typeof mod.Controller>[0], restored: ConstructorParameters<typeof mod.Controller>[1]) {
-      if (restored) throw new Error('cannot replay');
+      if (restored) {
+        deps.cards?.open('A1', 0, 1, 'after');
+        throw new Error('cannot replay');
+      }
       super(deps, restored);
     }
   }
@@ -35,6 +38,10 @@ it('a saved session the controller cannot replay is discarded and the app starts
   expect(b.restored).toBe(false);
   expect(b.controller.hintIndex).toBe(0);
   expect(countText(RESTORED_NOTICE)).toBe(0);
+  // The card the failed restore opened is not left on screen over the fresh start (Task 12, decision 5).
+  expect(b.cards.isOpen()).toBe(false);
+  expect(document.getElementById('card')!.hidden).toBe(true);
+  expect(document.getElementById('card')!.childElementCount).toBe(0);
   const after = loadSession(store);
   expect(after === null || after.history.length === 0).toBe(true);
 });
