@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Spec §7.2 visual-check gate and size budgets; CONTRACT §4.14 uncheckedAssets / check-release / releaseWarnings.
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
@@ -26,16 +26,38 @@ afterAll(() => {
 /**
  * A temp copy of what the check-release build reads (sources, scripts, manifest, config) with the repo's node_modules linked in.
  * It has no src/assets folder, so no image is bundled in it. Tests change its flags and manifest freely; the repo is never touched.
+ * From assets/ it takes only manifest.json and asset-rules.json, the two files src/assetManifest.ts imports. assets/raw/ and
+ * assets/staged/ hold untrusted downloads and re-encoded images that wait for the instructor's check: nothing here copies or opens them.
+ * `root` is the repository to copy from (a test passes a stand-in); node_modules is always the real one.
  */
-function repoCopy(): string {
+function repoCopy(root = ROOT): string {
   const dir = mkdtempSync(join(tmpdir(), 'release-copy-'));
   copies.push(dir);
-  for (const name of ['src', 'scripts', 'assets']) cpSync(join(ROOT, name), join(dir, name), { recursive: true });
-  for (const name of ['src/assets', 'assets/raw', 'assets/staged']) rmSync(join(dir, name), { recursive: true, force: true });
-  for (const name of ['package.json', 'tsconfig.json', 'vite.config.ts', 'index.html']) copyFileSync(join(ROOT, name), join(dir, name));
+  for (const name of ['src', 'scripts']) cpSync(join(root, name), join(dir, name), { recursive: true });
+  rmSync(join(dir, 'src/assets'), { recursive: true, force: true });
+  mkdirSync(join(dir, 'assets'));
+  for (const name of ['manifest.json', 'asset-rules.json']) copyFileSync(join(root, 'assets', name), join(dir, 'assets', name));
+  for (const name of ['package.json', 'tsconfig.json', 'vite.config.ts', 'index.html']) copyFileSync(join(root, name), join(dir, name));
   symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'));
   return dir;
 }
+
+describe('repoCopy (the temp repository the CLI tests build in)', () => {
+  it('takes only manifest.json and asset-rules.json from assets/: the quarantined raw/ and staged/ downloads are never copied or opened', () => {
+    // A stand-in repository whose assets/raw and assets/staged files cannot be read at all: copying one of them would throw.
+    const root = mkdtempSync(join(tmpdir(), 'release-root-'));
+    copies.push(root);
+    for (const d of ['src', 'scripts', 'assets/raw', 'assets/staged']) mkdirSync(join(root, d), { recursive: true });
+    for (const f of ['assets/manifest.json', 'assets/asset-rules.json', 'package.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'src/a.ts', 'scripts/b.mjs']) writeFileSync(join(root, f), '{}');
+    for (const f of ['assets/raw/x.jpg', 'assets/staged/x.jpg']) {
+      writeFileSync(join(root, f), 'not an image');
+      chmodSync(join(root, f), 0o000);
+    }
+    const copy = repoCopy(root);
+    expect(readdirSync(join(copy, 'assets')).sort()).toEqual(['asset-rules.json', 'manifest.json']);
+    expect(readdirSync(join(copy, 'src'))).toEqual(['a.ts']);
+  });
+});
 
 /** Sets every flag of the copy's FEATURES literal: true for the names listed, false for the rest. */
 function setFlags(dir: string, on: readonly string[]): void {
