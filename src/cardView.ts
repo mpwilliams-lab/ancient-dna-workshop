@@ -9,7 +9,7 @@ import {
   CARDS, cardSource, cardVars, distributionRows, DISTRIBUTION_SCALE_MAX, fillCard, type Card, type CardVar,
 } from './cards';
 import {
-  BACK_BUTTON, BACK_BUTTON_LABEL, CARD_CONTINUE, CARD_CONTINUE_DONE, CARD_CONTINUE_TO_PLOT, cardCounter, CREDITS_LINK,
+  BACK_BUTTON, BACK_BUTTON_LABEL, CARD_CONTINUE, CARD_CONTINUE_DONE, CARD_CONTINUE_TO_PLOT, cardCounter, CREDITS_LINK, MAP_SOURCE_SUFFIX,
 } from './content';
 import { chipElement } from './icons';
 import { renderDiagram } from './diagrams';
@@ -58,13 +58,25 @@ export function continueLabel(index: number, count: number, placement: 'after' |
 }
 
 /**
+ * Spec §6: a card that shows a map carries "Map outline: Made with Natural Earth." in its source line. K2's §3.4 source does not
+ * include it, so it is added whenever the map is drawn; a source that already ends with it is left alone, and the text form
+ * (mapShown false) is never changed.
+ */
+export function sourceWithMapSuffix(source: string | undefined, mapShown: boolean): string | undefined {
+  if (!mapShown) return source;
+  if (source === undefined || source === '') return MAP_SOURCE_SUFFIX;
+  return source.endsWith(MAP_SOURCE_SUFFIX) ? source : `${source} ${MAP_SOURCE_SUFFIX}`;
+}
+
+/**
  * The source line as shown, templates filled, or undefined when the card shows none. A line whose {…} value is missing from
  * the data is left out, never printed half-filled: A1's "{n_pops} groups, {n_people} people" when the JSON has no europe_fit
  * (cardVars gives '' for both). Carry-forward from the Task 10 review: A1's source is shown only with its map (Task 23), and
- * never without europe_fit.
+ * never without europe_fit. A card whose map is drawn (`upgraded` on a map card) always ends with the Natural Earth line
+ * (sourceWithMapSuffix, Task 27: K2's §3.4 source is the one that lacks it).
  */
 export function cardSourceLine(card: Card, upgraded: boolean, vars: Readonly<Record<CardVar, string>>): string | undefined {
-  const source = cardSource(card, upgraded);
+  const source = sourceWithMapSuffix(cardSource(card, upgraded), upgraded && cardMapId(card) !== undefined);
   if (source === undefined) return undefined;
   const missing = (Object.keys(vars) as CardVar[]).some((name) => vars[name] === '' && source.includes(`{${name}}`));
   return missing ? undefined : fillCard(source, vars);

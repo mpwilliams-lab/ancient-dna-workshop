@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Map slot on cards (Task 20; spec §5.2, §3.2–§3.3, CONTRACT §4.11 DOM; Task 23: A1). Task 24 appends its cases.
+// Map slot on cards (Task 20; spec §5.2, §3.2–§3.3, CONTRACT §4.11 DOM; Task 23: A1; Task 24: H2, I2, J3; Task 27: K2, L3 and the source line).
 // Every manifest here is an in-memory copy (tests/helpers/assetEnv.ts): nothing reads the committed manifest's checks.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -7,13 +7,13 @@ import { describe, expect, it } from 'vitest';
 import { cardShowsUpgrade } from '../src/assets';
 import { renderCardMap } from '../src/cardMap';
 import { CARDS, cardSource, cardVars, distributionRows, fillCard } from '../src/cards';
-import { renderCardBody, upgradedFormShown } from '../src/cardView';
+import { renderCardBody, sourceWithMapSuffix, upgradedFormShown } from '../src/cardView';
 import { IRELAND_FOOTNOTE, MAP_SOURCE_SUFFIX, MAP_TEXT } from '../src/content';
 import { ALL_OFF, ALL_ON } from '../src/features';
 import { A1_CONFIRMED_LABELS, mapSpec } from '../src/maps';
 import { cloneFixture, FIXTURE } from './fixtures/fixture';
 import { ruleViolations } from './contentRules';
-import { checkedManifest, fakeUrls } from './helpers/assetEnv';
+import { checkedManifest, fakeUrls, onlyChecked } from './helpers/assetEnv';
 import { cardCtx, flagSet, openOnCard } from './helpers/cardCtx';
 
 const MAP_CARDS = [['D1', 'map.D1'], ['E1', 'map.E1'], ['G1', 'map.G1']] as const;
@@ -29,11 +29,13 @@ describe('the upgrade rule for D1, E1, G1', () => {
       expect(upgradedFormShown(CARDS[id], on, checkedManifest(), fakeUrls())).toBe(true);
     });
   }
-  it('a map card whose spec is not built is never upgraded, whatever the flags and checks', () => {
-    for (const id of ['K2', 'L3'] as const) {
-      // (Task 27 builds these and moves its ids out of this list. A1 is built: Task 23; H2, I2 and J3: Task 24.)
-      expect(cardShowsUpgrade(CARDS[id], ALL_ON, checkedManifest(), fakeUrls()), id).toBe(false);
-    }
+  // Task 27 built K2 and L3, so no card has an unbuilt map any more and Task 20's version of this test (it named K2 and L3) is gone. The rule
+  // is still the code's (assets.ts cardShowsUpgrade asks MAP_SPECS_BUILT), so it is pinned with a card whose map has no spec: F1's inset id,
+  // which Task 29 builds and takes out of this test.
+  it('a card whose map spec is not built is never upgraded, whatever the flags and checks', () => {
+    const unbuilt = { ...CARDS.D1, map: 'F1inset' as const };
+    expect(cardShowsUpgrade(unbuilt, ALL_ON, checkedManifest(), fakeUrls())).toBe(false);
+    expect(cardShowsUpgrade(CARDS.D1, ALL_ON, checkedManifest(), fakeUrls())).toBe(true);
   });
 });
 
@@ -195,8 +197,12 @@ describe('A1 card (Task 23, spec §3.1)', () => {
   });
 });
 
-describe('distribution cards with their maps (Task 24, spec §3.4)', () => {
-  const CASES = [['H2', 'map.H2', 'LCT'], ['I2', 'map.I2', 'SLC45A2'], ['J3', 'map.J3', 'HERC2']] as const;
+describe('distribution cards with their maps (Tasks 24 and 27, spec §3.4)', () => {
+  const CASES = [
+    ['H2', 'map.H2', 'LCT'], ['I2', 'map.I2', 'SLC45A2'], ['J3', 'map.J3', 'HERC2'], ['K2', 'map.K2', 'TYK2'], ['L3', 'map.L3', 'HLA-DQ2'],
+  ] as const;
+  /** How many of the fixture's rows have coordinates, so a dot: spec §3.4's value lists less the gnomAD rows. */
+  const DOTS = { LCT: 20, SLC45A2: 10, HERC2: 10, TYK2: 7, 'HLA-DQ2': 4 } as const;
   const BEFORE = /selection|advantage|rose|spread|once more common|over the last 4,000 years/i;   // the "before" rule (tests/cards.test.ts)
   const placed = (gene: (typeof CASES)[number][2]) => distributionRows(FIXTURE, gene).filter((r) => r.lat !== undefined && r.lon !== undefined);
   const side = (gene: (typeof CASES)[number][2]) => distributionRows(FIXTURE, gene).filter((r) => r.lat === undefined || r.lon === undefined);
@@ -211,12 +217,13 @@ describe('distribution cards with their maps (Task 24, spec §3.4)', () => {
       expect(el.querySelector('.card-title')!.textContent).toBe(CARDS[id].title);
       expect(el.querySelector('.card-puzzle')!.textContent).toBe(CARDS[id].puzzle);
       expect([...el.querySelectorAll('.card-lines li')].map((li) => li.textContent)).toEqual(CARDS[id].lines);
-      expect(el.querySelector('.card-source')!.textContent).toBe(CARDS[id].source);
+      // The card's own source line (spec §3.4), with the Natural Earth line after it where the spec's K2 source does not already have it (§6).
+      expect(el.querySelector('.card-source')!.textContent).toBe(sourceWithMapSuffix(CARDS[id].source, true));
       expect(el.querySelector('.card-source')!.textContent).toContain(MAP_SOURCE_SUFFIX);
       // The map sits where the value bars were: after the title and before the lines.
       expect(el.querySelector('.card-title')!.compareDocumentPosition(slot!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(slot!.compareDocumentPosition(el.querySelector('.card-lines')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(placed(gene).length).toBeGreaterThanOrEqual(10);
+      expect(placed(gene)).toHaveLength(DOTS[gene]);
       expect(slot!.querySelectorAll('svg.map-svg circle.map-dot')).toHaveLength(placed(gene).length);
       expect([...slot!.querySelectorAll('svg.map-svg text.map-label')].map((t) => t.textContent)).toEqual(placed(gene).map((r) => `${r.label} ${r.display}`));
     });
@@ -233,7 +240,7 @@ describe('distribution cards with their maps (Task 24, spec §3.4)', () => {
       for (const node of el.querySelectorAll('.card-puzzle')) node.remove();
       expect(el.textContent).not.toMatch(BEFORE);
       expect(el.textContent).not.toMatch(/paternity|illegitim|affair|mismatch/i);
-      for (const t of el.querySelectorAll('svg text')) expect(t.textContent, 'a map label is a place and a number').toMatch(/^[A-Za-z ()]+ \d+$/);
+      for (const t of el.querySelectorAll('svg text')) expect(t.textContent, 'a map label is a place and a number (TYK2 has one decimal)').toMatch(/^[A-Za-z ()]+ \d+(\.\d)?$/);
     });
 
     it(`${id} not upgraded (map unchecked): the P1 value bars, no map, no Natural Earth in the source`, () => {
@@ -303,5 +310,113 @@ describe('distribution cards with their maps (Task 24, spec §3.4)', () => {
     expect([...el.children].map((c) => c.tagName.toLowerCase() + (c.className ? `.${c.getAttribute('class')}` : ''))).toEqual(['svg.map-svg', 'ul.card-map-side']);
     expect(el.querySelector('.card-map-side .value-label')!.textContent).toBe('Middle East');
     expect(el.querySelector('.card-map-side .value-num')!.textContent).toBe('47');
+  });
+});
+
+describe('sourceWithMapSuffix (Task 27, spec §6: maps carry the Natural Earth line)', () => {
+  it('leaves the text form alone', () => {
+    expect(sourceWithMapSuffix('Data: gnomAD.', false)).toBe('Data: gnomAD.');
+    expect(sourceWithMapSuffix(undefined, false)).toBeUndefined();
+  });
+  it('adds the suffix once when a map is shown', () => {
+    expect(sourceWithMapSuffix('Data: gnomAD.', true)).toBe(`Data: gnomAD. ${MAP_SOURCE_SUFFIX}`);
+    expect(sourceWithMapSuffix(`Data: x. ${MAP_SOURCE_SUFFIX}`, true)).toBe(`Data: x. ${MAP_SOURCE_SUFFIX}`);
+    expect(sourceWithMapSuffix(undefined, true)).toBe(MAP_SOURCE_SUFFIX);
+    expect(sourceWithMapSuffix('', true)).toBe(MAP_SOURCE_SUFFIX);
+    // Idempotent: applying it to its own result changes nothing.
+    const once = sourceWithMapSuffix('Data: gnomAD.', true);
+    expect(sourceWithMapSuffix(once, true)).toBe(once);
+  });
+  it('changes no card but K2: every other map card\'s spec source already ends with the line, and K2\'s (spec §3.4) does not', () => {
+    const MAP_CARD_IDS = ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3'] as const;
+    for (const id of MAP_CARD_IDS) {
+      const source = CARDS[id].source!;
+      if (id === 'K2') {
+        expect(source.endsWith(MAP_SOURCE_SUFFIX), 'K2\'s §3.4 source has no Natural Earth line').toBe(false);
+        expect(sourceWithMapSuffix(source, true)).toBe(`${source} ${MAP_SOURCE_SUFFIX}`);
+      } else {
+        expect(source.endsWith(MAP_SOURCE_SUFFIX), `${id}'s source already ends with it`).toBe(true);
+        expect(sourceWithMapSuffix(source, true), id).toBe(source);
+      }
+    }
+  });
+});
+
+describe('distribution cards K2 and L3 with their maps (Task 27)', () => {
+  const CASES = [['K2', 'map.K2', 'TYK2', 1, 2], ['L3', 'map.L3', 'HLA-DQ2', 2, 3]] as const;
+  for (const [id, flag, gene, index, count] of CASES) {
+    const upgraded = () => renderCardBody(document, CARDS[id],
+      cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), onlyChecked([id]), { placement: 'before', index, count }));
+
+    it(`${id} upgraded: map instead of the value bars; title, lines and puzzle stay; gnomAD rows in the side list`, () => {
+      const el = upgraded();
+      expect(el.querySelector(`.card-map[data-map="${id}"] svg.map-svg`)).not.toBeNull();
+      expect(el.querySelector('.card-values')).toBeNull();
+      expect(el.querySelector('.card-title')!.textContent).toBe(CARDS[id].title);
+      expect(el.querySelector('.card-puzzle')!.textContent).toBe(CARDS[id].puzzle);
+      expect(el.querySelectorAll('.card-lines li')).toHaveLength(CARDS[id].lines!.length);
+      const side = distributionRows(FIXTURE, gene).filter((r) => r.lat === undefined || r.lon === undefined);
+      expect([...el.querySelectorAll('.card-map-side li')].map((li) => li.textContent)).toEqual(side.map((r) => `${r.label} ${r.display}`));
+    });
+
+    it(`${id} upgraded: the source line ends with the Natural Earth line exactly once`, () => {
+      const src = upgraded().querySelector('.card-source')!.textContent!;
+      expect(src.endsWith(MAP_SOURCE_SUFFIX)).toBe(true);
+      expect(src.split(MAP_SOURCE_SUFFIX).length - 1).toBe(1);
+      expect(src.startsWith(CARDS[id].source!.replace(` ${MAP_SOURCE_SUFFIX}`, ''))).toBe(true);   // the spec's own words come first, unchanged
+    });
+
+    it(`${id} with its flag on but the map unchecked: the P1 value bars and the text-form source line`, () => {
+      const el = renderCardBody(document, CARDS[id],
+        cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), onlyChecked([]), { placement: 'before', index, count }));
+      expect(el.querySelector('.card-map')).toBeNull();
+      expect(el.querySelectorAll(`.card-values[data-gene="${gene}"] .value-row`)).toHaveLength(distributionRows(FIXTURE, gene).length);
+      expect(el.querySelector('.card-source')?.textContent ?? '').toBe(cardSource(CARDS[id], false) ?? '');
+      expect(el.querySelector('.card-source')?.textContent ?? '').not.toContain('Natural Earth');
+    });
+
+    it(`${id}: the footer has Image credits exactly when the map shows, with only this map checked`, () => {
+      expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), onlyChecked([id])).querySelector('.card-credits')).not.toBeNull();
+      expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), onlyChecked([])).querySelector('.card-credits')).toBeNull();
+      expect(openOnCard(id, FIXTURE, flagSet(flag, false, ALL_ON), onlyChecked([id])).querySelector('.card-credits')).toBeNull();
+    });
+  }
+
+  // (place, number) of every row a card shows, whichever form it is in: the value bars of the text form, or the map's labels plus its side list.
+  const numbersOf = (el: HTMLElement): [string, string][] => {
+    const bars = [...el.querySelectorAll('.value-row')].map((li): [string, string] => [li.querySelector('.value-label')!.textContent!, li.querySelector('.value-num')!.textContent!]);
+    const labels = [...el.querySelectorAll('svg text.map-label')].map((t): [string, string] => {
+      const s = t.textContent!;
+      return [s.slice(0, s.lastIndexOf(' ')), s.slice(s.lastIndexOf(' ') + 1)];
+    });
+    const side = [...el.querySelectorAll('.card-map-side li')].map((li): [string, string] => [li.querySelector('.value-label')!.textContent!, li.querySelector('.value-num')!.textContent!]);
+    return [...bars, ...labels, ...side].sort((a, b) => a[0].localeCompare(b[0]));
+  };
+
+  for (const [id, flag] of CASES) {
+    it(`${id}: the value bars of the text form and the labels plus side list of the map say the same numbers`, () => {
+      const bars = numbersOf(renderCardBody(document, CARDS[id], cardCtx(FIXTURE, ALL_OFF, onlyChecked([]), { placement: 'before' })));
+      const map = numbersOf(renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), onlyChecked([id]), { placement: 'before' })));
+      expect(bars.length).toBeGreaterThanOrEqual(5);
+      expect(map).toEqual(bars);
+    });
+  }
+
+  it('K2 prints one decimal everywhere, in both forms (Britain 2.7, O1), and L3 whole numbers', () => {
+    const k2 = numbersOf(renderCardBody(document, CARDS.K2, cardCtx(FIXTURE, flagSet('map.K2', true, ALL_OFF), onlyChecked(['K2']), { placement: 'before' })));
+    for (const [place, n] of k2) expect(n, place).toMatch(/^\d+\.\d$/);
+    expect(k2.find(([place]) => place === 'Britain')![1]).toBe('2.7');
+    const l3 = numbersOf(renderCardBody(document, CARDS.L3, cardCtx(FIXTURE, flagSet('map.L3', true, ALL_OFF), onlyChecked(['L3']), { placement: 'before' })));
+    for (const [place, n] of l3) expect(n, place).toMatch(/^\d+$/);
+  });
+
+  it('each flag is its own: with only map.K2 on, L3 keeps its value bars, and the other way round', () => {
+    for (const [on, off] of [['K2', 'L3'], ['L3', 'K2']] as const) {
+      const only = flagSet(`map.${on}`, true, ALL_OFF);
+      expect(renderCardBody(document, CARDS[on], cardCtx(FIXTURE, only, onlyChecked(['K2', 'L3']), { placement: 'before' })).querySelector('.card-map'), on).not.toBeNull();
+      const other = renderCardBody(document, CARDS[off], cardCtx(FIXTURE, only, onlyChecked(['K2', 'L3']), { placement: 'before' }));
+      expect(other.querySelector('.card-map'), off).toBeNull();
+      expect(other.querySelector('.card-values'), off).not.toBeNull();
+    }
   });
 });

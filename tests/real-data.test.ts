@@ -370,3 +370,99 @@ describe.runIf(process.env.REAL_DATA === '1')('real data: distribution maps H2, 
     }
   });
 });
+
+// ---------- v3 (Task 27): the K2 and L3 distribution maps draw the rows the students will see (spec §3.4, §6) ----------
+describe.runIf(process.env.REAL_DATA === '1')('real data: distribution maps K2 and L3 (Task 27, spec §3.4)', () => {
+  const d = () => validateData(JSON.parse(readFileSync(REAL, 'utf8')));
+  const place = (t: string) => t.replace(/ [0-9.]+$/, '');
+
+  it('K2: 7 dots (Spain, Tuscany, Britain, China, Japan, Nigeria, Kenya); side list Europe (large sample), Middle East, Finland', () => {
+    const s = mapSpec('K2', d());
+    expect((s.texts ?? []).map((t) => place(t.text))).toEqual(['Spain', 'Tuscany', 'Britain', 'China', 'Japan', 'Nigeria', 'Kenya']);
+    expect((s.sideList ?? []).map((r) => r.label)).toEqual(['Europe (large sample)', 'Middle East', 'Finland']);
+    expect((s.texts ?? []).slice(3).map((t) => t.text.split(' ').at(-1))).toEqual(['0.0', '0.0', '0.0', '0.0']);
+  });
+
+  it('L3: Europe only — 4 dots inside the Europe-west frame; side list Europe (large sample)', () => {
+    const s = mapSpec('L3', d());
+    const f = MAP_FRAMES.europeWest;
+    expect((s.texts ?? []).map((t) => place(t.text))).toEqual(['Spain', 'Tuscany', 'Britain', 'Finland']);
+    for (const p of s.points ?? []) {
+      expect(p.lat).toBeGreaterThanOrEqual(f.latMin);
+      expect(p.lat).toBeLessThanOrEqual(f.latMax);
+      expect(p.lon).toBeGreaterThanOrEqual(f.lonMin);
+      expect(p.lon).toBeLessThanOrEqual(f.lonMax);
+    }
+    expect((s.sideList ?? []).map((r) => r.label)).toEqual(['Europe (large sample)']);
+  });
+
+  const EXPECT = {
+    K2: { gene: 'TYK2', side: ['Europe (large sample)', 'Middle East', 'Finland'] },
+    L3: { gene: 'HLA-DQ2', side: ['Europe (large sample)'] },
+  } as const;
+  for (const id of ['K2', 'L3'] as const) {
+    const want = (): string[] => SPEC_ROWS[EXPECT[id].gene].filter(([label]) => !(EXPECT[id].side as readonly string[]).includes(label)).map(([label, shown]) => `${label} ${shown}`);
+
+    it(`${id}: the labels are spec §3.4's rows with coordinates (${EXPECT[id].gene}), in its order, with its numbers; the side list is ${JSON.stringify(EXPECT[id].side)}`, () => {
+      const s = mapSpec(id, d());
+      expect(DISTRIBUTION_MAP_GENE[id]).toBe(EXPECT[id].gene);
+      expect((s.texts ?? []).map((t) => t.text)).toEqual(want());
+      expect(s.points).toHaveLength(want().length);
+      expect((s.sideList ?? []).map((r) => `${r.label} ${r.display}`).sort()).toEqual(
+        SPEC_ROWS[EXPECT[id].gene].filter(([label]) => (EXPECT[id].side as readonly string[]).includes(label)).map(([label, shown]) => `${label} ${shown}`).sort(),
+      );
+      expect(mapDataReady(id, d())).toBe(true);
+    });
+
+    it(`${id}: every label and dot lies in the window, no label overlaps another or covers a dot, and each is nearest its own dot, as estimated and with every word 8% wider`, () => {
+      expect(layoutViolations(mapSpec(id, d()))).toEqual([]);
+      expect(layoutViolations(mapSpec(id, d()), 1.08)).toEqual([]);
+    });
+
+    it(`${id}: a number that prints 0 is the hollow ring, every other is a dot of at least 4, bigger for a bigger number`, () => {
+      const s = mapSpec(id, d());
+      const rows = distributionRows(d(), EXPECT[id].gene).filter((r) => r.lat !== undefined);
+      const radii = specDots(s).map((dot) => dot.r);
+      rows.forEach((r, i) => {
+        if (Number(r.display) === 0) expect(radii[i], r.label).toBe(3);
+        else expect(radii[i], r.label).toBeGreaterThanOrEqual(4);
+        if (i > 0) expect(radii[i]!, `${r.label} against the row above it`).toBeLessThanOrEqual(radii[i - 1]!);
+      });
+    });
+  }
+
+  it('K2 Britain shows 2.7 (O1: 5 of 182 copies = 0.02747), Tuscany 2.8 and Spain 3.3, as the card\'s value list prints them', () => {
+    const texts = mapSpec('K2', d()).texts!.map((t) => t.text);
+    expect(texts).toEqual(expect.arrayContaining(['Britain 2.7', 'Tuscany 2.8', 'Spain 3.3']));
+    const gbr = d().trait_maps.TYK2.find((r) => r.label_key === '1kg:GBR')!;
+    expect(gbr.allele_count).toBe(5);
+    expect(gbr.value).toBeCloseTo(5 / 182, 5);
+  });
+
+  it('K2 is drawn on the fixed 0-15 scale (the biggest dot is the Spain 3.3 of the 1000 Genomes places, a dot of about 6.5, not the 4 of the 0-100 floor)', () => {
+    const s = mapSpec('K2', d());
+    expect(s.scaleMax).toBe(15);
+    const radii = specDots(s).map((dot) => dot.r);
+    expect(Math.max(...radii)).toBeGreaterThan(6);
+    expect(Math.max(...radii)).toBeLessThan(7);
+  });
+
+  it('L3 Britain shows 16 and Spain 25, as the card\'s value list prints them; the gnomAD European sample 22 is in the side list', () => {
+    expect(mapSpec('L3', d()).texts!.map((t) => t.text)).toEqual(['Spain 25', 'Tuscany 21', 'Britain 16', 'Finland 9']);
+    expect((mapSpec('L3', d()).sideList ?? []).map((r) => `${r.label} ${r.display}`)).toEqual(['Europe (large sample) 22']);
+  });
+
+  it('the 1000 Genomes sites are where the spec §6 table puts them, so every dot is in its own country or city', () => {
+    const SITES: Record<string, [number, number]> = {
+      Britain: [52.5, -1.5], Finland: [61.0, 25.0], Tuscany: [43.5, 11.0], Spain: [40.4, -3.7],
+      China: [39.9, 116.4], Japan: [35.7, 139.7], Nigeria: [7.4, 3.9], Kenya: [0.6, 34.8],
+    };
+    for (const id of ['K2', 'L3'] as const) {
+      const s = mapSpec(id, d());
+      (s.texts ?? []).forEach((t, i) => {
+        const [lat, lon] = SITES[place(t.text)]!;
+        expect([s.points![i]!.lat, s.points![i]!.lon], `${id} ${t.text}`).toEqual([lat, lon]);
+      });
+    }
+  });
+});

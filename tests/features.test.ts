@@ -10,7 +10,7 @@ import { INITIAL_PLOT, reducePlot } from '../src/plotState';
 import { plotIsAnimating, renderPlot } from '../src/plots/index';
 import { ruleViolations } from './contentRules';
 import { FIXTURE } from './fixtures/fixture';
-import { checkedManifest, fakeUrls } from './helpers/assetEnv';
+import { checkedManifest, fakeUrls, onlyChecked } from './helpers/assetEnv';
 import { cardCtx, flagSet, openOnCard } from './helpers/cardCtx';
 import { installFakeAnimate } from './helpers/fakeAnimation';
 
@@ -285,6 +285,39 @@ describe('map.H2 / map.I2 / map.J3 (Task 24, spec §10.3)', () => {
       expect(el.querySelector('.card-values')).toBeNull();
       expect(el.querySelector('.card-source')?.textContent ?? '').toContain('Map outline: Made with Natural Earth.');
       expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest()).querySelector('.card-credits')).not.toBeNull();
+    });
+  }
+});
+
+// Task 27. K2 (TYK2) and L3 (HLA-DQ2) are "before" cards too. Both flag states are proved with in-memory manifests (onlyChecked: only the
+// map named is checked, CONTRACT §8 R6), never the committed assets/manifest.json, whose visual_check only the instructor fills: this
+// passes before and after his check of the two maps, and with the flags still false in src/features.ts.
+describe('map.K2 / map.L3 (Task 27, spec §10.3)', () => {
+  const CASES = [['K2', 'map.K2', 'TYK2', 1, 2], ['L3', 'map.L3', 'HLA-DQ2', 2, 3]] as const;
+  for (const [id, flag, gene, index, count] of CASES) {
+    const ctx = (features: ReturnType<typeof flagSet>, checked: readonly (typeof id)[]) =>
+      cardCtx(FIXTURE, features, onlyChecked(checked), { placement: 'before', index, count });
+
+    it(`${flag} false: ${id} shows its value list and no map, even with the map checked`, () => {
+      const el = renderCardBody(document, CARDS[id], ctx(flagSet(flag, false, ALL_ON), [id]));
+      expect(el.querySelector('.card-map')).toBeNull();
+      expect(el.querySelector('svg.map-svg')).toBeNull();
+      expect(el.querySelector(`.card-values[data-gene="${gene}"]`)).not.toBeNull();
+      expect(el.querySelectorAll(`.card-values[data-gene="${gene}"] .value-row`)).toHaveLength(distributionRows(FIXTURE, gene).length);
+      expect(el.querySelector('.card-source')?.textContent ?? '').not.toContain('Natural Earth');
+      expect(openOnCard(id, FIXTURE, flagSet(flag, false, ALL_ON), onlyChecked([id])).querySelector('.card-credits')).toBeNull();
+    });
+    it(`${flag} true with its map checked: ${id} draws the map instead of the bars, with the full source line and the Image credits button`, () => {
+      const el = renderCardBody(document, CARDS[id], ctx(flagSet(flag, true, ALL_OFF), [id]));
+      expect(el.querySelector(`.card-map[data-map="${id}"] svg.map-svg`)).not.toBeNull();
+      expect(el.querySelector('.card-values')).toBeNull();
+      expect(el.querySelector('.card-source')?.textContent ?? '').toContain('Map outline: Made with Natural Earth.');
+      expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), onlyChecked([id])).querySelector('.card-credits')).not.toBeNull();
+    });
+    it(`${flag} true with its map unchecked: ${id} stays in its value bars`, () => {
+      const el = renderCardBody(document, CARDS[id], ctx(flagSet(flag, true, ALL_OFF), []));
+      expect(el.querySelector('.card-map')).toBeNull();
+      expect(el.querySelector(`.card-values[data-gene="${gene}"]`)).not.toBeNull();
     });
   }
 });

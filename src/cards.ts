@@ -443,7 +443,8 @@ export function cardUpgraded(card: Card, features: Features = FEATURES): boolean
   return card.feature !== undefined && features[card.feature];
 }
 
-/** Upgraded: the full source line. Text form: A1 shows none; map cards drop the trailing Natural Earth line (CONTRACT decision 4). */
+/** Upgraded: the full source line. Text form: A1 shows none; map cards drop the trailing Natural Earth line (CONTRACT decision 4). K2's
+ *  line (spec §3.4) never had one; cardView's sourceWithMapSuffix adds it when K2's map is drawn (spec §6, Task 27). */
 export function cardSource(card: Card, upgraded: boolean): string | undefined {
   if (card.source === undefined) return undefined;
   if (upgraded) return card.source;

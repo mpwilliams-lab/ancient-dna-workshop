@@ -281,8 +281,6 @@ describe('readiness (CONTRACT §4.14)', () => {
     expect(cardShowsUpgrade(CARDS.B1, on, checkedManifest(['castlerigg']), fakeUrls())).toBe(true);   // optional tile
     expect(cardShowsUpgrade(CARDS.D1, on, checkedManifest(), fakeUrls())).toBe(true);
     expect(cardShowsUpgrade(CARDS.D1, on, checkedManifest(['D1']), fakeUrls())).toBe(false);
-    // Task 20: a map card is upgraded only once its spec is built (MAP_SPECS_BUILT). Task 27 removes this line when it builds L3.
-    expect(cardShowsUpgrade(CARDS.L3, ALL_ON, checkedManifest(), fakeUrls())).toBe(false);
     expect(cardShowsUpgrade(CARDS.D2, ALL_ON, checkedManifest(), fakeUrls())).toBe(false);          // text-only card
   });
   it('follows the same flag rule as cardUpgraded', () => {

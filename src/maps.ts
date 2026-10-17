@@ -15,8 +15,8 @@ export { MAP_LABEL_FONT_PX };
 export const MAP_LABEL_CHAR_EM = 0.58;
 
 /** Maps whose spec exists. A card is upgraded to its map only if its id is here (assets.ts cardShowsUpgrade), so an
- *  unbuilt map is never drawn, whatever the flags. Tasks 27 and 29 add their ids. */
-export const MAP_SPECS_BUILT: ReadonlySet<MapId> = new Set<MapId>(['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3']);
+ *  unbuilt map is never drawn, whatever the flags. Task 29 adds the F1 inset. */
+export const MAP_SPECS_BUILT: ReadonlySet<MapId> = new Set<MapId>(['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3']);
 
 type Anchor = 'start' | 'middle' | 'end';
 const ll = (lat: number, lon: number): LatLon => ({ lat, lon });
@@ -457,9 +457,13 @@ export const DISTRIBUTION_MAP_FRAME: Readonly<Record<DistributionMapId, MapFrame
  * pictures are drawn small on a card: the window is cut to the dots and their labels, and at 1366 x 768 the card leaves it about 300 px,
  * so 20 units would be 11 px (H2, whose window is the tallest) to 13 px. H2's 26 and the others' 24 give 14.4 to 16 px there, the least
  * that e2e/maps.spec.ts accepts (14); 26 is about the most the twenty labels of H2 can have and still all lie clear of each other and of
- * the dots (28 cannot be laid out). Task 27 sets K2 and L3 when it builds them.
+ * the dots (28 cannot be laid out).
+ * K2 and L3 (Task 27) have few, short labels ("Britain 2.7", "Tuscany 21"), so they ask for more: 30. At 24 K2 drew 13.7 px at 1366 x 768,
+ * under that floor: its side list, whose longest row is "Europe (large sample) 4.4", takes 200 of the card's 702 px and leaves the picture
+ * 488. At 30 (measured in Chromium, same in Edge) K2 is 16.9 px there and 27.4 px at 1920 x 1080, L3 18.8 and 25.4; the window grows by
+ * only 1% (K2) and 5% (L3), and the labels still lie clear (e2e/maps.spec.ts, tests/real-data.test.ts: 34 would too).
  */
-export const DISTRIBUTION_LABEL_PX: Readonly<Record<DistributionMapId, number>> = { H2: 26, I2: 24, J3: 24, K2: 24, L3: 24 };
+export const DISTRIBUTION_LABEL_PX: Readonly<Record<DistributionMapId, number>> = { H2: 26, I2: 24, J3: 24, K2: 30, L3: 30 };
 const isDistributionMap = (id: MapId): id is DistributionMapId => id in DISTRIBUTION_MAP_GENE;
 const hasCoordinates = (r: { lat?: number; lon?: number }): boolean => r.lat !== undefined && r.lon !== undefined;
 
@@ -490,7 +494,7 @@ function dotMapView(frame: MapFrameId, box: LabelBox): MapView {
 }
 
 /**
- * H2, I2, J3 (and K2, L3 once Task 27 builds them): one dot for every row of trait_maps[gene] that has coordinates, drawn from the rows
+ * H2, I2, J3, K2, L3 (K2 and L3: Task 27): one dot for every row of trait_maps[gene] that has coordinates, drawn from the rows
  * distributionRows gives, in its order (biggest first, so a small dot is never hidden under a big one), so the spec never depends on the
  * order of the rows in the JSON. A dot's value is the row's `value` x 100, copies in every 100 (not rounded, and never taken from
  * allele_count), on the gene's scale (DISTRIBUTION_SCALE_MAX). Its label is "<place> <number>", the number the value list prints. Rows
@@ -554,6 +558,8 @@ export function mapSpec(id: MapId, data: WorkshopData): MapSpec {
     case 'H2':
     case 'I2':
     case 'J3':
+    case 'K2':
+    case 'L3':
       return distributionSpec(id, data);
     default:
       throw new Error(`mapSpec: map ${id} is not built yet`);

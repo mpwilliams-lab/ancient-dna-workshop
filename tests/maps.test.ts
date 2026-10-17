@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-// Spec §6 map specs (Task 20: D1, E1, G1; Task 23: A1; Task 24: H2, I2, J3). Task 27 appends its own describe blocks to this file.
+// Spec §6 map specs (Task 20: D1, E1, G1; Task 23: A1; Task 24: H2, I2, J3; Task 27: K2, L3, which go through the same distribution
+// builder, so the Task 24 checks below run over all five and a Task 27 block at the end adds what is theirs alone).
 import { describe, expect, it } from 'vitest';
 import { DISTRIBUTION_SCALE_MAX, distributionRows } from '../src/cards';
 import { MAP_TEXT } from '../src/content';
+import { EUROPE_WEST_LAND } from '../src/generated/map-europe-west';
 import {
   A1_CONFIRMED_LABELS, A1_DOT_R, A1_LABEL_PX, BAND_MAX_ASPECT, BAND_PAD, DISTRIBUTION_LABEL_PX, DISTRIBUTION_MAP_FRAME,
   DISTRIBUTION_MAP_GENE, DOT_LABEL_WIDTH_FACTOR, bandView, distributionSpec, drawingBox, frameBox, labelAt, labelBox, MAP_LABEL_FONT_PX,
@@ -560,7 +562,7 @@ describe('mapSpec(A1): genes mirror geography (Task 23, spec §3.1, §6, §8)', 
   });
 });
 
-// ---- Distribution maps H2, I2, J3 (Task 24, spec §3.4, §6): dots sized by copies in every 100, labelled "<place> <copies>" ----
+// ---- Distribution maps H2, I2, J3 (Task 24) and K2, L3 (Task 27) (spec §3.4, §6): dots sized by copies in every 100, labelled "<place> <copies>" ----
 
 /** The slack the placer keeps for a font that draws wider than labelBox's estimate: every check below draws every word this much wider.
  *  A literal, not DOT_LABEL_WIDTH_FACTOR, so that lowering the constant fails the checks instead of loosening them. */
@@ -694,11 +696,13 @@ describe('placeDotLabels (Task 24): a clear place for every label, or none', () 
   });
 });
 
-describe('distribution maps H2, I2, J3 (Task 24, spec §3.4, §6)', () => {
-  const IDS = ['H2', 'I2', 'J3'] as const;
+describe('distribution maps H2, I2, J3, K2, L3 (Tasks 24 and 27, spec §3.4, §6)', () => {
+  const IDS = ['H2', 'I2', 'J3', 'K2', 'L3'] as const;
+  /** The rows with coordinates the fixture (a copy of the real rows, tests/real-data.test.ts) draws as dots: spec §3.4's value lists less the gnomAD rows. */
+  const DOTS: Readonly<Record<(typeof IDS)[number], number>> = { H2: 20, I2: 10, J3: 10, K2: 7, L3: 4 };
   const hasCoords = (r: { lat?: number; lon?: number }): boolean => r.lat !== undefined && r.lon !== undefined;
 
-  it('genes and frames: H2 LCT on the Europe frame, I2 SLC45A2 and J3 HERC2 on the Old World frame', () => {
+  it('genes and frames: H2 LCT on the Europe frame, I2 SLC45A2, J3 HERC2 and K2 TYK2 on the Old World frame, L3 HLA-DQ2 on the Europe-west frame', () => {
     expect(DISTRIBUTION_MAP_GENE).toEqual({ H2: 'LCT', I2: 'SLC45A2', J3: 'HERC2', K2: 'TYK2', L3: 'HLA-DQ2' });
     expect(DISTRIBUTION_MAP_FRAME).toEqual({ H2: 'europe', I2: 'oldWorld', J3: 'oldWorld', K2: 'oldWorld', L3: 'europeWest' });
   });
@@ -725,7 +729,7 @@ describe('distribution maps H2, I2, J3 (Task 24, spec §3.4, §6)', () => {
       expect(s.labelPx).toBe(DISTRIBUTION_LABEL_PX[id]);
       const rows = placed();
       expect(s.points).toHaveLength(rows.length);
-      expect(rows.length, 'the fixture has rows to draw').toBeGreaterThanOrEqual(10);
+      expect(rows.length, 'the fixture has the rows to draw').toBe(DOTS[id]);
       const raw = new Map(FIXTURE.trait_maps[gene].map((r) => [r.label_key, r.value]));
       s.points!.forEach((p, i) => {
         expect(p.lat).toBe(rows[i]!.lat);
@@ -740,7 +744,7 @@ describe('distribution maps H2, I2, J3 (Task 24, spec §3.4, §6)', () => {
       const s = mapSpec(id, FIXTURE);
       const side = distributionRows(FIXTURE, gene).filter((r) => !hasCoords(r));
       expect(s.sideList ?? []).toEqual(side.map((r) => ({ label: r.label, display: r.display })));
-      expect((s.sideList ?? []).length === 0, 'H2 has none; I2 and J3 have the Middle East').toBe(id === 'H2');
+      expect((s.sideList ?? []).length === 0, 'H2 has none; the others have their gnomAD rows').toBe(id === 'H2');
     });
 
     it(`${id}: one label per dot, "<place> <copies>", the numbers the value list prints`, () => {
@@ -779,7 +783,7 @@ describe('distribution maps H2, I2, J3 (Task 24, spec §3.4, §6)', () => {
     it(`${id}: the dots follow the dot rule: a number that prints 0 is the hollow ring, any other number a filled dot of at least 4`, () => {
       const svg = rendered(mapSpec(id, FIXTURE));
       const rows = placed();
-      const zeros = rows.filter((r) => r.display === '0').length;
+      const zeros = rows.filter((r) => Number(r.display) === 0).length;     // (TYK2 prints one decimal: "0.0")
       expect(svg.querySelectorAll('circle.map-dot--zero')).toHaveLength(zeros);
       expect(svg.querySelectorAll('circle.map-dot--value')).toHaveLength(rows.length - zeros);
       for (const dot of svg.querySelectorAll('circle.map-dot--value')) expect(Number(dot.getAttribute('r'))).toBeGreaterThanOrEqual(4);
@@ -845,7 +849,7 @@ describe('distribution maps H2, I2, J3 (Task 24, spec §3.4, §6)', () => {
   for (const id of IDS) {
     it(`${id}: placeDotLabels finds a clear place for every label of the fixture's rows, so the map is data-ready and the greedy fallback is not what draws it`, () => {
       // mapDataReady is false exactly when the search found no layout (or there is no row with coordinates), and the fixture has rows.
-      expect(distributionRows(FIXTURE, DISTRIBUTION_MAP_GENE[id]).filter(hasCoords).length).toBeGreaterThanOrEqual(10);
+      expect(distributionRows(FIXTURE, DISTRIBUTION_MAP_GENE[id]).filter(hasCoords)).toHaveLength(DOTS[id]);
       expect(mapDataReady(id, FIXTURE)).toBe(true);
     });
   }
@@ -863,14 +867,6 @@ describe('distribution maps H2, I2, J3 (Task 24, spec §3.4, §6)', () => {
     }
   });
 
-  it('K2 and L3 are not built yet (Task 27): their specs throw and they are not data-ready, whatever the data', () => {
-    for (const id of ['K2', 'L3'] as const) {
-      expect(MAP_SPECS_BUILT.has(id), id).toBe(false);
-      expect(() => mapSpec(id, FIXTURE), id).toThrow(/not built/);
-      expect(mapDataReady(id, FIXTURE), id).toBe(false);
-    }
-  });
-
   it('drawingBox holds every value dot with its radius, as it holds arrows, links and labels', () => {
     const s: MapSpec = { ...mapSpec('I2', FIXTURE), texts: [] };
     const box = drawingBox(s)!;
@@ -885,5 +881,169 @@ describe('distribution maps H2, I2, J3 (Task 24, spec §3.4, §6)', () => {
     // ... and it is tight: some dot touches each side.
     expect(Math.min(...dots.map((d) => d.x - d.r))).toBeGreaterThan(box.left - 2);
     expect(Math.max(...dots.map((d) => d.y + d.r))).toBeGreaterThan(box.bottom - 2);
+  });
+});
+
+// ---- Task 27: K2 (TYK2, Old World frame, fixed 0-15 scale) and L3 (HLA-DQ2, Europe only, Europe-west frame) ----
+// They go through the same distribution builder as H2, I2 and J3 (Task 24): no new builder. The checks above already run over all five; these
+// are the brief's own and what only these two have: one decimal, the fixed scale, the Europe-west outline.
+describe('distribution maps K2 and L3 (Task 27, spec §3.4 P3 form, §6)', () => {
+  const CASES = [
+    { id: 'K2', gene: 'TYK2', frame: 'oldWorld', scaleMax: 15 },
+    { id: 'L3', gene: 'HLA-DQ2', frame: 'europeWest', scaleMax: 100 },
+  ] as const;
+  const hasLatLon = (r: { lat?: number; lon?: number }) => r.lat !== undefined && r.lon !== undefined;
+
+  for (const { id, gene, frame, scaleMax } of CASES) {
+    it(`${id}: built and data ready, on the ${frame} frame with the fixed 0-${scaleMax} scale`, () => {
+      expect(distributionRows(FIXTURE, gene).some(hasLatLon)).toBe(true);   // guards the tests below
+      expect(MAP_SPECS_BUILT.has(id)).toBe(true);
+      expect(mapDataReady(id, FIXTURE)).toBe(true);
+      const s = mapSpec(id, FIXTURE);
+      expect(s.frame).toBe(frame);
+      expect(s.scaleMax).toBe(DISTRIBUTION_SCALE_MAX[gene]);
+      expect(s.scaleMax).toBe(scaleMax);
+      expect(dotRadius(scaleMax, scaleMax)).toBeCloseTo(14, 9);
+    });
+
+    it(`${id}: one dot per row with coordinates, value = copies in every 100`, () => {
+      const s = mapSpec(id, FIXTURE);
+      const placed = distributionRows(FIXTURE, gene).filter(hasLatLon);
+      const raw = new Map(FIXTURE.trait_maps[gene].map((r) => [r.label_key, r.value]));
+      expect(s.points).toHaveLength(placed.length);
+      s.points!.forEach((p, i) => {
+        expect(p.lat).toBe(placed[i]!.lat);
+        expect(p.lon).toBe(placed[i]!.lon);
+        expect(p.value).toBeCloseTo(raw.get(placed[i]!.key)! * 100, 9);
+        expect(p.role).toBe('value');
+      });
+    });
+
+    it(`${id}: side list = the rows without coordinates (gnomAD), in row order`, () => {
+      const side = distributionRows(FIXTURE, gene).filter((r) => !hasLatLon(r));
+      expect(side.length, 'the fixture has gnomAD rows').toBeGreaterThan(0);
+      expect(mapSpec(id, FIXTURE).sideList ?? []).toEqual(side.map((r) => ({ label: r.label, display: r.display })));
+    });
+
+    it(`${id}: one label per dot, "<place> <copies>", inside the map, no overlaps, passing the content rules`, () => {
+      const s = mapSpec(id, FIXTURE);
+      const placed = distributionRows(FIXTURE, gene).filter(hasLatLon);
+      expect((s.texts ?? []).map((t) => t.text)).toEqual(placed.map((r) => `${r.label} ${r.display}`));
+      expectLabelsLaidOut(s);
+      for (const t of s.texts ?? []) expect(ruleViolations(t.text), t.text).toEqual([]);
+    });
+
+    it(`${id}: renderMap draws every label`, () => {
+      const s = mapSpec(id, FIXTURE);
+      const svg = rendered(s);
+      for (const t of s.texts ?? []) expect(svg.textContent).toContain(t.text);
+    });
+
+    it(`${id}: nothing new in the spec: it is exactly what the distribution builder gives, and a map built for the card is not a new kind of map`, () => {
+      expect(mapSpec(id, FIXTURE)).toEqual(distributionSpec(id, FIXTURE));
+      expect(mapSpec(id, FIXTURE).arrows ?? []).toHaveLength(0);
+      expect(mapSpec(id, FIXTURE).links ?? []).toHaveLength(0);
+    });
+  }
+
+  it('both are built, and the rest of the built set is as Tasks 20, 23 and 24 left it', () => {
+    for (const id of ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3'] as const) expect(MAP_SPECS_BUILT.has(id), id).toBe(true);
+    expect(MAP_SPECS_BUILT.has('F1inset')).toBe(false);   // Task 29's
+  });
+
+  // ---- K2: TYK2, one decimal, the fixed 0-15 scale (spec §3.4 K2; open issue O1) ----
+  describe('K2', () => {
+    const copies = (label: string): string => (mapSpec('K2', FIXTURE).texts ?? []).map((t) => t.text).find((t) => t.startsWith(`${label} `))!;
+
+    it('every number has one decimal, and Britain prints 2.7 (O1: 5 of 182 copies, 0.02747), not 2.8', () => {
+      const texts = (mapSpec('K2', FIXTURE).texts ?? []).map((t) => t.text);
+      for (const t of texts) expect(t, t).toMatch(/^[A-Za-z ()]+ \d+\.\d$/);
+      expect(copies('Britain')).toBe('Britain 2.7');
+      expect(FIXTURE.trait_maps.TYK2.find((r) => r.label_key === '1kg:GBR')!.value).toBeCloseTo(0.02747, 5);
+    });
+
+    it('the four places with no copies are hollow rings that print 0.0: China, Japan, Nigeria, Kenya', () => {
+      const s = mapSpec('K2', FIXTURE);
+      expect((s.texts ?? []).map((t) => t.text).filter((t) => t.endsWith(' 0.0')).map((t) => t.slice(0, -4))).toEqual(['China', 'Japan', 'Nigeria', 'Kenya']);
+      const svg = rendered(s);
+      expect([...svg.querySelectorAll('circle.map-dot--zero')].map((c) => [c.getAttribute('r'), c.getAttribute('fill')])).toEqual(Array(4).fill(['3', 'none']));
+      expect(svg.querySelectorAll('circle.map-dot--value')).toHaveLength(3);
+    });
+
+    it('the dots are sized on the fixed 0-15 scale, not on the largest number shown: radius = 14 sqrt(copies / 15), never under 4', () => {
+      const svg = rendered(mapSpec('K2', FIXTURE));
+      const dots = [...svg.querySelectorAll('circle.map-dot--value')];
+      expect(dots).toHaveLength(3);
+      for (const d of dots) {
+        const v = Number(d.getAttribute('data-value'));
+        expect(Number(d.getAttribute('r')), `${v} in 100`).toBeCloseTo(Math.round(dotRadius(v, 15) * 10) / 10, 9);
+        expect(dotRadius(v, 15), `${v} in 100`).toBeCloseTo(14 * Math.sqrt(v / 15), 9);     // on 0-100 these would all be the floor, 4
+        expect(dotRadius(v, 15)).toBeGreaterThan(5);
+      }
+      expect(dotRadius(15, 15)).toBeCloseTo(14, 9);
+    });
+
+    it('the ranking uses the raw frequency: Tuscany (0.028) precedes Britain (0.0275) whatever Britain\'s displayed 2.7 or 2.8', () => {
+      for (const britain of [0.02747, 0.0275]) {
+        const d = cloneFixture();
+        d.trait_maps.TYK2 = d.trait_maps.TYK2.map((r) => (r.label_key === '1kg:TSI' ? { ...r, value: 0.02804 } : r.label_key === '1kg:GBR' ? { ...r, value: britain } : r));
+        const names = (distributionSpec('K2', d).texts ?? []).map((t) => t.text.replace(/ [\d.]+$/, ''));
+        expect(names.indexOf('Tuscany'), `Britain at ${britain}`).toBeGreaterThanOrEqual(0);
+        expect(names.indexOf('Tuscany'), `Britain at ${britain}`).toBeLessThan(names.indexOf('Britain'));
+      }
+    });
+
+    it('its words are drawn at 28 map units or more: at 24 they were 13.7 px tall at 1366 x 768 (its side list takes 200 of the card\'s 702 px, leaving the picture 488), under the 14 px that e2e/maps.spec.ts holds every map to', () => {
+      expect(DISTRIBUTION_LABEL_PX.K2).toBeGreaterThanOrEqual(28);
+      expect(mapSpec('K2', FIXTURE).labelPx).toBe(DISTRIBUTION_LABEL_PX.K2);
+      expect(rendered(mapSpec('K2', FIXTURE)).querySelector('text.map-label')!.getAttribute('font-size')).toBe(String(DISTRIBUTION_LABEL_PX.K2));
+    });
+
+    it('the side list holds Europe (large sample), Middle East and Finland with one decimal each, and the map has no point for them', () => {
+      const side = (mapSpec('K2', FIXTURE).sideList ?? []).map((r) => r.label).sort();
+      expect(side).toEqual(['Europe (large sample)', 'Finland', 'Middle East']);
+      for (const r of mapSpec('K2', FIXTURE).sideList ?? []) expect(r.display, r.label).toMatch(/^\d+\.\d$/);
+      const labels = (mapSpec('K2', FIXTURE).texts ?? []).map((t) => t.text).join('|');
+      expect(labels).not.toMatch(/Europe \(large sample\)|Middle East|Finland/);
+    });
+  });
+
+  // ---- L3: HLA-DQ2, Europe only, the Europe-west frame (spec §3.4 L3, §6) ----
+  describe('L3', () => {
+    it('draws on the Europe-west outline and projection, and every dot lies inside that frame', () => {
+      const s = mapSpec('L3', FIXTURE);
+      const svg = rendered(s);
+      expect(svg.getAttribute('data-frame')).toBe('europeWest');
+      expect(svg.querySelectorAll('g.map-land path')).toHaveLength(EUROPE_WEST_LAND.length);
+      expect(EUROPE_WEST_LAND.length).toBeGreaterThan(0);
+      const f = MAP_FRAMES.europeWest;
+      expect(s.points).toHaveLength(4);
+      for (const p of s.points ?? []) {
+        expect(p.lat).toBeGreaterThanOrEqual(f.latMin);
+        expect(p.lat).toBeLessThanOrEqual(f.latMax);
+        expect(p.lon).toBeGreaterThanOrEqual(f.lonMin);
+        expect(p.lon).toBeLessThanOrEqual(f.lonMax);
+      }
+    });
+
+    it('Europe only: Spain, Tuscany, Britain and Finland as dots, the gnomAD European sample in the side list, no Asian or African place', () => {
+      const s = mapSpec('L3', FIXTURE);
+      expect((s.texts ?? []).map((t) => t.text.replace(/ \d+$/, '')).sort()).toEqual(['Britain', 'Finland', 'Spain', 'Tuscany']);
+      expect((s.sideList ?? []).map((r) => r.label)).toEqual(['Europe (large sample)']);
+      expect(s.points!.every((p) => p.lat > 36 && p.lon < 30)).toBe(true);
+    });
+
+    it('whole copies, not decimals, and no zero ring (every number is 9 or more): the dots are filled', () => {
+      const svg = rendered(mapSpec('L3', FIXTURE));
+      for (const t of svg.querySelectorAll('text.map-label')) expect(t.textContent, t.textContent!).toMatch(/^[A-Za-z ()]+ \d+$/);
+      expect(svg.querySelectorAll('circle.map-dot--zero')).toHaveLength(0);
+      expect(svg.querySelectorAll('circle.map-dot--value')).toHaveLength(4);
+    });
+
+    it('every label is inside the picture\'s window, clear of the others and of every dot, as estimated and drawn 8% wider', () => {
+      const s = mapSpec('L3', FIXTURE);
+      expect(layoutViolations(s)).toEqual([]);
+      expect(layoutViolations(s, WIDER)).toEqual([]);
+    });
   });
 });
