@@ -16,3 +16,6 @@ assets/staged/
 .release-check/
 # Natural Earth downloads for scripts/make-map.mjs (Task 19): untrusted data, read with JSON.parse only. Never commit them.
 assets/geo-raw/
+# Map preview for the instructor's visual check (Task 20): built script and its page. Never committed.
+.preview-maps/
+assets/preview/

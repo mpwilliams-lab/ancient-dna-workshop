@@ -21,6 +21,7 @@
     "e2e": "npm run build && playwright test",
     "export-offline": "npm run build && node scripts/export-offline.mjs",
     "run-sheet": "vite build --ssr scripts/runsheet-cli.ts --outDir .runsheet --emptyOutDir && node .runsheet/runsheet-cli.js",
+    "preview-maps": "vite build --ssr scripts/preview-maps.ts --outDir .preview-maps --emptyOutDir && node .preview-maps/preview-maps.js",
     "fetch-assets": "node scripts/fetch-assets.mjs",
     "promote-assets": "node scripts/fetch-assets.mjs --promote",
     "credits": "node scripts/make-credits.mjs",
