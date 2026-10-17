@@ -19,6 +19,8 @@ import { FIXTURE } from './helpers/shellEnv';
 const ROOT = resolve(__dirname, '..');
 const md = buildRunSheet(FIXTURE, '2026-10-19T09:00:00Z', '/Drive/web-app-dist/ancient-dna-workshop.html');
 const allSay = (): string[] => Object.values(SAY_LINES).flatMap((v) => v ?? []);
+/** Another module importing src/runsheet, in any form (static, side-effect, dynamic, re-export): a quoted relative path ending in "runsheet". */
+const RUNSHEET_IMPORT = /['"]\.{1,2}\/(?:[\w/]*\/)?runsheet['"]/;
 
 function row(title: string): string {
   const line = md.split('\n').find((l) => l.startsWith(`| ${title} |`));
@@ -92,13 +94,19 @@ describe('say-lines: spec §3.6, verbatim, instructor only', () => {
       e.isDirectory() ? srcFiles(join(dir, e.name)) : /\.ts$/.test(e.name) ? [join(dir, e.name)] : []);
     for (const f of srcFiles(resolve(ROOT, 'src'))) {
       if (/[\\/]runsheet\.ts$/.test(f)) continue;
-      expect(readFileSync(f, 'utf8'), f).not.toMatch(/from ['"]\.{1,2}\/(?:[\w/]*\/)?runsheet['"]/);
+      expect(readFileSync(f, 'utf8'), f).not.toMatch(RUNSHEET_IMPORT);
     }
     const built = resolve(ROOT, 'dist/index.html');
     if (existsSync(built)) {
       const page = readFileSync(built, 'utf8');
       for (const s of allSay()) expect(page.includes(s), s).toBe(false);
     }
+  });
+  it('the import guard sees side-effect, dynamic and re-export imports, not only "from" imports', () => {
+    for (const form of ["import { buildRunSheet } from './runsheet';", 'import "./runsheet";', "const m = await import('../runsheet');", "export * from './sub/runsheet';"]) {
+      expect(RUNSHEET_IMPORT.test(form), form).toBe(true);
+    }
+    for (const other of ["import { x } from './runsheetFoo';", "import { x } from './plots/pca';"]) expect(RUNSHEET_IMPORT.test(other), other).toBe(false);
   });
 });
 
@@ -161,7 +169,7 @@ describe('open checks (spec §11)', () => {
   });
 });
 
-// Skipped in a plain `npm test`; run with `npm run check-data` (REAL_DATA=1).
+// Skipped in a plain `npm test`. `npm run check-data` does not run this file: run it with REAL_DATA=1 npx vitest run tests/runsheet-content.test.ts.
 describe.runIf(process.env.REAL_DATA === '1')('open check 5 against the real workshop_data.json (O1)', () => {
   it('quotes the 1000 Genomes Britain value the build wrote and what card K2 shows for it', () => {
     const real = validateData(JSON.parse(readFileSync(resolve(ROOT, 'src/data/workshop_data.json'), 'utf8')));

@@ -21,7 +21,7 @@ function captionPresentDayPct(caption: string): number {
   return Number(m[1]);
 }
 /**
- * Spec §6 rule 6, as amended in v2.1 (approved by Matthew with the rest of v2.1): the card's present-day
+ * Spec §6 rule 6, as amended in v2.1 (approved by the instructor with the rest of v2.1): the card's present-day
  * number must match the plotted present-day value rounded to a whole percent. "About 3%" is a whole
  * percent, so it matches when the plotted value (inside its own interval) rounds to it. This is the same
  * comparison as the data build's tyk2_caption check (Task 4). Under the old v2 rule (not in force), the

@@ -3,7 +3,7 @@ import { defineConfig, devices, type Project } from '@playwright/test';
 
 // Microsoft Edge is the lab browser, and spec §8 requires the `msedge` project. Playwright drives
 // the installed Edge through the `msedge` channel. Without Edge the local suite refuses to run,
-// unless E2E_CHROMIUM_ONLY=1 is set, which needs Matthew's recorded approval (Task 14 Step 3).
+// unless E2E_CHROMIUM_ONLY=1 is set, which needs the instructor's recorded approval (Task 14 Step 3).
 const EDGE_EXECUTABLES: Record<string, string[]> = {
   darwin: ['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'],
   win32: [
@@ -16,9 +16,9 @@ const hasEdge = (EDGE_EXECUTABLES[process.platform] ?? []).some((p) => existsSyn
 const chromiumOnly = process.env.E2E_CHROMIUM_ONLY === '1';
 if (!process.env.LIVE && !hasEdge) {
   if (!chromiumOnly) {
-    throw new Error('[playwright] Microsoft Edge is not installed, and spec §8 requires the msedge project. Install it with `npx playwright install msedge`. Set E2E_CHROMIUM_ONLY=1 only with Matthew\'s recorded approval (Task 14 Step 3).');
+    throw new Error('[playwright] Microsoft Edge is not installed, and spec §8 requires the msedge project. Install it with `npx playwright install msedge`. Set E2E_CHROMIUM_ONLY=1 only with the instructor\'s recorded approval (Task 14 Step 3).');
   }
-  console.warn('[playwright] E2E_CHROMIUM_ONLY=1: Microsoft Edge is not installed, so the msedge project is skipped (Chromium-only run approved by Matthew, Task 14 Step 3).');
+  console.warn('[playwright] E2E_CHROMIUM_ONLY=1: Microsoft Edge is not installed, so the msedge project is skipped (Chromium-only run approved by the instructor, Task 14 Step 3).');
 }
 
 const local: Project[] = [

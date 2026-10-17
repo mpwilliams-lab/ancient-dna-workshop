@@ -113,7 +113,7 @@ describe('instructor run sheet v3: the on-screen content rules reach the sheet t
   });
 });
 
-// Skipped in a plain `npm test`; run with `npm run check-data` (REAL_DATA=1). The sheet the CLI writes is built from this file.
+// Skipped in a plain `npm test`. `npm run check-data` does not run this file: run it with REAL_DATA=1 npx vitest run tests/runsheet.test.ts. The sheet the CLI writes is built from the real workshop_data.json.
 describe.runIf(process.env.REAL_DATA === '1')('instructor run sheet v3 built from the real workshop_data.json', () => {
   const real = () => validateData(JSON.parse(readFileSync(resolve(__dirname, '../src/data/workshop_data.json'), 'utf8')));
 

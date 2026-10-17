@@ -39,7 +39,7 @@ describe.runIf(process.env.REAL_DATA === '1')('real workshop_data.json', () => {
     expect(strings.filter((s) => ruleViolations(s).length > 0)).toEqual([]);
   });
 
-  // Spec §6 rule 6 as amended in v2.1 (approved by Matthew): whole-percent match, rounded half-up as in Task 4.
+  // Spec §6 rule 6 as amended in v2.1 (approved by the instructor): whole-percent match, rounded half-up as in Task 4.
   it('TYK2 caption whole-percent present-day number matches the plotted present-day value (same rule as tyk2_caption in Task 4)', () => {
     const d = validateData(raw());
     const t = d.traits.find((x) => x.gene === 'TYK2')!;
