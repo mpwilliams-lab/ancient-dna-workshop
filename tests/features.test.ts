@@ -10,7 +10,7 @@ import { INITIAL_PLOT, reducePlot } from '../src/plotState';
 import { plotIsAnimating, renderPlot } from '../src/plots/index';
 import { ruleViolations } from './contentRules';
 import { FIXTURE } from './fixtures/fixture';
-import { checkedManifest } from './helpers/assetEnv';
+import { checkedManifest, fakeUrls } from './helpers/assetEnv';
 import { cardCtx, flagSet, openOnCard } from './helpers/cardCtx';
 import { installFakeAnimate } from './helpers/fakeAnimation';
 
@@ -287,4 +287,60 @@ describe('map.H2 / map.I2 / map.J3 (Task 24, spec §10.3)', () => {
       expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest()).querySelector('.card-credits')).not.toBeNull();
     });
   }
+});
+
+// Task 25. H1 (milk, cow), I1 (melanocyte) and J1 (irises) are "before" cards, so every flag state is rendered with placement 'before'.
+// Both flag states are proved with in-memory manifests (checkedManifest, fakeUrls), never the committed assets/manifest.json or
+// src/assets/img/, which change as the instructor checks and promotes images: this passes before and after the check.
+describe('images.H1 / images.I1 / images.J1 (Task 25, spec §10.3)', () => {
+  const CARDS_AND_FLAGS = [['H1', 'images.H1'], ['I1', 'images.I1'], ['J1', 'images.J1']] as const;
+  const before = { placement: 'before' } as const;
+  for (const [id, flag] of CARDS_AND_FLAGS) {
+    const tiles = CARDS[id].tiles ?? [];
+    it(`${flag} false: ${id} shows its captions as text and no <img>, even with every image checked and bundled`, () => {
+      expect(tiles.length, 'a card with no tiles would pass these tests for nothing').toBeGreaterThanOrEqual(1);
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, false), checkedManifest(), before));
+      expect(el.querySelectorAll('img')).toHaveLength(0);
+      expect(el.querySelector('.card-tiles')?.getAttribute('data-form')).toBe('text');
+      for (const t of tiles) expect(el.textContent).toContain(t.caption);
+      expect(openOnCard(id, FIXTURE, flagSet(flag, false), checkedManifest()).querySelector('.card-credits')).toBeNull();
+    });
+    it(`${flag} true: ${id} shows one image per tile when every image is checked and bundled, with the Image credits button`, () => {
+      expect(tiles.length).toBeGreaterThanOrEqual(1);
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest(), before));
+      expect(el.querySelectorAll('img')).toHaveLength(tiles.length);
+      expect(el.querySelector('.card-tiles')?.getAttribute('data-form')).toBe('images');
+      expect([...el.querySelectorAll('figure')].map((f) => f.getAttribute('data-image'))).toEqual(tiles.map((t) => t.image));
+      expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest()).querySelector('.card-credits')).not.toBeNull();
+    });
+    it(`${flag} true: ${id} has no optional tile, so one image that is unchecked, or checked but not bundled, keeps the whole card in text form`, () => {
+      expect(tiles.every((t) => t.optional !== true), `${id}: every tile is required`).toBe(true);
+      for (const t of tiles) {
+        const unchecked = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest([t.image]), before));
+        expect(unchecked.querySelectorAll('img'), `${t.image} unchecked`).toHaveLength(0);
+        expect(unchecked.querySelector('.card-tiles')?.getAttribute('data-form'), `${t.image} unchecked`).toBe('text');
+        const unbundled = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest(), { ...before, imageUrls: fakeUrls([t.image]) }));
+        expect(unbundled.querySelectorAll('img'), `${t.image} not bundled`).toHaveLength(0);
+        for (const u of [unchecked, unbundled]) for (const tile of tiles) expect(u.textContent).toContain(tile.caption);
+        expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest([t.image])).querySelector('.card-credits'), `${t.image} unchecked`).toBeNull();
+      }
+    });
+    // Runs for the cards whose files are bundled: J1's drawing now, H1 and I1 once the instructor's check has been followed by npm run
+    // promote-assets (skipped until then, by design).
+    it.runIf(tiles.every((t) => BUNDLED_IMAGES[t.image] !== undefined))(`${id}: the bundled files are inlined data: URLs`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest(), { ...before, imageUrls: BUNDLED_IMAGES }));
+      const srcs = [...el.querySelectorAll('img')].map((img) => img.getAttribute('src') ?? '');
+      expect(srcs).toHaveLength(tiles.length);
+      for (const s of srcs) expect(s).toMatch(id === 'J1' ? /^data:image\/svg\+xml/ : /^data:image\/jpeg;base64,/);
+    });
+  }
+  it('each flag is its own: with only images.H1 on, I1 and J1 stay in text form, and the other way round', () => {
+    for (const [on, flag] of CARDS_AND_FLAGS) {
+      const only = flagSet(flag, true, ALL_OFF);
+      for (const [id] of CARDS_AND_FLAGS) {
+        const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, only, checkedManifest(), before));
+        expect(el.querySelectorAll('img'), `${id} with only ${on} on`).toHaveLength(id === on ? (CARDS[id].tiles ?? []).length : 0);
+      }
+    }
+  });
 });
