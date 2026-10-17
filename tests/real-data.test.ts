@@ -4,11 +4,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { CARDS, cardVars, distributionRows, formatCopies, SAMPLE_CARD_VARS } from '../src/cards';
 import { revealNote, traitCaption } from '../src/content';
 import { validateData } from '../src/data';
 import { zoomFactor } from '../src/plotState';
 import { steppePct } from '../src/plots/admixture';
-import { GENE_IDS, TRAIT_MAP_ORDER } from '../src/types';
+import { GENE_IDS, TRAIT_MAP_ORDER, type GeneId } from '../src/types';
 import { ruleViolations } from './contentRules';
 
 const REAL = fileURLToPath(new URL('../src/data/workshop_data.json', import.meta.url));
@@ -138,5 +139,77 @@ describe.runIf(process.env.REAL_DATA === '1')('real workshop_data.json: v3 plot 
   it('zoomFactor is 5 (frames unchanged by the Today frame change, RF2)', () => {
     const d = validateData(JSON.parse(readFileSync(REAL, 'utf8')));
     expect(zoomFactor(d)).toBe(5);
+  });
+});
+
+// ---------- v3 (Task 10): the cards read their numbers from this file ----------
+/** Spec §3.4 value lists, label and display, in screen order. */
+const SPEC_ROWS: Record<GeneId, [string, string][]> = {
+  LCT: [['Ireland', '96'], ['Norway', '84'], ['United Kingdom', '75'], ['Sweden', '73'], ['Netherlands', '68'], ['Finland', '58'],
+    ['France', '58'], ['Germany', '52'], ['Estonia', '51'], ['Hungary', '46'], ['Portugal', '39'], ['Spain', '38'], ['Poland', '37'],
+    ['Russia', '32'], ['Romania', '29'], ['North Macedonia', '24'], ['Belarus', '23'], ['Ukraine', '23'], ['Italy', '18'], ['Greece', '11']],
+  SLC45A2: [['Britain', '98'], ['Tuscany', '97'], ['Finland', '96'], ['Spain', '82'], ['Middle East', '47'], ['Pakistan', '6'],
+    ['Bangladesh', '4'], ['China', '1'], ['Kenya', '1'], ['Japan', '0'], ['Nigeria', '0']],
+  HERC2: [['Finland', '91'], ['Britain', '82'], ['Tuscany', '42'], ['Spain', '32'], ['Middle East', '21'], ['Pakistan', '10'],
+    ['Bangladesh', '10'], ['China', '0'], ['Japan', '0'], ['Nigeria', '0'], ['Kenya', '0']],
+  // O1 (settled): the build writes the 1000 Genomes Britain value as 5 of 182 copies = 0.02747, so it shows 2.7, as in spec K2.
+  TYK2: [['Europe (large sample)', '4.4'], ['Spain', '3.3'], ['Middle East', '3.1'], ['Finland', '2.9'], ['Tuscany', '2.8'],
+    ['Britain', '2.7'], ['China', '0.0'], ['Japan', '0.0'], ['Nigeria', '0.0'], ['Kenya', '0.0']],
+  'HLA-DQ2': [['Spain', '25'], ['Europe (large sample)', '22'], ['Tuscany', '21'], ['Britain', '16'], ['Finland', '9']],
+};
+
+describe.runIf(process.env.REAL_DATA === '1')('cards on the real data (Task 10)', () => {
+  const data = () => validateData(JSON.parse(readFileSync(REAL, 'utf8')));
+
+  it('E3 and F1 templates: about 5× zoom, 5× as many, 371 against 77, 17 Roman-group people', () => {
+    const d = data();
+    expect(cardVars(d)).toMatchObject({ zoom: '5', ratio: '5', n_IronAge: '371', n_BellBeaker: '77', n_Roman: '17' });
+    expect(cardVars(d).zoom).toBe(String(zoomFactor(d)));   // RF2: the card's number is the plot's number
+  });
+
+  it('A1 source numbers come from the Europe fit (26 groups, 716 people, after the TSI override) and equal SAMPLE_CARD_VARS', () => {
+    const d = data();
+    expect(d.europe_fit).toMatchObject({ n_pops: 26, n_people: 716, r_lat: 0.8868, r_lon: 0.8298 });
+    expect(cardVars(d)).toMatchObject({ n_pops: '26', n_people: '716' });
+    expect(cardVars(d)).toEqual(SAMPLE_CARD_VARS);   // the numbers allRenderableStrings() scans are the real build's
+  });
+
+  it('A1 map labels (open check 14): the eight labelled groups, no "Tuscan" among them, every label passes the rules', () => {
+    const labelled = data().europe_pops!.filter((p) => p.map_label).map((p) => p.label);
+    expect([...labelled].sort()).toEqual(
+      ['Czech', 'Estonian', 'Hungarian', 'Lithuanian', 'Romanian', 'Serbian', 'Sicilian', 'South Italian'],
+    );
+    for (const label of labelled) expect(ruleViolations(label), label).toEqual([]);
+  });
+
+  it.each(Object.keys(SPEC_ROWS) as GeneId[])('%s distribution rows equal spec §3.4 after rounding', (gene) => {
+    expect(distributionRows(data(), gene).map((r) => [r.label, r.display])).toEqual(SPEC_ROWS[gene]);
+  });
+
+  it('every card value equals its trait_maps value after rounding, and only rows in trait_maps are shown', () => {
+    const d = data();
+    for (const card of Object.values(CARDS)) {
+      if (!card.values) continue;
+      const rows = distributionRows(d, card.values);
+      expect(rows).toHaveLength(d.trait_maps[card.values].length);
+      for (const r of rows) {
+        const src = d.trait_maps[card.values].find((x) => x.label_key === r.key)!;
+        expect(r.display).toBe(formatCopies(card.values, src.value));
+      }
+    }
+  });
+
+  it('H2 prints the UK 75 and "about 94 adults in 100", and both follow from the UK row (one copy is enough)', () => {
+    const uk = data().trait_maps.LCT.find((r) => r.label_key === 'country:UK')!;
+    expect(formatCopies('LCT', uk.value)).toBe('75');
+    expect(Math.round(100 * (1 - (1 - uk.value) ** 2))).toBe(94);
+    expect(CARDS.H2.lines![1]).toContain('about 94 adults in 100');
+    expect(CARDS.H2.lines![2]).toContain("the UK's 75");
+  });
+
+  it('open check 15: the LCT trajectory present-day value is below the UK 0.75 (backs H2 line 3)', () => {
+    const lct = data().traits.find((t) => t.gene === 'LCT')!;
+    expect(lct.present_day).not.toBeNull();
+    expect(lct.present_day!).toBeLessThan(0.75);
   });
 });

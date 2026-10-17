@@ -3,7 +3,11 @@
 import * as self from './content';
 import type { AxisTick, ChipIcon, ChipKey, ConsumerShare, GeneId, MapGroupId, PeriodId, SourceId, Trait } from './types';
 import { GENE_IDS, MAP_GROUP_IDS } from './types';
+import { CARDS, cardStrings, fillCard, SAMPLE_CARD_VARS } from './cards';
+import { IRELAND_FOOTNOTE, MAP_SOURCE_SUFFIX, SILVA_2026_SHOWN, TRAIT_MAP_LABELS } from './sharedText';
 import { ALL_OFF, ALL_ON, FEATURES, type Features } from './features';
+// Re-exported so every contract name is importable from content.ts and scanned by allRenderableStrings() (CONTRACT §4.1).
+export { IRELAND_FOOTNOTE, MAP_SOURCE_SUFFIX, SILVA_2026_SHOWN, TRAIT_MAP_LABELS };
 
 export const APP_TITLE = 'Ancient DNA of Britain';
 export const PAGES_URL = 'https://mpwilliams-lab.github.io/ancient-dna-workshop/';
@@ -58,9 +62,6 @@ export const NORTH_SEA_LABEL = 'North Sea coast (early medieval)';
 export function withN(label: string, n: number): string {
   return `${label} (n = ${n})`;
 }
-
-/** Open check 1 (spec v3 §11) passed: Silva et al. 2026 is shown. false selects every §3.3 fallback string. */
-export const SILVA_2026_SHOWN: boolean = true;
 
 // ---- Hook and today's map (spec §3) ----
 export const ME_HEADING = 'Example customer (made up for this demo, not a real person)';
@@ -312,6 +313,10 @@ export function allRenderableStrings(): string[] {
   out.push(mapAxesLine(950), axesLine(950), europeProjectingLine(MAP_GROUP_IDS.map((id) => MAP_GROUP_LABELS[id])));
   out.push(...helpLines(ALL_ON), ...helpLines(ALL_OFF));
   out.push(...SHELL_STRINGS);
+  // Every card string (spec §5.1, CONTRACT §4.1), with {…} templates filled with the current build's numbers.
+  for (const card of Object.values(CARDS)) {
+    for (const s of cardStrings(card)) out.push(fillCard(s, SAMPLE_CARD_VARS));
+  }
   return out;
 }
 

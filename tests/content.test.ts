@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { CARDS, cardStrings, fillCard, SAMPLE_CARD_VARS } from '../src/cards';
 import * as C from '../src/content';
 import { PARSER_GENE_ORDER, PARSER_PCA_ORDER, parse } from '../src/parser';
+import * as Shared from '../src/sharedText';
 import type { Trait, TraitPoint } from '../src/types';
 import { ALLOWED_AGE_PHRASES, ruleViolations } from './contentRules';
 import { cloneFixture, FIXTURE } from './fixtures/fixture';
@@ -463,5 +465,20 @@ describe('help(): the run_pca entry (v3 §3.5, Task 4)', () => {
       '      BronzeAge, IronAge, Roman, AngloSaxon, Viking,',
       '      Today or all',
     ]);
+  });
+});
+
+describe('cards and trait-map labels are scanned with the rest (Task 10, spec §5.1)', () => {
+  it('allRenderableStrings() holds every card string, templates filled with the current build numbers', () => {
+    for (const card of Object.values(CARDS)) {
+      for (const s of cardStrings(card)) expect(ALL).toContain(fillCard(s, SAMPLE_CARD_VARS));
+    }
+  });
+  it('re-exports the leaf-module values, and they are scanned', () => {
+    expect(C.TRAIT_MAP_LABELS).toBe(Shared.TRAIT_MAP_LABELS);
+    expect(C.IRELAND_FOOTNOTE).toBe('Ireland: small sample.');
+    expect(C.MAP_SOURCE_SUFFIX).toBe('Map outline: Made with Natural Earth.');
+    expect(C.SILVA_2026_SHOWN).toBe(Shared.SILVA_2026_SHOWN);
+    for (const s of [C.IRELAND_FOOTNOTE, C.MAP_SOURCE_SUFFIX, ...Object.values(C.TRAIT_MAP_LABELS)]) expect(ALL).toContain(s);
   });
 });
