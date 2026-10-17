@@ -423,11 +423,17 @@ body {
 
 #card .value-row {
   display: grid;
-  grid-template-columns: minmax(6.5em, 9.5em) minmax(3em, 1fr) 2.6em;
+  grid-template-columns: minmax(6.5em, 12em) minmax(3em, 1fr) 2.6em;
   align-items: center;
   gap: 0.5em;
   padding: 0.06em 0;
   break-inside: avoid;
+}
+
+/* "Europe (large sample)" needs about 10em on one line, so the label column may grow to 12em. The long two-column LCT list
+   has no label wider than 8em: it keeps the narrower label column and so longer bars. */
+#card .card-values[data-long] .value-row {
+  grid-template-columns: minmax(6.5em, 9.5em) minmax(3em, 1fr) 2.6em;
 }
 
 #card .value-bar {

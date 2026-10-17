@@ -177,4 +177,8 @@ describe('card overlay (spec §5.2, CONTRACT §4.11)', () => {
     expect(rule('#card .card-tile img')['max-height']).toBe('min(26vh, 230px)');
     expect(rule('#card .card-map')['max-height']).toBe('min(52vh, 460px)');
   });
+  it('gives the value labels room for "Europe (large sample)" on one line (label column up to 12em), but not in the long two-column list, which keeps its longer bars', () => {
+    expect(rule('#card .value-row')['grid-template-columns']).toBe('minmax(6.5em, 12em) minmax(3em, 1fr) 2.6em');
+    expect(rule('#card .card-values[data-long] .value-row')['grid-template-columns']).toBe('minmax(6.5em, 9.5em) minmax(3em, 1fr) 2.6em');
+  });
 });

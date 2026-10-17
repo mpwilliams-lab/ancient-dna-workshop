@@ -126,6 +126,14 @@ describe('distribution cards: P1 value bars (spec §3.4)', () => {
     );
     expect(list.hasAttribute('data-long')).toBe(rows.length > LONG_VALUE_LIST);
   });
+  it.each(GENE_IDS)('%s: a screen reader gets one "label: number" per row, and the bar (a picture of the same number) is hidden from it', (gene) => {
+    const id = CARD_IDS.find((c) => CARDS[c].values === gene)!;
+    const rows = distributionRows(FIXTURE, gene);
+    const items = [...body(id).querySelectorAll(`.card-values[data-gene="${gene}"] li.value-row`)];
+    expect(items).toHaveLength(rows.length);
+    expect(items.map((li) => li.getAttribute('aria-label'))).toEqual(rows.map((r) => `${r.label}: ${r.display}`));
+    for (const li of items) expect(li.querySelector('.value-bar')!.getAttribute('aria-hidden'), li.getAttribute('data-key') ?? '').toBe('true');
+  });
   it('bar fractions: copies per 100 over the scale, TYK2 on 0-15, clamped to 0..1', () => {
     expect(barFraction(0.75, 100)).toBe(0.75);
     expect(barFraction(0.044, 15)).toBe(0.293);
@@ -430,6 +438,69 @@ describe('mountCardView: isolation and geometry', () => {
     hintTop = 720;
     document.defaultView!.dispatchEvent(new Event('resize'));
     expect(root().style.getPropertyValue('--card-bottom')).toBe('48px');
+  });
+  it('finds the hint line when the terminal is mounted after the view (the shell mounts the card view first) and observes it from the first open', () => {
+    const observed: Element[] = [];
+    let hintChanged: () => void = () => undefined;
+    (document.defaultView as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      constructor(cb: () => void) {
+        hintChanged = cb;
+      }
+      observe(e: Element): void {
+        observed.push(e);
+      }
+      disconnect(): void {}
+    };
+    document.getElementById('panes')!.getBoundingClientRect = () => ({ bottom: 768 }) as DOMRect;
+    const v = mountCardView(root(), FIXTURE, NOOP_HANDLERS, ALL_OFF);   // #terminal is still empty: there is no hint line yet
+    expect(observed).toHaveLength(0);
+    const hint = document.createElement('div');                         // mountTerminal runs after the view is mounted
+    hint.className = 'term-hint';
+    document.getElementById('terminal')!.append(hint);
+    let hintTop = 700;
+    hint.getBoundingClientRect = () => ({ top: hintTop }) as DOMRect;
+    v.open('E1', 0, 1, 'after');                                        // the controller opens the card first ...
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toBe(hint);
+    expect(root().style.getPropertyValue('--card-bottom')).toBe('68px');
+    hintTop = 650;                                                      // ... and then setHint(CARD_HINT) makes the hint wrap
+    hintChanged();
+    expect(root().style.getPropertyValue('--card-bottom')).toBe('118px');
+  });
+  it('moves its observer to a new hint line element (the terminal is mounted again) and does not re-observe the same one', () => {
+    const observed: Element[] = [];
+    const watching = new Set<Element>();
+    (document.defaultView as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      observe(e: Element): void {
+        observed.push(e);
+        watching.add(e);
+      }
+      disconnect(): void {
+        watching.clear();
+      }
+    };
+    document.getElementById('panes')!.getBoundingClientRect = () => ({ bottom: 768 }) as DOMRect;
+    const hintAt = (top: number): HTMLElement => {
+      const h = document.createElement('div');
+      h.className = 'term-hint';
+      h.getBoundingClientRect = () => ({ top }) as DOMRect;
+      return h;
+    };
+    const first = hintAt(700);
+    document.getElementById('terminal')!.append(first);
+    const v = mountCardView(root(), FIXTURE, NOOP_HANDLERS, ALL_OFF);
+    expect(watching.size).toBe(1);                                      // the mount-time lookup is kept
+    expect(watching.has(first)).toBe(true);
+    v.open('E1', 0, 2, 'after');
+    v.open('E2', 1, 2, 'after');
+    expect(observed).toHaveLength(1);                                   // the same element is observed once, not once per open
+    const second = hintAt(650);
+    first.replaceWith(second);
+    v.open('E3', 0, 1, 'after');
+    expect(watching.size).toBe(1);                                      // the observer left the old element for the new one
+    expect(watching.has(second)).toBe(true);
+    expect(observed).toHaveLength(2);
+    expect(root().style.getPropertyValue('--card-bottom')).toBe('118px');
   });
 });
 

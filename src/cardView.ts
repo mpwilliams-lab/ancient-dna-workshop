@@ -219,13 +219,29 @@ export function mountCardView(root: HTMLElement, data: WorkshopData, handlers: C
   root.hidden = true;
   let current: CardId | null = null;
 
+  const hintLine = (): HTMLElement | null => doc.querySelector<HTMLElement>('#terminal .term-hint');
+
   /** Below 1100 px the card ends where the hint line starts, so the hint, the prompt row and the header stay usable.
    *  Without a hint line (a bare page, no terminal mounted) the card runs to the bottom of #panes. */
   const place = (): void => {
     const panes = root.parentElement;
-    const hint = doc.querySelector<HTMLElement>('#terminal .term-hint');
+    const hint = hintLine();
     const gap = panes && hint ? Math.max(0, Math.ceil(panes.getBoundingClientRect().bottom - hint.getBoundingClientRect().top)) : 0;
     root.style.setProperty('--card-bottom', `${gap}px`);
+  };
+
+  // The hint line changes height when it switches to CARD_HINT and back, and the controller does that right after it opens a
+  // card, so the card's bottom edge has to follow it. The shell mounts this view BEFORE the terminal (Task 12), so the hint
+  // line may not exist yet: it is looked up again on every open, and the observer moves to it.
+  const RO = doc.defaultView?.ResizeObserver;   // absent in jsdom: then only window resizes refit
+  const ro = RO ? new RO(() => view.refit()) : null;
+  let observed: HTMLElement | null = null;
+  const observeHint = (): void => {
+    const hint = hintLine();
+    if (ro === null || hint === observed) return;
+    if (observed !== null) ro.disconnect();
+    observed = hint;
+    if (hint !== null) ro.observe(hint);
   };
 
   const view: CardView = {
@@ -237,6 +253,7 @@ export function mountCardView(root: HTMLElement, data: WorkshopData, handlers: C
       root.setAttribute('data-card-id', id);
       current = id;
       root.hidden = false;
+      observeHint();
       place();
       fitCard(root);
     },
@@ -258,9 +275,6 @@ export function mountCardView(root: HTMLElement, data: WorkshopData, handlers: C
   };
 
   doc.defaultView?.addEventListener('resize', () => view.refit());
-  // The hint line changes height when it switches to CARD_HINT and back; keep the card's bottom edge on it.
-  const hint = doc.querySelector<HTMLElement>('#terminal .term-hint');
-  const RO = doc.defaultView?.ResizeObserver;   // absent in jsdom: then only window resizes refit
-  if (hint && RO) new RO(() => view.refit()).observe(hint);
+  observeHint();
   return view;
 }
