@@ -12,7 +12,7 @@ import {
   ROMAN_FOCUS_CAPTION, zoomNote,
 } from '../src/content';
 import {
-  INITIAL_PLOT, admixBars, admixCallout, layerOpacity, pcaCaptions, reducePlot, todayShown, zoomFactor,
+  INITIAL_PLOT, admixBars, admixCallout, layerOpacity, pcaCaptions, reducePlot, steppePct, todayShown, zoomFactor,
   type PcaCaptionItem, type PlotState,
 } from '../src/plotState';
 
@@ -283,6 +283,40 @@ describe('ADMIXTURE bars and callout (spec v3 §2.3)', () => {
     expect(admixCallout(run([pca('IronAge'), adm()]), data)).toEqual({ kind: 'beaker' });
     expect(admixCallout(run([pca('all'), adm()]), data)).toMatchObject({ kind: 'reveal' });
     expect(admixCallout(INITIAL_PLOT, data)).toEqual({ kind: 'beaker' });
+  });
+  it('admixCallout: falls back to the Beaker callout, and never throws, when the JSON lacks the Today bar or the Iron Age bar', () => {
+    const s = guidedUpTo('revealAdmix');
+    expect(s.admixShown).toEqual(expect.arrayContaining(['Today', 'IronAge']));
+    expect(admixCallout(s, data).kind).toBe('reveal'); // the complete data, for contrast
+    for (const missing of ['Today', 'IronAge'] as PeriodId[]) {
+      const d: WorkshopData = { ...data, admixture: { ...data.admixture, bars: data.admixture.bars.filter((b) => b.period !== missing) } };
+      expect(() => admixCallout(s, d), missing).not.toThrow();
+      expect(admixCallout(s, d), missing).toEqual({ kind: 'beaker' });
+    }
+    expect(admixCallout(s, { ...data, admixture: { ...data.admixture, bars: [] } })).toEqual({ kind: 'beaker' });
+  });
+  it('admixCallout: "among the bars" means the bars drawn (admixShown); the layers decide only while nothing has been drawn', () => {
+    const base: PlotState = { ...INITIAL_PLOT, view: 'admixture' };
+    expect(admixCallout({ ...base, admixShown: ['IronAge', 'Today'] }, data).kind).toBe('reveal');                          // no layers at all
+    expect(admixCallout({ ...base, admixShown: ['IronAge'], layers: ['IronAge', 'Today'] }, data).kind).toBe('beaker');     // layers ahead of the bars
+    expect(admixCallout({ ...base, admixShown: [], layers: ['IronAge', 'Today'] }, data).kind).toBe('reveal');              // nothing drawn yet
+  });
+  it('steppePct: whole percent, rounded half up; admixCallout reads the two steppe numbers through it (one rounding rule)', () => {
+    expect([0, 0.004, 0.005, 0.4951, 0.5, 0.5651, 0.556, 0.571, 1].map((STEPPE) => steppePct({ STEPPE, FARMER: 0, WHG: 0 })))
+      .toEqual([0, 0, 1, 50, 50, 57, 56, 57, 100]);
+    const edge: WorkshopData = {
+      ...data,
+      admixture: {
+        ...data.admixture,
+        bars: data.admixture.bars.map((b) =>
+          b.period === 'Today' ? { ...b, STEPPE: 0.4951 } : b.period === 'IronAge' ? { ...b, STEPPE: 0.5651 } : b),
+      },
+    };
+    const bar = (id: PeriodId) => edge.admixture.bars.find((b) => b.period === id)!;
+    expect(admixCallout(guidedUpTo('revealAdmix'), edge)).toEqual({
+      kind: 'reveal', todaySteppe: steppePct(bar('Today')), ironSteppe: steppePct(bar('IronAge')),
+    });
+    expect([steppePct(bar('Today')), steppePct(bar('IronAge'))]).toEqual([50, 57]);
   });
   it('a trait keeps the layers and records the gene', () => {
     const s = run([pca('Today'), { kind: 'trait', gene: 'HERC2' }]);

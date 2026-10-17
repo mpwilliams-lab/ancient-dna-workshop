@@ -154,6 +154,7 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState, 
   svg.setAttribute('data-frame', p.frame);
   if (p.focus !== undefined) svg.setAttribute('data-focus', p.focus);
   else svg.removeAttribute('data-focus');
+  svg.removeAttribute('data-callout'); // an ADMIXTURE marker: the bars may have used this svg just before
   svg.replaceChildren();
 
   const defs = svgEl('defs');

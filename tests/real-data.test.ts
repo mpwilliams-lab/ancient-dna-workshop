@@ -4,9 +4,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { traitCaption } from '../src/content';
+import { revealNote, traitCaption } from '../src/content';
 import { validateData } from '../src/data';
 import { zoomFactor } from '../src/plotState';
+import { steppePct } from '../src/plots/admixture';
 import { GENE_IDS, TRAIT_MAP_ORDER } from '../src/types';
 import { ruleViolations } from './contentRules';
 
@@ -107,6 +108,28 @@ describe.runIf(process.env.REAL_DATA === '1')('real workshop_data.json', () => {
       'trait_ticks', 'logs', 'trait_maps', 'spread_check'];
     expect(keys.slice(0, base.length)).toEqual(base);
     expect(keys.slice(base.length)).toEqual(keys.includes('europe_pops') ? ['europe_pops', 'europe_fit'] : []);
+  });
+
+  // ---- reveal callout and note (Task 9; spec §3.3, review S24) ----
+  it('the Iron Age bar is the closest of all seven ancient periods to Britain today (three-share distance)', () => {
+    const bars = validateData(raw()).admixture.bars;
+    const today = bars.find((b) => b.period === 'Today')!;
+    const dist = (b: (typeof bars)[number]) =>
+      Math.hypot(b.STEPPE - today.STEPPE, b.FARMER - today.FARMER, b.WHG - today.WHG);
+    const ranked = bars.filter((b) => b.period !== 'Today').map((b) => ({ id: b.period, d: dist(b) })).sort((a, b) => a.d - b.d);
+    expect(ranked).toHaveLength(7);
+    expect(ranked[0]!.id).toBe('IronAge');
+    expect(ranked[0]!.d).toBeCloseTo(0.020, 3);
+    expect(ranked[1]!.id).toBe('Viking');
+    expect(ranked[1]!.d).toBeCloseTo(0.0275, 3);
+  });
+
+  it('the reveal note reads 56% for Britain today and 57% for the Iron Age on this build', () => {
+    const bars = validateData(raw()).admixture.bars;
+    const pct = (id: string) => steppePct(bars.find((b) => b.period === id)!);
+    expect([pct('Today'), pct('IronAge')]).toEqual([56, 57]);
+    expect(revealNote(pct('Today'), pct('IronAge'))).toBe(
+      'Britain today: 56% steppe. Iron Age: 57% steppe. Of all the periods, the Iron Age bar is the closest match.');
   });
 });
 

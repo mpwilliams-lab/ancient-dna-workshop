@@ -105,3 +105,11 @@
   width: 1.15em;
   height: 1.15em;
 }
+
+/* HLA-DQ2 reveal line (spec §3.4 L-reveal): a second caption line under the rule 6 caption. */
+.traj-reveal {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  font-style: italic;
+}

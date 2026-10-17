@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { SCRIPT } from '../src/hints';
+import { SCRIPT, SCRIPT_STEPS } from '../src/hints';
 import { formatCommand, PARSE_TEXT } from '../src/parser';
-import { BEAKER_CALLOUT, EAST_ENGLAND_LEGEND, HLA_TEXT_CARD, PERIOD_LABELS, ROMAN_LOG_LINE } from '../src/content';
+import {
+  BEAKER_CALLOUT, EAST_ENGLAND_LEGEND, HLA_REVEAL_LINE, HLA_TEXT_CARD, PERIOD_LABELS, REVEAL_CALLOUT, ROMAN_LOG_LINE,
+  revealNote, steppePctLabel,
+} from '../src/content';
 import { centreOf, DATA, freshStart, hintIndex, idle, plotSettled, run, screenViolations, watch } from './helpers';
 
 test('the full guided script runs over file:// with zero network requests and no page errors', async ({ page }) => {
@@ -31,8 +34,29 @@ test('the full guided script runs over file:// with zero network requests and no
     expect(await screenViolations(page), `after ${cmd}`).toEqual([]);
 
     if (step.name === 'run_admixture') {
-      // Spec v3 §3.2 rule 3: the plain Beaker callout is on screen and the v2.1 bridge line is gone.
-      await expect(page.locator('#plot .admix-callout')).toHaveText(BEAKER_CALLOUT);
+      // Spec v3 §2.3, §3.2, §3.3. The first run (admix1) draws only First farmers / Stonehenge builders and Bell Beaker under
+      // the plain Beaker callout: Britain today has not been mapped yet. The run after Britain today and the Iron Age are
+      // both mapped (revealAdmix) swaps in the reveal callout and a note whose two numbers are the whole percents the bar
+      // labels show, read here from this build's JSON. The v2.1 bridge line is gone in both.
+      const stepId = SCRIPT_STEPS[i]!.id;
+      const pct = (id: string) => Math.round(DATA.admixture.bars.find((b) => b.period === id)!.STEPPE * 100);
+      const labels = page.locator('#plot g.period-bar .bar-label');
+      const pcts = page.locator('#plot g.period-bar .steppe-pct');
+      if (stepId === 'admix1') {
+        await expect(page.locator('#plot svg.plot-svg')).toHaveAttribute('data-callout', 'beaker');
+        await expect(page.locator('#plot .admix-callout')).toHaveText(BEAKER_CALLOUT);
+        await expect(page.locator('#plot .admix-reveal-note')).toHaveCount(0);
+        await expect(labels).toHaveText([PERIOD_LABELS.FirstFarmers, PERIOD_LABELS.BellBeaker]);
+      } else {
+        expect(stepId).toBe('revealAdmix');
+        await expect(page.locator('#plot svg.plot-svg')).toHaveAttribute('data-callout', 'reveal');
+        await expect(page.locator('#plot .admix-callout')).toHaveText(REVEAL_CALLOUT);
+        await expect(page.locator('#plot .admix-reveal-note')).toHaveText(revealNote(pct('Today'), pct('IronAge')));
+        await expect(labels).toHaveText(
+          (['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Today'] as const).map((id) => PERIOD_LABELS[id]));
+        await expect(pcts).toHaveText(
+          (['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Today'] as const).map((id) => steppePctLabel(pct(id))));
+      }
       await expect(page.locator('#plot .admix-bridge')).toHaveCount(0);
       expect((await page.locator('body').textContent()) ?? '').not.toMatch(/rises to \d+%, not 90%/);
     }
@@ -59,6 +83,9 @@ test('the full guided script runs over file:// with zero network requests and no
     if (step.name === 'allele_freq') {
       const trait = DATA.traits.find((t) => t.gene === step.gene)!;
       const plot = page.locator('#plot');
+      // Spec v3 §3.4 L-reveal: the HLA-DQ2 line sits under a drawn HLA trajectory only, never on the text card or elsewhere.
+      await expect(plot.locator('.traj-reveal')).toHaveCount(step.gene === 'HLA-DQ2' && trait.source !== 'text' ? 1 : 0);
+      if (step.gene === 'HLA-DQ2' && trait.source !== 'text') await expect(plot.locator('.traj-reveal')).toHaveText(HLA_REVEAL_LINE);
       if (trait.source === 'text') {
         await expect(plot).toContainText(HLA_TEXT_CARD);
       } else {

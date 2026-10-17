@@ -1,6 +1,6 @@
 // Plot state for the v3 script (spec v3 §2.3, CONTRACT §4.5). Pure: no DOM. The renderers (Tasks 8, 9) draw from the
 // state and the helpers below; replay (Task 6) rebuilds the state by running reducePlot over the command log.
-import type { ChipIcon, ChipKey, FrameId, GeneId, PeriodId, WorkshopData } from './types';
+import type { AdmixShares, ChipIcon, ChipKey, FrameId, GeneId, PeriodId, WorkshopData } from './types';
 import { GENE_IDS, PERIOD_FRAME } from './types';
 import type { PlotAction } from './commands';
 import {
@@ -151,12 +151,22 @@ export function admixBars(p: PlotState): PeriodId[] {
   return p.layers.length > 0 ? [...p.layers] : [...DEFAULT_BARS];
 }
 
+/**
+ * Whole-percent steppe share of a bar (or a person), as printed on screen. The one rounding rule: the "{pct}% steppe"
+ * bar labels, the reveal note and admixCallout all read it, so the note cannot disagree with the bars. plots/admixture.ts
+ * re-exports it.
+ */
+export function steppePct(s: AdmixShares): number {
+  return Math.round(s.STEPPE * 100);
+}
+
 export type AdmixCallout = { kind: 'beaker' } | { kind: 'reveal'; todaySteppe: number; ironSteppe: number } | { kind: 'none' };
 
 /**
  * Which callout the ADMIXTURE view shows (spec v3 §2.3, §3.3): none for the per-person view; the reveal callout and note
- * when Britain today and the Iron Age are both among the bars; otherwise the Beaker callout. The two steppe numbers are
- * whole percents of data.admixture.bars (56 and 57 on the current build).
+ * when Britain today and the Iron Age are both among the bars; otherwise the Beaker callout, which is also the fallback
+ * when the JSON lacks the Britain today bar or the Iron Age bar. The two steppe numbers are steppePct of
+ * data.admixture.bars (56 and 57 on the current build).
  */
 export function admixCallout(p: PlotState, data: WorkshopData): AdmixCallout {
   if (p.admixPeriod !== undefined) return { kind: 'none' };
@@ -164,9 +174,7 @@ export function admixCallout(p: PlotState, data: WorkshopData): AdmixCallout {
   if (bars.includes('Today') && bars.includes('IronAge')) {
     const today = data.admixture.bars.find((b) => b.period === 'Today');
     const iron = data.admixture.bars.find((b) => b.period === 'IronAge');
-    if (today && iron) {
-      return { kind: 'reveal', todaySteppe: Math.round(today.STEPPE * 100), ironSteppe: Math.round(iron.STEPPE * 100) };
-    }
+    if (today && iron) return { kind: 'reveal', todaySteppe: steppePct(today), ironSteppe: steppePct(iron) };
   }
   return { kind: 'beaker' };
 }

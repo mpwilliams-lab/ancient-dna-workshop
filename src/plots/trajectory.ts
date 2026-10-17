@@ -1,6 +1,6 @@
 import type { AxisTick, GeneId, Trait, TraitPoint, WorkshopData } from '../types';
 import {
-  GENE_TRAIT_LABELS, HLA_TEXT_CARD, LOCAL_ANGLO_SAXON_POINT_LABEL, PERIOD_LABELS, TICK_LABELS, TRAIT_Y_LABEL,
+  GENE_TRAIT_LABELS, HLA_REVEAL_LINE, HLA_TEXT_CARD, LOCAL_ANGLO_SAXON_POINT_LABEL, PERIOD_LABELS, TICK_LABELS, TRAIT_Y_LABEL,
   countNote, traitCaption, traitSourceLabel,
 } from '../content';
 import { INK, OKABE_ITO, f1, svgEl, textBlock } from './svg';
@@ -137,6 +137,9 @@ export function renderTrajectory(host: HTMLElement, data: WorkshopData, gene: Ge
   else drawLocal(svg, trait, pts, sc);
   wrap.append(svg);
   wrap.append(el('p', 'traj-caption', traitCaption(trait)));
+  // Spec §3.4 L-reveal: a second caption line under the HLA-DQ2 trajectory (the rule 6 caption above it is unchanged).
+  // Only a drawn trajectory gets it: the text card above returns before this point.
+  if (gene === 'HLA-DQ2') wrap.append(el('p', 'traj-reveal', HLA_REVEAL_LINE));
   wrap.append(el('p', 'traj-source', traitSourceLabel(trait)));
   host.append(wrap);
 }

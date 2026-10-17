@@ -4,7 +4,7 @@ import fixture from './fixtures/data.fixture.json';
 import type { GeneId, PeriodId, WorkshopData } from '../src/types';
 import type { PlotAction } from '../src/commands';
 import type { PcaPeriod } from '../src/parser';
-import { INITIAL_PLOT, pcaCaptions, reducePlot, type PcaCaptionItem, type PlotState } from '../src/plotState';
+import { INITIAL_PLOT, admixCallout, pcaCaptions, reducePlot, type PcaCaptionItem, type PlotState } from '../src/plotState';
 import { finishPlotAnimations, plotIsAnimating, renderPlot } from '../src/plots/index';
 import {
   CHIP_TEXT, EUROPE_CAPTION, FINALE_CAPTION, PCA_CAPTION, PLOT_EMPTY, REVEAL_PCA_CAPTION, ROMAN_FOCUS_CAPTION,
@@ -49,6 +49,7 @@ function checkRendered(h: HTMLElement, s: PlotState, d: WorkshopData): void {
       .toEqual(['svg', 'captions']);
     const svg = h.querySelector('svg.plot-svg')!;
     expect(svg.getAttribute('data-frame')).toBe(s.frame);
+    expect(svg.hasAttribute('data-callout')).toBe(false); // an ADMIXTURE marker: never left over on the PCA
     const inOrder = ORDER.filter((id) => s.layers.includes(id));
     const f = inOrder.find((id) => id === s.focus);
     expect([...svg.querySelectorAll('g.layer.period')].map((g) => g.getAttribute('data-layer')))
@@ -62,6 +63,13 @@ function checkRendered(h: HTMLElement, s: PlotState, d: WorkshopData): void {
   if (s.view === 'admixture') {
     expect(h.children).toHaveLength(1); // no caption strip on the bars
     const svg = h.querySelector('svg.plot-svg')!;
+    // The PCA markers are gone, and the callout marker names the callout shown (none for the per-person view).
+    const callout = admixCallout(s, d).kind;
+    expect(svg.hasAttribute('data-frame')).toBe(false);
+    expect(svg.hasAttribute('data-focus')).toBe(false);
+    expect(svg.getAttribute('data-callout')).toBe(callout);
+    expect(svg.querySelectorAll('text.admix-callout')).toHaveLength(callout === 'none' ? 0 : 1);
+    expect(svg.querySelectorAll('text.admix-reveal-note')).toHaveLength(callout === 'reveal' ? 1 : 0);
     const people = s.admixPeriod ? d.admixture.people[s.admixPeriod] ?? [] : [];
     if (people.length > 0) {
       expect(svg.querySelectorAll('g.person-bar')).toHaveLength(people.length);
@@ -129,6 +137,29 @@ describe('renderPlot router', () => {
     expect(h.querySelector('svg.plot-svg')).toBeNull();
     expect(h.querySelector('.pca-captions')).toBeNull();
     expect(h.querySelector('.traj')).not.toBeNull();
+  });
+
+  it('on the shared svg each view sets its own aspect ratio and leaves none of the other view\'s markers behind', () => {
+    const d = data();
+    const h = host();
+    let s = reducePlot(reducePlot(INITIAL_PLOT, pca('IronAge'), d), pca('Today'), d);
+    renderPlot(h, d, s);
+    const svg = h.querySelector('svg.plot-svg')!;
+    expect(svg.getAttribute('preserveAspectRatio')).toBe('xMidYMin meet');   // the PCA is top-anchored (caption strip below it)
+    expect([svg.getAttribute('data-view'), svg.getAttribute('data-frame'), svg.getAttribute('data-focus')]).toEqual(['pca', 'britain', 'Today']);
+    expect(svg.hasAttribute('data-callout')).toBe(false);
+    s = reducePlot(s, adm(), d);
+    renderPlot(h, d, s);
+    expect(h.querySelector('svg.plot-svg')).toBe(svg);
+    expect(svg.getAttribute('preserveAspectRatio')).toBe('xMidYMid meet');   // the bars stay centred
+    expect([svg.getAttribute('data-view'), svg.getAttribute('data-callout')]).toEqual(['admixture', 'reveal']);
+    expect(svg.hasAttribute('data-frame')).toBe(false);
+    expect(svg.hasAttribute('data-focus')).toBe(false);
+    s = reducePlot(s, pca('Roman'), d);
+    renderPlot(h, d, s);
+    expect(svg.getAttribute('preserveAspectRatio')).toBe('xMidYMin meet');
+    expect([svg.getAttribute('data-view'), svg.getAttribute('data-frame'), svg.getAttribute('data-focus')]).toEqual(['pca', 'britain', 'Roman']);
+    expect(svg.hasAttribute('data-callout')).toBe(false);
   });
 
   it('never throws: a broken data object logs and shows the empty panel', () => {

@@ -4,7 +4,7 @@ import fixture from './fixtures/data.fixture.json';
 import type { AxisTick, GeneId, Trait, WorkshopData } from '../src/types';
 import { renderTrajectory, trajectoryScale } from '../src/plots/trajectory';
 import {
-  GENE_TRAIT_LABELS, HLA_TEXT_CARD, LOCAL_ANGLO_SAXON_POINT_LABEL, PERIOD_LABELS, TICK_LABELS,
+  GENE_TRAIT_LABELS, HLA_REVEAL_LINE, HLA_TEXT_CARD, LOCAL_ANGLO_SAXON_POINT_LABEL, PERIOD_LABELS, TICK_LABELS,
   countNote, traitCaption, traitSourceLabel,
 } from '../src/content';
 
@@ -157,5 +157,50 @@ describe('renderTrajectory: HLA-DQ2 text card and bad input', () => {
     const h = host();
     expect(() => renderTrajectory(h, makeData([LCT_AGES]), 'SLC45A2' as GeneId)).not.toThrow();
     expect(h.children).toHaveLength(0);
+  });
+});
+
+describe('HLA-DQ2 reveal line (spec §3.4 L-reveal)', () => {
+  const HLA_AGES: Trait = {
+    gene: 'HLA-DQ2', rsid: 'rs3891176', variant_id: '6_32634318_C_A', allele: 'A', source: 'ages', present_day: 0.2,
+    points: [{ t: 4500, f: 0.004, lo: 0.002, hi: 0.007 }, { t: 2000, f: 0.1, lo: 0.08, hi: 0.12 }, { t: 0, f: 0.2, lo: 0.18, hi: 0.22 }],
+  };
+
+  it('is the exact spec sentence', () => {
+    expect(HLA_REVEAL_LINE).toBe(
+      'One leading idea, still a hypothesis: immune versions like this helped people fight infections, ' +
+      'and coeliac disease is the price a few people pay (Zhernakova et al. 2010; Akbari et al. 2026).');
+  });
+
+  it('sits under the unchanged rule 6 caption of a drawn HLA-DQ2 trajectory, before the source line', () => {
+    const el = host();
+    renderTrajectory(el, makeData([LCT_AGES, HERC2_LOCAL, TYK2_LOCAL, HLA_AGES]), 'HLA-DQ2');
+    const kids = [...el.querySelector('.traj')!.children].map((c) => c.className);
+    expect(kids.slice(-3)).toEqual(['traj-caption', 'traj-reveal', 'traj-source']);
+    expect(el.querySelector('.traj-caption')?.textContent).toBe(traitCaption(HLA_AGES));
+    expect(el.querySelector('.traj-reveal')?.textContent).toBe(HLA_REVEAL_LINE);
+  });
+
+  it('is absent for every other gene and on the HLA text card', () => {
+    for (const gene of ['LCT', 'HERC2', 'TYK2'] as GeneId[]) {
+      const el = host();
+      renderTrajectory(el, makeData(), gene);
+      expect(el.querySelector('.traj-reveal'), gene).toBeNull();
+    }
+    const card = host();
+    renderTrajectory(card, makeData(), 'HLA-DQ2');
+    expect(card.querySelector('.hla-text')).not.toBeNull();
+    expect(card.querySelector('.traj-reveal')).toBeNull();
+  });
+
+  it('also sits under a locally computed HLA-DQ2 trajectory (the plotted source does not matter, only that a plot is drawn)', () => {
+    const local: Trait = {
+      ...HLA_AGES, source: 'local',
+      points: [{ t: 3950, f: 0.05, lo: 0.02, hi: 0.1, n: 40, period: 'BellBeaker' }, { t: -70, f: 0.16, lo: 0.1, hi: 0.23, n: 100, period: 'Today' }],
+    };
+    const el = host();
+    renderTrajectory(el, makeData([LCT_AGES, HERC2_LOCAL, TYK2_LOCAL, local]), 'HLA-DQ2');
+    expect(el.querySelector('svg.traj-svg')).not.toBeNull();
+    expect([...el.querySelector('.traj')!.children].map((c) => c.className).slice(-3)).toEqual(['traj-caption', 'traj-reveal', 'traj-source']);
   });
 });
