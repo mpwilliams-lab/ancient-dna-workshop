@@ -557,7 +557,8 @@ describe('Enter during printing (spec §4.2)', () => {
   it('flushes the running log, applies its plot, then runs the new command', async () => {
     const r = rig();
     r.term.holdPrints = true;
-    r.c.submit('run_pca(period = "Today")');
+    // v3: Britain today now uses the British frame, so a Europe-frame period keeps the frame change in this test.
+    r.c.submit('run_pca(period = "FirstFarmers")');
     expect(r.term.isPrinting()).toBe(true);
     expect(r.renders).toHaveLength(1);
     r.c.submit('run_pca(period = "IronAge")');
@@ -799,13 +800,13 @@ describe('with the real DOM terminal and fake timers', () => {
   it('Enter mid-print keeps log lines and plots in command order', async () => {
     vi.useFakeTimers();
     const w = wire();
-    type(w.input, 'run_pca(period = "Today")');
+    type(w.input, 'run_pca(period = "FirstFarmers")'); // a Europe-frame period (v3: Britain today is in the British frame)
     const printedSoFar = lines(w.out).length;
     type(w.input, 'run_pca(period = "IronAge")');
     const all = lines(w.out);
     const echoB = all.indexOf('> run_pca(period = "IronAge")');
     expect(echoB).toBeGreaterThan(printedSoFar - 1);
-    expect(all[0]).toBe('> run_pca(period = "Today")');
+    expect(all[0]).toBe('> run_pca(period = "FirstFarmers")');
     expect(w.renders).toHaveLength(2);
     expect(w.renders[1].frame).toBe('europe');
     await vi.runAllTimersAsync();

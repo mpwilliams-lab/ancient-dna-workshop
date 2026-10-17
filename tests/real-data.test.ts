@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { traitCaption } from '../src/content';
 import { validateData } from '../src/data';
+import { zoomFactor } from '../src/plotState';
 import { ruleViolations } from './contentRules';
 
 const REAL = fileURLToPath(new URL('../src/data/workshop_data.json', import.meta.url));
@@ -45,5 +46,13 @@ describe.runIf(process.env.REAL_DATA === '1')('real workshop_data.json', () => {
     expect(p.lo).toBeLessThanOrEqual(p.f);
     expect(p.f).toBeLessThanOrEqual(p.hi);
     expect(Math.round(Number((100 * p.f).toFixed(2)))).toBe(Number(m![1]));
+  });
+});
+
+// ---------- v3 (Task 5): the zoom factor the caption strip and card E3 print ----------
+describe.runIf(process.env.REAL_DATA === '1')('real workshop_data.json: v3 plot state', () => {
+  it('zoomFactor is 5 (frames unchanged by the Today frame change, RF2)', () => {
+    const d = validateData(JSON.parse(readFileSync(REAL, 'utf8')));
+    expect(zoomFactor(d)).toBe(5);
   });
 });

@@ -1,6 +1,6 @@
 import type { PeriodId } from './types';
 import { PERIOD_IDS, GENE_IDS, FRAME_IDS } from './types';
-import type { PlotState } from './plotState';
+import type { PcaFocus, PlotState } from './plotState';
 import { SCRIPT } from './hints';
 
 export interface TranscriptLine { kind: 'input' | 'output' | 'notice'; text: string }
@@ -11,7 +11,9 @@ export const SESSION_KEY = 'adna-workshop-session-v1';
 export const MAX_TRANSCRIPT = 2000;
 export const MAX_HISTORY = 200;
 
-const VIEWS: readonly PlotState['view'][] = ['none', 'pca', 'admixture', 'trait'];
+const VIEWS: readonly PlotState['view'][] = ['none', 'pca', 'admixture', 'trait', 'consumer'];
+const FOCI: readonly PcaFocus[] = [...PERIOD_IDS, 'Europe', 'all'];
+const PERSONS: readonly (PeriodId | 'me')[] = [...PERIOD_IDS, 'me'];
 const KINDS: readonly TranscriptLine['kind'][] = ['input', 'output', 'notice'];
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -24,11 +26,15 @@ function toPlot(v: unknown): PlotState | null {
   if (!isPeriodList(v.layers) || !isPeriodList(v.admixShown) || !isPeriodList(v.admixNew)) return null;
   if (v.admixPeriod !== undefined && !isOneOf(PERIOD_IDS, v.admixPeriod)) return null;
   if (v.gene !== undefined && !isOneOf(GENE_IDS, v.gene)) return null;
+  if (v.focus !== undefined && !isOneOf(FOCI, v.focus)) return null;
+  if (v.person !== undefined && !isOneOf(PERSONS, v.person)) return null;
   const plot: PlotState = {
     view: v.view, layers: v.layers, frame: v.frame, showNorthSea: v.showNorthSea, admixShown: v.admixShown, admixNew: v.admixNew,
   };
   if (v.admixPeriod !== undefined) plot.admixPeriod = v.admixPeriod;
   if (v.gene !== undefined) plot.gene = v.gene;
+  if (v.focus !== undefined) plot.focus = v.focus;
+  if (v.person !== undefined) plot.person = v.person;
   return plot;
 }
 

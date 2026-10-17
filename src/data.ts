@@ -84,7 +84,9 @@ function validatePeriods(v: unknown): PeriodInfo[] {
     const order = num(o.order, `${path}.order`);
     if (order !== PERIOD_IDS.indexOf(id)) throw new DataError(`${path}.order`, `${id} must have order ${PERIOD_IDS.indexOf(id)}, got ${order}`);
     const frame = oneOf(o.frame, FRAME_IDS, `${path}.frame`);
-    if (frame !== PERIOD_FRAME[id]) throw new DataError(`${path}.frame`, `${id} must use frame ${PERIOD_FRAME[id]}, got ${frame}`);
+    // Spec v3 §2.3: Today may say europe (v2.1 JSON) or britain (Sun 18 data run); the app draws Today from PERIOD_FRAME
+    // either way. The other seven periods stay strict.
+    if (id !== 'Today' && frame !== PERIOD_FRAME[id]) throw new DataError(`${path}.frame`, `${id} must use frame ${PERIOD_FRAME[id]}, got ${frame}`);
     return { id, order, frame, n_pca: count(o.n_pca, `${path}.n_pca`), n_admix: count(o.n_admix, `${path}.n_admix`), centre: pt(o.centre, `${path}.centre`) };
   });
   sameSet(list.map((p) => p.id), PERIOD_IDS, 'periods');

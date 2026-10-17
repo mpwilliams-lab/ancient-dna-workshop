@@ -38,6 +38,8 @@ const BREAKERS: Breaker[] = [
   ['a duplicated period', (d) => { d.periods[7] = { ...d.periods[6] }; }, /periods\[7\]\.order|periods: expected exactly/],
   ['wrong order number', (d) => { d.periods[2].order = 5; }, /BronzeAge must have order 2/],
   ['wrong frame', (d) => { d.periods[3].frame = 'europe'; }, /IronAge must use frame britain/],
+  ['wrong frame, Europe-frame period', (d) => { d.periods[0].frame = 'britain'; }, /FirstFarmers must use frame europe/],
+  ['unknown frame on Today', (d) => { d.periods[7].frame = 'world'; }, /periods\[7\]\.frame: expected one of europe, britain/],
   ['NaN centre (JS NaN)', (d) => { d.periods[0].centre.x = NaN; }, /periods\[0\]\.centre\.x: expected a finite number/],
   ['NaN coordinate written as a string by R', (d) => { d.points[1].points[0].y = 'NaN'; }, /points\[1\]\.points\[0\]\.y: expected a finite number, got "NaN"/],
   ['null coordinate', (d) => { d.map_groups[2].points[1].x = null; }, /map_groups\[2\]\.points\[1\]\.x: expected a finite number, got null/],
@@ -84,6 +86,14 @@ describe('validateData rejects bad data', () => {
     breakIt(d);
     expect(() => validateData(d)).toThrow(DataError);
     expect(() => validateData(d)).toThrow(message);
+  });
+
+  it('accepts Britain today in either frame (spec v3 §2.3: the Sun 18 run writes britain), and keeps the JSON value', () => {
+    for (const frame of ['europe', 'britain'] as const) {
+      const d = rawFixture();
+      d.periods[7].frame = frame;
+      expect(validateData(d).periods[7]).toMatchObject({ id: 'Today', frame });
+    }
   });
 
   it('error messages start with the file name so the console says what broke', () => {

@@ -89,10 +89,28 @@ describe('session persistence (RF4)', () => {
       expect(store.map.has(SESSION_KEY)).toBe(false);
     }
   });
-  it('the last script position (16, after HLA-DQ2) is a valid hint index', () => {
+  it('the last script position (19, after HLA-DQ2) is a valid hint index', () => {
     const store = new MemoryStore();
-    saveSession(store, { ...SAMPLE, hintIndex: 16 });
-    expect(loadSession(store)?.hintIndex).toBe(16);
+    saveSession(store, { ...SAMPLE, hintIndex: 19 });
+    expect(loadSession(store)?.hintIndex).toBe(19);
+  });
+  it('round-trips the v3 plot fields (focus, the consumer view and its person) until Task 6 replaces this session', () => {
+    const store = new MemoryStore();
+    for (const plot of [
+      { ...INITIAL_PLOT, view: 'pca' as const, focus: 'Europe' as const },
+      { ...INITIAL_PLOT, view: 'pca' as const, layers: ['IronAge' as const, 'Today' as const], focus: 'Today' as const, frame: 'britain' as const },
+      { ...INITIAL_PLOT, view: 'consumer' as const, person: 'me' as const, focus: 'all' as const },
+    ]) {
+      saveSession(store, { ...SAMPLE, plot });
+      expect(loadSession(store)?.plot).toEqual(plot);
+    }
+  });
+  it('rejects a v3 plot field with a bad value', () => {
+    for (const plot of [{ ...SAMPLE.plot, focus: 'Mars' }, { ...SAMPLE.plot, person: 'everyone' }]) {
+      const store = new MemoryStore();
+      store.setItem(SESSION_KEY, JSON.stringify({ ...SAMPLE, plot }));
+      expect(loadSession(store)).toBeNull();
+    }
   });
   it('keeps only the newest transcript and history lines, and survives a 2,000-character line', () => {
     expect(MAX_TRANSCRIPT).toBe(2000);

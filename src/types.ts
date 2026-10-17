@@ -12,7 +12,8 @@ export type ConsumerLabel = 'British' | 'Scandinavian' | 'French' | 'Iberian' | 
 export interface Pt { x: number; y: number }
 export interface PeriodInfo { id: PeriodId; order: number; frame: FrameId; n_pca: number; n_admix: number; centre: Pt }
 //   order: FirstFarmers 0, BellBeaker 1, BronzeAge 2, IronAge 3, Roman 4, AngloSaxon 5, Viking 6, Today 7
-//   frame: europe for Today/FirstFarmers/BellBeaker; britain for BronzeAge/IronAge/Roman/AngloSaxon/Viking
+//   frame: europe for FirstFarmers/BellBeaker; britain for BronzeAge/IronAge/Roman/AngloSaxon/Viking; Today europe (v2.1 JSON)
+//   or britain (from the Sun 18 data run). The app never draws from this field: reducePlot uses PERIOD_FRAME below.
 export interface PersonPt extends Pt { east?: boolean }            // east only on AngloSaxon points (eastern-England highlight)
 export interface PeriodPoints { period: PeriodId; points: PersonPt[] }
 export interface MapGroup { id: MapGroupId; n: number; centre: Pt; points: Pt[] }   // rescaled to projected scale, then rotated
@@ -54,9 +55,11 @@ export const SOURCE_IDS: readonly SourceId[] = ['STEPPE', 'FARMER', 'WHG'];
 export const FRAME_IDS: readonly FrameId[] = ['europe', 'britain'];
 export const CONSUMER_LABELS: readonly ConsumerLabel[] = ['British', 'Scandinavian', 'French', 'Iberian', 'Italian'];
 export const TICK_KEYS: readonly AxisTick['key'][] = ['BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'AngloSaxon', 'Medieval', 'Today'];
+/** The frame each period's PCA is drawn in (spec v3 §2.3). Britain today uses the British frame. reducePlot reads this
+ *  app constant, never periods[].frame from the JSON, so the Today change cannot move a frame box (RF2). */
 export const PERIOD_FRAME: Readonly<Record<PeriodId, FrameId>> = {
   FirstFarmers: 'europe', BellBeaker: 'europe', BronzeAge: 'britain', IronAge: 'britain',
-  Roman: 'britain', AngloSaxon: 'britain', Viking: 'britain', Today: 'europe',
+  Roman: 'britain', AngloSaxon: 'britain', Viking: 'britain', Today: 'britain',
 };
 
 // ---- v3 app ids (CONTRACT §3). Chips: Task 3. Steps, cards, images, maps, diagrams: Task 4. ----
