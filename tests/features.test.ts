@@ -1,5 +1,6 @@
 // Build-time feature flags (spec v3 §10.3, CONTRACT §1). Each flag task (16-30) adds its false-path test here.
 import { describe, expect, it } from 'vitest';
+import { BUNDLED_IMAGES } from '../src/assets';
 import { CARDS } from '../src/cards';
 import { renderCardBody } from '../src/cardView';
 import { execute } from '../src/commands';
@@ -160,4 +161,32 @@ describe('map.D1 / map.E1 / map.G1 false paths (Task 20, spec §10.3)', () => {
       expect(renderCardBody(document, CARDS[id], cardCtx(FIXTURE, only, checkedManifest())).querySelector('.card-map'), id).toBeNull();
     }
   });
+});
+
+// Task 21. Both flag states are proved with in-memory manifests (checkedManifest, fakeUrls), never the committed assets/manifest.json
+// or src/assets/img/, which change as the instructor checks and promotes images: this passes before and after the check.
+describe('images.E2 / images.F1 / images.G2 (Task 21, spec §10.3)', () => {
+  for (const [id, flag] of [['E2', 'images.E2'], ['F1', 'images.F1'], ['G2', 'images.G2']] as const) {
+    const tiles = CARDS[id].tiles ?? [];
+    it(`${flag} false: ${id} shows its captions as text and no <img>, even with every image checked and bundled`, () => {
+      expect(tiles.length, 'a card with no tiles would pass these tests for nothing').toBeGreaterThanOrEqual(2);   // G2 keeps two if West Stow is dropped
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, false), checkedManifest()));
+      expect(el.querySelectorAll('img')).toHaveLength(0);
+      for (const t of tiles) expect(el.textContent).toContain(t.caption);
+      expect(openOnCard(id, FIXTURE, flagSet(flag, false), checkedManifest()).querySelector('.card-credits')).toBeNull();
+    });
+    it(`${flag} true: ${id} shows one image per tile when every image is checked and bundled`, () => {
+      expect(tiles.length).toBeGreaterThanOrEqual(2);
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest()));
+      expect(el.querySelectorAll('img')).toHaveLength(tiles.length);
+      expect(openOnCard(id, FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest()).querySelector('.card-credits')).not.toBeNull();
+    });
+    // Runs once Part B has promoted this card's files into src/assets/img/ (skipped until then, by design).
+    it.runIf(tiles.every((t) => BUNDLED_IMAGES[t.image] !== undefined))(`${id}: the promoted files are inlined JPEGs`, () => {
+      const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, flagSet(flag, true, ALL_OFF), checkedManifest(), { imageUrls: BUNDLED_IMAGES }));
+      const srcs = [...el.querySelectorAll('img')].map((img) => img.getAttribute('src') ?? '');
+      expect(srcs).toHaveLength(tiles.length);
+      for (const s of srcs) expect(s).toMatch(/^data:image\/jpeg;base64,/);
+    });
+  }
 });
