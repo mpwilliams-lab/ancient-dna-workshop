@@ -369,7 +369,7 @@ body {
    cap above sits small in a wide grey panel. It may be drawn larger, up to min(35vh, 380px) (a ruling after Task 26's review; it
    supersedes spec §5.2's image bound min(26vh, 230px) for a one-picture tile row only: every other tile row keeps the bound, F1 a
    smaller cap still). Drawn: the diagram (5:4) 336 x 269 at 1366 x 768 and 473 x 378 at 1920 x 1080, where it was 250 x 200 and
-   288 x 230; the drawing as wide as its tile (702 x 234 and 1005 x 335). The card stays `normal` at both lab-standard screens with 81 px
+   288 x 230; the drawing as wide as its tile (702 x 234 and 1004 x 335). The card stays `normal` at both lab-standard screens with 81 px
    to spare at 1366 x 768 (a line of its 19 px text is 26 px) and 334 px at 1920 x 1080, and with at least 41 px to spare at every other
    window of e2e/viewports.ts that gets the bigger picture (the least is CSS 1280 x 720): the lab font (Segoe UI) is not measured, so
    the cap leaves room for it. Two places keep the general cap because the card has little height to spare there: a window shorter
