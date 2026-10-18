@@ -39,7 +39,6 @@ describe('validateData on the fixture', () => {
     expect(FIXTURE.europe_pops).toHaveLength(35);
     expect(FIXTURE.europe_pops!.filter((p) => !p.isolate)).toHaveLength(26);
     expect(FIXTURE.europe_fit).toEqual({ n_pops: 26, n_people: 716, r_lat: 0.8868, r_lon: 0.8298 });
-    expect(FIXTURE.named).toBeUndefined();
   });
 
   it('the fixture labels the eight groups the data build chose (open check 14), in europe_pops order, none of them an isolate', () => {
@@ -223,5 +222,14 @@ describe('v3 optional fields (CONTRACT §2.1)', () => {
     expect(TRAIT_MAP_ORDER.TYK2).not.toContain('1kg:PJL');
     expect(TRAIT_MAP_ORDER.TYK2).not.toContain('1kg:FIN');
     expect(TRAIT_MAP_ORDER['HLA-DQ2']).toEqual(['1kg:IBS', 'gnomad:nfe', '1kg:TSI', '1kg:GBR', '1kg:FIN']);
+  });
+});
+
+describe('named points (P3, Task 28)', () => {
+  it('the fixture carries one york_traveller point, outside its British frame', () => {
+    expect(FIXTURE.named).toEqual([{ key: 'york_traveller', period: 'Roman', x: 0.045, y: 0.005 }]);
+    const f = FIXTURE.frames.britain;
+    const p = FIXTURE.named![0]!;
+    expect(p.x > f.xmax || p.x < f.xmin || p.y > f.ymax || p.y < f.ymin).toBe(true);
   });
 });

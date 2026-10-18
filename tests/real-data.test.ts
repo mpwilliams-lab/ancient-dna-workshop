@@ -112,7 +112,11 @@ describe.runIf(process.env.REAL_DATA === '1')('real workshop_data.json', () => {
     const base = ['version', 'periods', 'points', 'map_groups', 'north_sea', 'frames', 'admixture', 'consumer', 'traits',
       'trait_ticks', 'logs', 'trait_maps', 'spread_check'];
     expect(keys.slice(0, base.length)).toEqual(base);
-    expect(keys.slice(base.length)).toEqual(keys.includes('europe_pops') ? ['europe_pops', 'europe_fit'] : []);
+    // then the Europe pair when the run included it, then `named` (the P3 run, Task 28), always last
+    expect(keys.slice(base.length)).toEqual([
+      ...(keys.includes('europe_pops') ? ['europe_pops', 'europe_fit'] : []),
+      ...(keys.includes('named') ? ['named'] : []),
+    ]);
   });
 
   // ---- reveal callout and note (Task 9; spec §3.3, review S24) ----
@@ -135,6 +139,19 @@ describe.runIf(process.env.REAL_DATA === '1')('real workshop_data.json', () => {
     expect([pct('Today'), pct('IronAge')]).toEqual([56, 57]);
     expect(revealNote(pct('Today'), pct('IronAge'))).toBe(
       'Britain today: 56% steppe. Iron Age: 57% steppe. Of all the periods, the Iron Age bar is the closest match.');
+  });
+
+  it('named: exactly one york_traveller point (Roman), off the British frame, with no sample ID in the file (Task 28)', () => {
+    const d = validateData(raw());
+    expect(d.named).toHaveLength(1);
+    const p = d.named![0]!;
+    expect(p.key).toBe('york_traveller');
+    expect(p.period).toBe('Roman');
+    expect(Math.abs(p.x - 0.01456)).toBeLessThan(2e-5);
+    expect(Math.abs(p.y - -0.04387)).toBeLessThan(2e-5);
+    const f = d.frames.britain;
+    expect(p.x > f.xmax || p.x < f.xmin || p.y > f.ymax || p.y < f.ymin).toBe(true);
+    expect(JSON.stringify(raw())).not.toMatch(/3DT26|Driffield|oLevant/);
   });
 });
 

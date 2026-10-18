@@ -264,5 +264,6 @@
     {"id":"Maltese","label":"Maltese","n":8,"lat":35.94,"lon":14.38,"x":0.01107,"y":-0.02582,"map_x":0.25748,"map_y":35.93441,"isolate":true,"map_label":false},
     {"id":"Greek_Crete","label":"Cretan","n":2,"lat":35.16483,"lon":25.30583,"x":0.00887,"y":-0.02017,"map_x":0.01647,"map_y":38.27349,"isolate":false,"map_label":false}
   ],
-  "europe_fit": {"n_pops":26,"n_people":716,"r_lat":0.8868,"r_lon":0.8298}
+  "europe_fit": {"n_pops":26,"n_people":716,"r_lat":0.8868,"r_lon":0.8298},
+  "named": [{ "key": "york_traveller", "period": "Roman", "x": 0.045, "y": 0.005 }]
 }
