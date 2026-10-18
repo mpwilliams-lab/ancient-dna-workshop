@@ -221,8 +221,18 @@ export function mountTerminal(root: HTMLElement, handlers: TerminalHandlers): Te
     },
     showLines(lines: readonly { kind: 'input' | 'output' | 'notice'; text: string }[]): void {
       finish();
-      out.replaceChildren();
-      for (const l of lines) append(l.kind === 'input' ? `${PROMPT_SYMBOL} ${String(l.text)}` : String(l.text), l.kind);
+      // The whole log is built off-screen and swapped in at once, and scrolled to its end once. append() scrolls after every line, and each
+      // scroll forces a layout of the whole page: with a bars plot on screen (the one a Back is leaving) that took 3 s at 430 lines and 22 s at
+      // 2,000 (final review F3). Only the last MAX_DOM_LINES lines are ever on screen, so only those are built. Live printing still goes
+      // through append(), line by line.
+      const frag = doc.createDocumentFragment();
+      for (const l of lines.slice(-MAX_DOM_LINES)) {
+        const line = el('div', `term-line term-line--${l.kind}`);
+        line.textContent = l.kind === 'input' ? `${PROMPT_SYMBOL} ${String(l.text)}` : String(l.text);
+        frag.append(line);
+      }
+      out.replaceChildren(frag);
+      out.scrollTop = out.scrollHeight;
     },
   };
 }

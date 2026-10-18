@@ -377,4 +377,57 @@ describe('showLines (session v2 restore)', () => {
     expect(m.out.childElementCount).toBe(MAX_DOM_LINES);
     expect(texts(m.out)[MAX_DOM_LINES - 1]).toBe(`l${MAX_DOM_LINES + 9}`);
   });
+
+  // ---- final review F3: Back froze the page for seconds on a long log ----
+  // showLines added the lines one at a time through append(), which scrolls the log after every line, and each scroll forces a layout of the
+  // page: 3 s at 430 lines and 22 s at 2,000 when the plot being left held bars (e2e/back.spec.ts times the real page). It now builds the
+  // lines in a fragment, swaps them in once and scrolls once. jsdom has no layout, so these count the writes that cause it.
+
+  /** Records the childElementCount of the log at each write to its scrollTop: how many scrolls, and how much of the log was in place at each. */
+  function watchScrolls(out: HTMLElement): number[] {
+    const at: number[] = [];
+    Object.defineProperty(out, 'scrollTop', { configurable: true, get: () => 0, set: () => { at.push(out.childElementCount); } });
+    return at;
+  }
+
+  it('draws the log in one batch: one swap, one scroll once every line is in place, and no line added one by one, however long the log', () => {
+    for (const n of [1, 150, MAX_DOM_LINES, 2000]) {
+      const m = mount();
+      const scrolls = watchScrolls(m.out);
+      const appended = vi.spyOn(m.out, 'append');
+      const swapped = vi.spyOn(m.out, 'replaceChildren');
+      m.view.showLines(Array.from({ length: n }, (_, k) => ({ kind: 'output' as const, text: `l${k}` })));
+      expect(scrolls, `${n} lines: scrolls, each with the lines on screen at that moment`).toEqual([Math.min(n, MAX_DOM_LINES)]);
+      expect(appended, `${n} lines: lines added to the live log one by one`).not.toHaveBeenCalled();
+      expect(swapped, `${n} lines: swaps of the live log`).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('with more lines than fit, keeps the last MAX_DOM_LINES in order, each with its kind and its prompt', () => {
+    const m = mount();
+    const kinds = ['input', 'output', 'notice'] as const;
+    const lines = Array.from({ length: MAX_DOM_LINES * 2 + 7 }, (_, k) => ({ kind: kinds[k % 3]!, text: `t${k}` }));
+    m.view.showLines(lines);
+    const shown = lines.slice(-MAX_DOM_LINES);
+    expect(texts(m.out)).toEqual(shown.map((l) => (l.kind === 'input' ? `> ${l.text}` : l.text)));
+    expect([...m.out.children].map((c) => c.className)).toEqual(shown.map((l) => `term-line term-line--${l.kind}`));
+  });
+
+  it('an empty log clears the screen, and the text of a line is never read as HTML', () => {
+    const m = mount();
+    void m.view.printLines(['old']);
+    m.view.showLines([]);
+    expect(m.out.childElementCount).toBe(0);
+    m.view.showLines([{ kind: 'output', text: '<b>bold</b> & <img src=x onerror=alert(1)>' }, { kind: 'input', text: '<i>x</i>' }]);
+    expect(texts(m.out)).toEqual(['<b>bold</b> & <img src=x onerror=alert(1)>', '> <i>x</i>']);
+    expect(m.out.querySelector('b, i, img')).toBeNull();
+  });
+
+  it('live printing is unchanged: a staggered log still scrolls to its end after every line it adds', () => {
+    const m = mount();
+    const scrolls = watchScrolls(m.out);
+    void m.view.printLines(['a', 'b', 'c'], { stagger: true });
+    vi.advanceTimersByTime(staggerDelay(3) * 2);
+    expect(scrolls).toEqual([1, 2, 3]);
+  });
 });

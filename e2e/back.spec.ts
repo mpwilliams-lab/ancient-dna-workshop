@@ -6,6 +6,7 @@ import { NEXT_PREFIX, SCRIPT, SCRIPT_STEPS, hintText } from '../src/hints';
 import { formatCommand } from '../src/parser';
 import { consumerRows } from '../src/plots/consumer';
 import { derive, sessionBuildHash } from '../src/replay';
+import { MAX_DOM_LINES } from '../src/terminal';
 import { screensOf, screenKey } from '../tests/helpers/script';
 import { APP_URL, CARD_KEY_GAP_MS, DATA, boxes, cardOpen, consumerBarsShown, covers, freshStart, hintIndex, idle, installBoxes, prompt, run, screen, watch } from './helpers';
 
@@ -444,6 +445,72 @@ for (const c of LOG_VIEWPORTS) {
         expect(overflowing.has(`back ${key}`), `the log overflows its box at ${key} on the way back`).toBe(true);
       }
       expect(overflowing.has('back 4.0'), 'and at a card screen on the way back (B1 over the Predict plot)').toBe(true);
+      expect(w.requests).toEqual([]);
+      expect(w.errors).toEqual([]);
+    } finally {
+      await ctx.close();
+    }
+  });
+}
+
+// ---- Back is quick when the screen being left is a bars plot and the log is long (final review F3) ----
+// Back redraws the whole log inside the click handler. It used to add the lines one at a time, and each line scrolled the log to its end, which
+// forces a layout of the whole page while the bars plot being left is still in it. Measured on the dev Mac at 1366 x 768, Chromium and Edge alike:
+// 0.33 s at the 145 lines of the guided script, 2.9 s at 430 lines, 22 s at 2,000 (a PCA screen: 0.04 s at 430). Typos (3 or 4 lines each),
+// help() and the extras take a station past 400 lines in a few minutes. The log is now drawn as one fragment and scrolled once.
+// The padding is help(): its text and its echo, no plot change. It goes in the log BEFORE the first step so that it is still on screen after the
+// Back to a later step (a Back cuts the log to the end of the step it lands on). It runs until the saved log is as long as the terminal keeps
+// on screen, whatever help() prints, and the two steps after it make the log the Back draws longer still.
+
+const BACK_BUDGET_MS = 250;
+
+/** How many entries the saved log holds: what a Back to a screen that keeps all of them has to draw (0 before the first command is saved). */
+const savedEntries = (page: Page): Promise<number> => page.evaluate(() => {
+  const s = JSON.parse(sessionStorage.getItem('adna-workshop-session-v2') ?? '{"transcript":[]}') as { transcript: unknown[] };
+  return s.transcript.length;
+});
+
+const BARS_SCREENS = [
+  { name: 'consumer bars', on: FEATURES.consumerBars, command: 'ancestry_test(person = "Today")', view: 'consumer' },
+  { name: 'ADMIXTURE', on: true, command: 'run_admixture(K = 3)', view: 'admixture' },
+] as const;
+
+for (const s of BARS_SCREENS) {
+  test(`Back from ${s.name} with a log of 400 lines and more settles in under ${BACK_BUDGET_MS} ms, and draws the last 400 lines in order with the last one in view`, async ({ browser }) => {
+    test.skip(!s.on, `the flag for ${s.name} is off in the shipped set`);
+    test.setTimeout(240_000);
+    const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+    try {
+      const page = await ctx.newPage();
+      const w = watch(page);
+      await freshStart(page);
+      for (let i = 0; i < 60 && (await savedEntries(page)) < MAX_DOM_LINES; i++) await run(page, 'help()');
+      await run(page, formatCommand(SCRIPT[0]!));          // the hook, then load_genomes: two real steps, so that Back lands on one of them
+      await run(page, formatCommand(SCRIPT[1]!));
+      const kept = await savedEntries(page);               // what the Back will draw: the log up to the end of load_genomes
+      await run(page, s.command);                          // off the script, as free pacing allows: the bars screen that Back will leave
+      await expect(page.locator('#plot')).toHaveAttribute('data-view', s.view);
+      expect(kept, 'the premise: the log that Back draws is longer than the terminal keeps on screen').toBeGreaterThan(MAX_DOM_LINES);
+      await expect(page.locator('#terminal .term-out .term-line')).toHaveCount(MAX_DOM_LINES);
+
+      // One click on the real Back button, timed inside the page from the click to two frames later: the click handler (the whole restore, its
+      // layout included) and the next paint. A forced layout per line puts this in seconds.
+      const ms = await page.evaluate(async () => {
+        const back = document.getElementById('back') as HTMLButtonElement;
+        const t0 = performance.now();
+        back.click();
+        await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+        return performance.now() - t0;
+      });
+      expect(ms, `Back from ${s.name} with ${kept} log entries took ${ms.toFixed(0)} ms; the budget is ${BACK_BUDGET_MS} ms`).toBeLessThan(BACK_BUDGET_MS);
+
+      expect(await screen(page)).toEqual({ step: 2, card: 0 });
+      // and the screen is right: the last 400 lines of the saved log, in order, input lines with their prompt, the last of them in view
+      expect(await shownScreen(page)).toEqual((await savedScreen(page)).slice(-MAX_DOM_LINES));
+      const v = await logView(page);
+      expect(v.overflows, 'the log overflows its box, so its scroll position means something').toBe(true);
+      expect(v.below, `the last line of the log ends ${v.below.toFixed(1)} px below its box`).toBeLessThanOrEqual(2);
+      await expect(page.locator('#terminal input')).toBeFocused();
       expect(w.requests).toEqual([]);
       expect(w.errors).toEqual([]);
     } finally {
