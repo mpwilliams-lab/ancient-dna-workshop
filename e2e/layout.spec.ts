@@ -442,8 +442,8 @@ async function panelGeometry(page: Page): Promise<PanelGeometry> {
  */
 const MIN_TEXT_DEVICE_PX = 10;
 
-function expectTextLegible(g: PanelGeometry, label: string, c: Case): number | null {
-  if (g.smallestText === null) return null;
+function expectTextLegible(g: PanelGeometry, label: string, c: Case): void {
+  if (g.smallestText === null) return;
   const device = g.smallestText * g.svg!.scale * c.dsf;
   const size = `${label} at ${c.name}: the smallest text (${g.smallestText} units) is ${device.toFixed(1)} device px tall (${g.svg!.scale.toFixed(3)} px per unit, device scale factor ${c.dsf})`;
   test.info().annotations.push({ type: 'projector text size', description: size });
@@ -451,7 +451,6 @@ function expectTextLegible(g: PanelGeometry, label: string, c: Case): number | n
   if (LAB_STANDARD_CASES.includes(c)) {
     expect(device, `${label}: the smallest text (${g.smallestText} units) is drawn ${device.toFixed(1)} device px tall at ${c.name}`).toBeGreaterThanOrEqual(MIN_TEXT_DEVICE_PX);
   }
-  return device;
 }
 
 function expectPanelHolds(g: PanelGeometry, label: string, c: Case, view: 'pca' | 'bars' | 'trait', blocks: string[]): void {
@@ -804,7 +803,7 @@ function pictureCap(c: Case, single: boolean): number {
 /**
  * How tall a single-picture card draws its picture at the two lab-standard screens at 100%, in CSS px, keyed by the window's CSS size. Measured
  * 2026-10-17 in Chromium and Edge on macOS: the melanocyte diagram 336 x 269 at 1366 x 768 and 473 x 378 at 1920 x 1080 (it was 250 x 200 and
- * 288 x 230 under the general cap), the irises drawing as wide as its tile, 702 x 234 and 1005 x 335. The pins sit just under what was
+ * 288 x 230 under the general cap), the irises drawing as wide as its tile, 702 x 234 and 1004 x 335. The pins sit just under what was
  * measured, so a change that shrinks the picture back is noticed.
  */
 const MIN_SINGLE_PICTURE_H: Readonly<Record<string, number>> = { '1366x768': 265, '1920x1080': 375 };
