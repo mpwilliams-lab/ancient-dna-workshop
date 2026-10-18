@@ -143,7 +143,7 @@ export const OPEN_CHECKS: readonly OpenCheck[] = [
   { n: 12, check: 'Itan 2010 "about 65%"; Liebert 2017 values match the CSV.', status: 'Passes (H2 uses f_13910T)', gates: 'H1 bullet 2, H2', ifFails: '—' },
   { n: 13, check: 'Time wording in the Beaker callout.', status: 'Resolved: "within about ten generations"; a vitest pins the callout', gates: 'Callout', ifFails: '—' },
   { n: 14, check: 'A1 map labels: the 8 map_label groups from the data build.', status: 'Data run done (the build chose the eight groups). Open until the instructor confirms the eight names (npm run preview-maps shows A1 with and without them); until then the A1 map ships unlabelled', gates: 'A1 labels', ifFails: 'The map ships unlabelled' },
-  { n: 15, check: "The LCT trajectory's present-day value is below 0.75 (H2 line 3).", status: 'Open, as a vitest at P1', gates: 'H2 line 3', ifFails: 'Line 3 becomes "The next plot follows this letter across all of West Eurasia."' },
+  { n: 15, check: "The LCT trajectory's present-day value is below 0.75 (H2 line 3).", status: 'Passes (a vitest on the real data pins it; npm run check-data runs it)', gates: 'H2 line 3', ifFails: 'Line 3 becomes "The next plot follows this letter across all of West Eurasia."' },
   { n: 16, check: 'Gretzinger 2022: present-day English ancestry 25–47% early-medieval-continental-like ("about a quarter to a half").', status: 'Passes', gates: 'G1 bullet 3', ifFails: 'Drop the numbers: "people in England today carry only part of this ancestry"' },
   { n: 17, check: 'Kerner 2021 negative selection on TYK2 P1104A starting about 2,000 years ago ("since Roman times").', status: 'Passes', gates: 'Step 17 say-line only', ifFails: '—' },
 ];
@@ -303,8 +303,13 @@ const fmtMin = (m: number): string => String(m);
  * The whole sheet as Markdown. `offlineFile` is the exported offline file's size and sha256, read by the CLI when the sheet is
  * generated (scripts/runsheet-cli.ts). Without it (null, undefined or a damaged record) "Freeze and verify" prints a warning
  * line in place of the numbers; the sheet itself is still built.
+ * `currentBuild` is the same two numbers for the build in dist/index.html. When both are known and the hashes differ, the offline
+ * file is an older build than the code, and "Freeze and verify" opens with a STALE warning (final review F1: the Drive copy was
+ * 66 commits behind, and the table recorded its hash without a word). Without it the sheet cannot tell, and says nothing.
  */
-export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePath: string, offlineFile?: OfflineFileInfo | null): string {
+export function buildRunSheet(
+  data: WorkshopData, generatedAt: string, offlinePath: string, offlineFile?: OfflineFileInfo | null, currentBuild?: OfflineFileInfo | null,
+): string {
   const sourceOf = (g: string) => data.traits.find((t) => t.gene === g)?.source ?? 'missing';
   const v = cardVars(data);
   const all = beats(data);
@@ -435,8 +440,10 @@ export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePa
   L.push('- [ ] Screen: Settings → System → Display; note the resolution and the Scale (100% / 125% / 150%).');
   L.push('- [ ] Projector: note its mirrored resolution.');
   L.push('- [ ] If either is not one of 1024×768, 1280×720, 1280×1024, 1366×768, 1920×1080 at 100/125/150%, run `LAB_VIEWPORTS="<w>x<h>@<scale>" npm run e2e` in the repo (e.g. `LAB_VIEWPORTS="1600x900@1.25"`) and fix by Wed 21 Oct.');
+  L.push('- [ ] Projector legibility: stand in the back row, with the projector at its mirrored resolution, and read the plot text: the Today PCA legend, the ADMIXTURE bar labels and the LCT period names. Plot text does not grow with Ctrl+ or the display scale (the terminal and the cards do). If any of it cannot be read, note which and report it by Mon evening: bigger plot text is a code change and must land before the Wed 21 Oct 20:00 freeze. At 1024×768 the terminal text sits at its 12 px floor: press Ctrl+ once on the instructor machine.');
   L.push(`- [ ] Pages: open ${PAGES_URL} on the lab network; run the first three commands.`);
   L.push(`- [ ] Offline: copy \`${OFFLINE_NAME}\` from the USB stick or the lab shared drive onto every lab machine's desktop; double-click it on two machines and run \`load_genomes()\`.`);
+  L.push(`- [ ] Offline, every copy, before any timing run: in PowerShell on each lab machine's desktop run \`Get-FileHash -Algorithm SHA256 .\\${OFFLINE_NAME}\` and compare the \`Hash\` with the SHA-256 in "Freeze and verify" at the end of this sheet (capitals or not). A different hash is a stale or damaged copy: copy the Drive master over it, then check again. Repeat after any re-export.`);
   L.push('- [ ] Practise `?reset` on both the Pages URL and the desktop copy.');
   L.push(`- [ ] Refresh mid-session once, with a card open: the same card comes back and the session comes back with "${RESTORED_NOTICE}".`);
   L.push('- [ ] Time every step with text-only cards and fill in the timing table below (add 15% to card steps).');
@@ -475,12 +482,25 @@ export function buildRunSheet(data: WorkshopData, generatedAt: string, offlinePa
   L.push('| A trait plot looks wrong | Read its caption aloud and move on; captions are exact. |');
   L.push('| Running long | Use the timing cuts above, in order. Every command still runs: a station that falls behind presses Esc and Enter to run its hinted command (about 10 s), because a command left unrun leaves every later hint stuck on it. |');
   L.push('');
-  L.push(...freezeSection(offlinePath, offlineFile));
+  L.push(...freezeSection(offlinePath, offlineFile, currentBuild));
   return L.join('\n');
 }
 
+/** The first eight digits of a sha256: enough to see that two builds differ, and not a second full hash in the sheet. */
+export const shortHash = (sha256: string): string => `${sha256.slice(0, 8)}…`;
+
+/**
+ * Both records when both are good and the offline file is not the build in dist/index.html, else null. A missing file, no build to
+ * compare with and a damaged record are not a verdict (the first has its own warning line).
+ */
+export function staleOffline(offlineFile: unknown, currentBuild: unknown): { offline: OfflineFileInfo; current: OfflineFileInfo } | null {
+  return isOfflineFileInfo(offlineFile) && isOfflineFileInfo(currentBuild) && offlineFile.sha256 !== currentBuild.sha256
+    ? { offline: offlineFile, current: currentBuild }
+    : null;
+}
+
 /** "Freeze and verify": the freeze text, the offline file's recorded size and hash, the Thu 22 desktop check, and room for notes. */
-function freezeSection(offlinePath: string, offlineFile: unknown): string[] {
+function freezeSection(offlinePath: string, offlineFile: unknown, currentBuild: unknown): string[] {
   const L: string[] = [];
   L.push('## Freeze and verify');
   L.push('');
@@ -488,6 +508,11 @@ function freezeSection(offlinePath: string, offlineFile: unknown): string[] {
   L.push('');
   L.push('Sessions run Thu 22 and Fri 23 Oct only; there is none on Sat 24.');
   L.push('');
+  const stale = staleOffline(offlineFile, currentBuild);
+  if (stale) {
+    L.push(`> **WARNING: THE OFFLINE FILE IS NOT THE CURRENT BUILD. Its SHA-256 (\`${shortHash(stale.offline.sha256)}\`) differs from the build in \`dist/index.html\` (\`${shortHash(stale.current.sha256)}\`, ${stale.current.bytes.toLocaleString('en-US')} bytes), so the size and hash below describe an older build. Run \`npm run export-offline\`, then \`npm run run-sheet\` again, before copying the file to a lab machine or timing the Monday rehearsal on it.**`);
+    L.push('');
+  }
   if (isOfflineFileInfo(offlineFile)) {
     L.push(`The offline file is the one \`npm run export-offline\` wrote to the Drive master folder (\`${offlinePath}\`). Its size and SHA-256 below were read from that file when this sheet was generated (see \`generated\` at the top), not typed in.`);
     L.push('');

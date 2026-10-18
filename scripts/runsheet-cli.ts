@@ -9,15 +9,20 @@
 // comes from the same two places as there: WORKSHOP_OFFLINE_DIR, then offlineExportDir in local-paths.json.
 // Its "Freeze and verify" section records that file's byte size and sha256, read from the file each time the sheet is
 // generated. If the file is missing the sheet carries a warning line instead (and so does stderr); the run still succeeds.
+// If the file is there but is not the build in <repo>/dist/index.html (its sha256 differs), it is an older build than the code
+// (final review F1: the Drive copy was 66 commits behind and nothing said so). The sheet is still written, with a STALE
+// warning at the top of "Freeze and verify", and this exits with status 1 after saying so on stderr, so a chain such as
+// `npm run export-offline && npm run run-sheet` stops. With no dist/index.html there is nothing to compare with, and no warning.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DATA } from '../src/data';
-import { buildRunSheet, OFFLINE_NAME, type OfflineFileInfo } from '../src/runsheet';
+import { buildRunSheet, OFFLINE_NAME, shortHash, staleOffline, type OfflineFileInfo } from '../src/runsheet';
 
 // The built file sits in <repo>/.runsheet/ (the source in <repo>/scripts/), so the repo root is one folder up either way.
 const LOCAL_PATHS = resolve(dirname(fileURLToPath(import.meta.url)), '../local-paths.json');
+const BUILD = resolve(dirname(fileURLToPath(import.meta.url)), '../dist/index.html');
 
 function fail(msg: string): never {
   console.error(`run-sheet: ${msg}`);
@@ -64,11 +69,11 @@ const out = resolve(outPath);
 const offline = resolve(join(offlineDir, OFFLINE_NAME));
 
 /**
- * The exported offline file's size and sha256, read now: the sheet records what is in the Drive folder at generation time and
- * no number in it is typed by hand. The bytes are read raw (a text read would change both numbers for a file with multi-byte
- * characters). Null when the file is missing or cannot be read; the sheet then carries a warning line, and this is not a crash.
+ * A file's size and sha256, read now: the sheet records what is in the Drive folder at generation time and no number in it is
+ * typed by hand. The bytes are read raw (a text read would change both numbers for a file with multi-byte characters). Null
+ * when the file is missing or cannot be read; for the offline file the sheet then carries a warning line, and this is not a crash.
  */
-function readOffline(path: string): OfflineFileInfo | null {
+function readFileInfo(path: string): OfflineFileInfo | null {
   try {
     const bytes = readFileSync(path);
     return { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
@@ -77,14 +82,25 @@ function readOffline(path: string): OfflineFileInfo | null {
   }
 }
 
-const offlineFile = readOffline(offline);
+const offlineFile = readFileInfo(offline);
 if (!offlineFile) {
   console.warn(
     `run-sheet: warning: ${offline} was not found or could not be read, so the sheet has no size and hash for it. ` +
       'Run `npm run export-offline`, then run this again.',
   );
 }
-const md = buildRunSheet(DATA, new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'), offline, offlineFile);
+const currentBuild = readFileInfo(BUILD); // null before the first `npm run build`: nothing to compare with
+const stale = staleOffline(offlineFile, currentBuild);
+const md = buildRunSheet(DATA, new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'), offline, offlineFile, currentBuild);
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, md, 'utf8');
 console.log(`run-sheet: wrote ${out} (${md.length} chars)`);
+if (stale) {
+  console.error(
+    `run-sheet: error: the offline file is not the current build. ${offline} has SHA-256 ${shortHash(stale.offline.sha256)} ` +
+      `(${stale.offline.bytes.toLocaleString('en-US')} bytes) and dist/index.html has ${shortHash(stale.current.sha256)} ` +
+      `(${stale.current.bytes.toLocaleString('en-US')} bytes). The sheet was written with a WARNING in its "Freeze and verify" section. ` +
+      'Run `npm run export-offline`, then `npm run run-sheet` again.',
+  );
+  process.exitCode = 1;
+}

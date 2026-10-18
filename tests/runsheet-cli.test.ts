@@ -301,11 +301,91 @@ describe('the run sheet records the exported offline file, read when the sheet i
     writeFileSync(join(dir, 'ancient-dna-workshop-old.html'), decoy);
     mkdirSync(join(repo.root, 'dist'));
     writeFileSync(join(repo.root, 'dist', 'index.html'), decoy);
-    expect(repo.run([out], { WORKSHOP_OFFLINE_DIR: dir }).status).toBe(0);
+    // dist/index.html is a different build from the exported file here, so the run says so and exits 1 (final review F1, below);
+    // what it records is still the exported file, and the build's hash appears only in its short form, in that warning.
+    expect(repo.run([out], { WORKSHOP_OFFLINE_DIR: dir }).status).toBe(1);
     const md = readFileSync(out, 'utf8');
     expect(md).toContain(sha256(BODY));
     expect(md).not.toContain(sha256(decoy));
     expect(md.match(new RegExp(HEX64, 'g'))).toEqual([sha256(BODY)]);
+  });
+
+  // ---- final review F1: the Drive copy was the Task 14 build, 66 commits behind, and the sheet recorded its hash without a word ----
+  // The build the sheet compares with is <repo>/dist/index.html, one folder above the built CLI (here the temp repo's own dist).
+  const putBuild = (root: string, body: Buffer): void => {
+    mkdirSync(join(root, 'dist'), { recursive: true });
+    writeFileSync(join(root, 'dist', 'index.html'), body);
+  };
+  const CURRENT_BUILD = Buffer.from(`<!doctype html><title>the build in dist/index.html</title>${'y'.repeat(321)}`);
+  const short = (b: Buffer): string => sha256(b).slice(0, 8);
+  const freezeOf = (md: string): string => md.slice(md.indexOf('\n## Freeze and verify\n'));
+
+  it('an exported file that is not the build in dist/index.html: the sheet is still written, with a STALE warning at the top of "Freeze and verify", stderr says so, and the exit status is 1', () => {
+    const repo = miniRepo();
+    const dir = join(repo.root, 'export');
+    const out = join(repo.root, 'run-sheet.md');
+    exportTo(dir);
+    putBuild(repo.root, CURRENT_BUILD);
+    const r = repo.run([out], { WORKSHOP_OFFLINE_DIR: dir });
+    expect(r.status, 'a chain such as `npm run export-offline && npm run run-sheet` must stop here').toBe(1);
+    const md = readFileSync(out, 'utf8');
+    expect(r.stdout.trim()).toBe(`run-sheet: wrote ${out} (${md.length} chars)`);
+    expect(r.stderr).toMatch(/run-sheet: error: the offline file is not the current build/);
+    for (const text of [r.stderr, freezeOf(md)]) {
+      expect(text).toContain(short(BODY));
+      expect(text).toContain(short(CURRENT_BUILD));
+      expect(text).toContain(BYTES(CURRENT_BUILD));
+      expect(text).toContain('`npm run export-offline`');
+      expect(text).toContain('`npm run run-sheet`');
+    }
+    expect(r.stderr).toContain(join(dir, OFFLINE_NAME));
+    const freeze = freezeOf(md);
+    const warning = freeze.split('\n').find((l) => /warning/i.test(l));
+    expect(warning, 'a warning line in the freeze section').toMatch(/not the current build/i);
+    expect(freeze.split('\n').indexOf(warning!), 'the warning comes before the table of the file it is about').toBeLessThan(freeze.split('\n').findIndex((l) => l.startsWith('| File |')));
+    expect(freeze, 'the table still records the file that is there').toContain(`\`${sha256(BODY)}\``);
+    expect(md.match(new RegExp(HEX64, 'g')), 'no second full hash in the sheet').toEqual([sha256(BODY)]);
+    expect(md).toContain('status: draft');
+    expect(md).toContain('\n## Fallbacks\n'); // the rest of the sheet is intact
+  });
+
+  it('the same bytes in dist/index.html and in the exported file (what `npm run export-offline` leaves) is no warning and exit 0', () => {
+    const repo = miniRepo();
+    const dir = join(repo.root, 'export');
+    const out = join(repo.root, 'run-sheet.md');
+    exportTo(dir);
+    putBuild(repo.root, BODY);
+    const r = repo.run([out], { WORKSHOP_OFFLINE_DIR: dir });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toBe('');
+    const md = readFileSync(out, 'utf8');
+    expect(md).not.toMatch(/warning|not the current build/i);
+    expect(freezeOf(md)).toContain(`\`${sha256(BODY)}\``);
+  });
+
+  it('with no build to compare with (no dist/index.html, or something unreadable in its place) there is no verdict: no warning, exit 0', () => {
+    for (const makeBuild of [() => undefined, (root: string) => mkdirSync(join(root, 'dist', 'index.html'), { recursive: true })]) {
+      const repo = miniRepo();
+      const dir = join(repo.root, 'export');
+      const out = join(repo.root, 'run-sheet.md');
+      exportTo(dir);
+      makeBuild(repo.root);
+      const r = repo.run([out], { WORKSHOP_OFFLINE_DIR: dir });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).toBe('');
+      expect(readFileSync(out, 'utf8')).not.toMatch(/warning/i);
+    }
+  });
+
+  it('a missing offline file keeps its own warning and exit 0, build or no build: it is not also called stale', () => {
+    const repo = miniRepo();
+    const out = join(repo.root, 'run-sheet.md');
+    putBuild(repo.root, CURRENT_BUILD);
+    const r = repo.run([out], { WORKSHOP_OFFLINE_DIR: join(repo.root, 'nothing exported') });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/run-sheet: warning: .*not found or could not be read/);
+    expect(r.stderr).not.toMatch(/not the current build/i);
+    expect(readFileSync(out, 'utf8')).not.toMatch(/not the current build/i);
   });
 
   it('a missing offline file is a warning line in the sheet and on stderr, not a crash: the sheet is still written', () => {

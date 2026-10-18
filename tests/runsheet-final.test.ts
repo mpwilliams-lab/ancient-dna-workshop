@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CARD_HINT, WRAP_BUTTON, WRAP_CLOSE } from '../src/content';
 import { advance, EXTRA_PREFIX, hintText, NEXT_PREFIX, SCRIPT } from '../src/hints';
-import { buildRunSheet, FREEZE_TEXT, OFFLINE_NAME, type OfflineFileInfo } from '../src/runsheet';
+import { buildRunSheet, FREEZE_TEXT, OFFLINE_NAME, shortHash, staleOffline, type OfflineFileInfo } from '../src/runsheet';
 import { FIXTURE } from './helpers/shellEnv';
 
 const AT = '2026-10-19T09:00:00Z';
@@ -158,6 +158,107 @@ describe('run sheet: "Freeze and verify" (spec §3.6 freeze text)', () => {
       expect(text, JSON.stringify(info)).toMatch(/warning/i);
       expect(text, JSON.stringify(info)).not.toMatch(/undefined|NaN|Infinity/);
     }
+  });
+
+  // final review F1: the Drive copy was the Task 14 build, 66 commits behind the code, and the table recorded its hash without a word.
+  // The CLI passes the build in dist/index.html as a fifth argument (tests/runsheet-cli.test.ts runs it for real).
+  describe('when the offline file is not the build in dist/index.html', () => {
+    const stale = (): string => freezeOf(buildRunSheet(FIXTURE, AT, OFFLINE, FILE, OTHER));
+    const warningOf = (text: string): { at: number; line: string } => {
+      const lines = text.split('\n');
+      const at = lines.findIndex((l) => /warning/i.test(l));
+      return { at, line: lines[at] ?? '' };
+    };
+
+    it('opens with a loud WARNING before the table: both short hashes, the build size, dist/index.html and the two npm commands', () => {
+      const text = stale();
+      const lines = text.split('\n');
+      const { at, line } = warningOf(text);
+      expect(at, 'a warning line').toBeGreaterThan(-1);
+      expect(at).toBeGreaterThan(lines.indexOf('Sessions run Thu 22 and Fri 23 Oct only; there is none on Sat 24.'));
+      expect(at).toBeLessThan(lines.findIndex((l) => l.startsWith('| File |')));
+      expect(line).toMatch(/THE OFFLINE FILE IS NOT THE CURRENT BUILD/);
+      expect(line).toContain(shortHash(FILE.sha256));
+      expect(line).toContain(shortHash(OTHER.sha256));
+      expect(line).toContain(`${OTHER.bytes.toLocaleString('en-US')} bytes`);
+      expect(line).toContain('`dist/index.html`');
+      expect(line).toContain('`npm run export-offline`');
+      expect(line).toContain('`npm run run-sheet`');
+      expect(line.startsWith('> **WARNING')).toBe(true);
+    });
+
+    it('does not disturb the rest of the section: the spec freeze text is still its first line, the offline file is still recorded in full, the build\'s full hash stays out', () => {
+      const text = stale();
+      expect(text.split('\n')[2]).toBe(FREEZE_TEXT);
+      expect(text).toContain(`\`${FILE.sha256}\``);
+      expect(text).toContain(`${FILE.bytes.toLocaleString('en-US')} bytes`);
+      expect(text).not.toContain(OTHER.sha256);
+      expect(text).toContain('Get-FileHash -Algorithm SHA256');
+      expect(buildRunSheet(FIXTURE, AT, OFFLINE, FILE, OTHER)).not.toMatch(/undefined|NaN|\{\{|TBD/);
+    });
+
+    it('says nothing when the hashes are equal, when there is no build to compare with, or when the build record is damaged', () => {
+      const same: OfflineFileInfo = { bytes: FILE.bytes, sha256: FILE.sha256 };
+      const damaged = [{ bytes: -1, sha256: 'zz' }, { bytes: 10 }, {}, 'file', 42] as unknown as OfflineFileInfo[];
+      for (const current of [same, null, undefined, ...damaged]) {
+        expect(freezeOf(buildRunSheet(FIXTURE, AT, OFFLINE, FILE, current)), JSON.stringify(current)).not.toMatch(/warning/i);
+      }
+    });
+
+    it('a missing offline file keeps its own warning, and is not also called stale', () => {
+      for (const missing of [null, undefined, { bytes: -1, sha256: 'zz' } as OfflineFileInfo]) {
+        const text = freezeOf(buildRunSheet(FIXTURE, AT, OFFLINE, missing, OTHER));
+        const { line } = warningOf(text);
+        expect(line, JSON.stringify(missing)).toMatch(/not found|could not be read/i);
+        expect(text, JSON.stringify(missing)).not.toMatch(/not the current build/i);
+      }
+    });
+
+    it('staleOffline names both records only when both are good and differ', () => {
+      expect(staleOffline(FILE, OTHER)).toEqual({ offline: FILE, current: OTHER });
+      expect(staleOffline(FILE, { ...FILE })).toBeNull();
+      expect(staleOffline(FILE, null)).toBeNull();
+      expect(staleOffline(null, OTHER)).toBeNull();
+      expect(staleOffline(FILE, { bytes: 3, sha256: 'xyz' })).toBeNull();
+      expect(staleOffline(undefined, undefined)).toBeNull();
+    });
+
+    it('shortHash is the first eight digits and an ellipsis, so it can never be mistaken for a whole hash', () => {
+      expect(shortHash(FILE.sha256)).toBe('7baf0ba7…');
+      expect(shortHash(FILE.sha256)).not.toMatch(/\b[0-9a-f]{64}\b/);
+    });
+  });
+});
+
+// final review F1 and its Minor siblings: the Monday checklist has the two checks the review found missing.
+describe('run sheet: the Monday checklist', () => {
+  const monday = (): string => section(md, 'Monday 19 Oct rehearsal checklist');
+  const itemWith = (needle: RegExp): string | undefined => monday().split('\n').find((l) => l.startsWith('- [ ]') && needle.test(l));
+
+  it('has every lab desktop copy hashed with Get-FileHash and compared with the sheet, before any timing run', () => {
+    const item = itemWith(/Get-FileHash/);
+    expect(item, 'a checklist item that runs Get-FileHash').toBeDefined();
+    expect(item).toContain(`Get-FileHash -Algorithm SHA256 .\\${OFFLINE_NAME}`);
+    expect(item).toMatch(/every copy|each lab machine/);
+    expect(item).toMatch(/compare the `Hash` with the SHA-256 in "Freeze and verify"/);
+    expect(item).toMatch(/stale or damaged copy/);
+    expect(item).toMatch(/before any timing run/);
+    // after the item that copies the file there, and before the one that times the steps
+    const lines = monday().split('\n');
+    expect(lines.indexOf(item!)).toBeGreaterThan(lines.findIndex((l) => l.startsWith('- [ ] Offline: copy')));
+    expect(lines.indexOf(item!)).toBeLessThan(lines.findIndex((l) => l.startsWith('- [ ] Time every step')));
+  });
+
+  it('has the projector legibility check: the plot text read from the back row, the three places named, Ctrl+ not enlarging it, a report by Mon evening', () => {
+    const item = itemWith(/legibility/i);
+    expect(item, 'a checklist item about legibility').toBeDefined();
+    expect(item).toMatch(/back row/);
+    expect(item).toMatch(/projector at its mirrored resolution/);
+    for (const place of ['Today PCA legend', 'ADMIXTURE bar labels', 'LCT period names']) expect(item).toContain(place);
+    expect(item).toMatch(/does not grow with Ctrl\+/);
+    expect(item).toMatch(/Mon evening/);
+    expect(item).toMatch(/Wed 21 Oct 20:00 freeze/);
+    expect(item).toMatch(/1024×768.*12 px.*Ctrl\+ once/);
   });
 });
 

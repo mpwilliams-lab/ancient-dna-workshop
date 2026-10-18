@@ -198,6 +198,14 @@ describe('open checks (spec §11)', () => {
       expect(c.status).not.toMatch(/Open until|ships unlabelled/);
     }
   });
+  // Check 15 read "Open, as a vitest at P1" long after the vitest existed (final review, Minor). It reads as passing, and the test it names is there.
+  it('check 15 reads as passing, because the vitest on the real data that pins it exists', () => {
+    const c = OPEN_CHECKS[14]!;
+    expect(c.n).toBe(15);
+    expect(c.status).toMatch(/^Passes/);
+    expect(c.status).not.toMatch(/\bOpen\b/);
+    expect(readFileSync(join(ROOT, 'tests', 'real-data.test.ts'), 'utf8')).toContain("it('open check 15:");
+  });
   // O1 (settled): the build writes 1000 Genomes Britain as 5 copies = 0.02747, so card K2 shows 2.7. The spec §11 line still
   // has the pre-O1 value (0.0275, which would round to 2.8).
   it('check 5 carries O1: 1000 Genomes Britain is 0.02747 and card K2 shows 2.7, never the stale 0.0275 or 2.8', () => {
