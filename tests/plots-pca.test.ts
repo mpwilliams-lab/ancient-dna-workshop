@@ -1,17 +1,24 @@
 // @vitest-environment jsdom
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fixture from './fixtures/data.fixture.json';
-import type { ChipKey, PeriodId, WorkshopData } from '../src/types';
-import { INITIAL_PLOT, layerOpacity, type PcaCaptionItem, type PlotState } from '../src/plotState';
+import type { ChipKey, NamedPoint, PeriodId, WorkshopData } from '../src/types';
+import { validateData } from '../src/data';
+import { ALL_OFF, withFeatures, type Features } from '../src/features';
+import { INITIAL_PLOT, layerOpacity, reducePlot, type PcaCaptionItem, type PlotState } from '../src/plotState';
 import {
-  PCA_VIEW, TODAY_RING, clampToFrame, frameTransition, makeScale, renderPca, renderPcaCaptions,
+  PCA_VIEW, TODAY_RING, YORK_LABEL_CHARS, YORK_LINE, YORK_MARKER_R, clampToFrame, frameTransition, makeScale, renderPca,
+  renderPcaCaptions, yorkTravellerMark,
 } from '../src/plots/pca';
-import { INK, MAP_GREY, OKABE_ITO, PERIOD_COLORS, PERIOD_SHAPES, f1, textBlock, wrapText } from '../src/plots/svg';
+import { INK, MAP_GREY, OKABE_ITO, PERIOD_COLORS, PERIOD_SHAPES, f1, shapePath, textBlock, wrapText } from '../src/plots/svg';
 import { CHIP_ICON_PATHS, chipElement } from '../src/icons';
 import {
   CHIP_TEXT, EAST_ENGLAND_LEGEND, EUROPE_CAPTION, LEGEND_ANCIENT, LEGEND_LIVING, MAP_GROUP_LABELS, NORTH_SEA_LABEL,
-  PCA_CAPTION, PERIOD_LABELS, withN, zoomNote,
+  PCA_CAPTION, PERIOD_LABELS, YORK_TRAVELLER_LABEL, withN, zoomNote,
 } from '../src/content';
+import { ruleViolations } from './contentRules';
+import { FIXTURE } from './fixtures/fixture';
 
 // The shared fixture supplies everything else; the PCA geometry is pinned here so the
 // expected pixel values below do not depend on how the fixture's points were chosen.
@@ -889,5 +896,264 @@ describe('caption strip and chips (renderPcaCaptions, icons.ts)', () => {
       expect(el.querySelector('svg.chip-icon path')?.namespaceURI).toBe('http://www.w3.org/2000/svg');
       expect(el.textContent).toBe(CHIP_TEXT[key]);
     }
+  });
+});
+
+// ---- Task 29 (P3, flag yorkTraveller): the York traveller on the Roman plot ----
+// The point sits off the British frame (the label says "off this zoomed map"), so it is drawn pinned to the frame edge with a pointer
+// toward where it really lies. Both flag states are driven by an explicit `features` argument, never by the shipped FEATURES.
+describe('York traveller edge marker (Task 29, flag yorkTraveller)', () => {
+  const york: NamedPoint = { key: 'york_traveller', period: 'Roman', x: 0.045, y: 0.005 };
+  const data: WorkshopData = { ...FIXTURE, named: [york] };
+  const roman = reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, data);
+  const on = withFeatures({ yorkTraveller: true }, ALL_OFF);
+  const draw = (d: WorkshopData, p: PlotState, features?: Features): SVGSVGElement => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    document.body.replaceChildren(svg);
+    renderPca(svg, d, p, { animate: false, ...(features === undefined ? {} : { features }) });
+    return svg;
+  };
+
+  it('the label is the verbatim §3.3 text and passes the content rules', () => {
+    expect(YORK_TRAVELLER_LABEL).toBe('A man buried in York whose DNA is most like people in the Middle East today (off this zoomed map)');
+    expect(ruleViolations(YORK_TRAVELLER_LABEL)).toEqual([]);
+  });
+
+  it('draws one marker on a Roman-focus plot, with the label and a hover tip', () => {
+    expect(roman.focus).toBe('Roman');
+    const svg = draw(data, roman, on);
+    const g = svg.querySelectorAll('g.york-traveller');
+    expect(g).toHaveLength(1);
+    expect(g[0]!.getAttribute('data-named')).toBe('york_traveller');
+    expect(g[0]!.getAttribute('data-tip')).toBe(YORK_TRAVELLER_LABEL);
+    expect(g[0]!.querySelector('text.york-label')?.textContent).toBe(YORK_TRAVELLER_LABEL);
+  });
+
+  it('the marker is a hollow Roman square a little bigger than a data point, with a Roman-coloured pointer, and shows nothing but the label as text', () => {
+    const g = draw(data, roman, on).querySelector('g.york-traveller')!;
+    const marker = g.querySelector('path.york-marker')!;
+    expect(marker.getAttribute('fill')).toBe('#FFFFFF');
+    expect(marker.getAttribute('stroke')).toBe(PERIOD_COLORS.Roman);
+    expect(YORK_MARKER_R).toBeGreaterThan(5);                       // a data point has radius 5
+    expect(g.querySelector('path.york-pointer')!.getAttribute('fill')).toBe(PERIOD_COLORS.Roman);
+    expect(g.querySelector('path.york-pointer')!.getAttribute('d')).toMatch(/^M[\d. -]+L[\d. -]+L[\d. -]+Z$/);
+    expect(g.querySelectorAll('text')).toHaveLength(1);              // no sample ID, group ID or place name besides the label
+    expect(g.textContent).toBe(YORK_TRAVELLER_LABEL);
+  });
+
+  it('pins the marker to the frame edge and points toward the real position', () => {
+    const fr = data.frames[roman.frame];
+    const sc = makeScale(fr);
+    const c = clampToFrame(york, fr);
+    expect(c.clipped).toBe(true);
+    const q = { x: sc.toX(c.x), y: sc.toY(c.y) };
+    const t = { x: sc.toX(york.x), y: sc.toY(york.y) };
+    const g = draw(data, roman, on).querySelector('g.york-traveller')!;
+    expect(g.querySelector('path.york-marker')!.getAttribute('d')).toBe(shapePath(PERIOD_SHAPES.Roman, q.x, q.y, YORK_MARKER_R));
+    const tip = (g.querySelector('path.york-pointer')!.getAttribute('d') ?? '').match(/^M(-?[\d.]+) (-?[\d.]+)/)!;
+    const v = { x: Number(tip[1]) - q.x, y: Number(tip[2]) - q.y };
+    expect(v.x * (t.x - q.x) + v.y * (t.y - q.y)).toBeGreaterThan(0);
+  });
+
+  it('sets the words in three lines (wrapped at 36 characters, 18 apart) of 15 px type with a white outline, so they read over the dots', () => {
+    expect([YORK_LABEL_CHARS, YORK_LINE, YORK_MARKER_R]).toEqual([36, 18, 8]);
+    const label = draw(data, roman, on).querySelector('text.york-label')!;
+    expect(label.querySelectorAll('tspan')).toHaveLength(3);
+    expect(label.getAttribute('font-size')).toBe('15');
+    expect(label.getAttribute('font-weight')).toBe('600');
+    expect([label.getAttribute('stroke'), label.getAttribute('stroke-width'), label.getAttribute('paint-order')]).toEqual(['#FFFFFF', '4', 'stroke']);
+    expect(label.getAttribute('pointer-events'), 'the words never take the hover from the mark under them').toBe('none');
+  });
+
+  // textBlock keeps the space between two lines at the end of the first. A right-anchored line counts that space in its width, so the lines
+  // would stop a space (about 4 units) short of the last one: for a right-anchored label the spaces are at the front of the next line.
+  it('right-anchored lines all end on their last letter: the space between two lines is at the front of the next one, and the sentence is unchanged', () => {
+    const label = draw(data, roman, on).querySelector('text.york-label')!;
+    expect(label.getAttribute('text-anchor')).toBe('end');
+    const lines = [...label.querySelectorAll('tspan')].map((t) => t.textContent!);
+    expect(lines).toHaveLength(3);
+    lines.forEach((l, i) => {
+      expect(l.endsWith(' '), `line ${i} ends in a space`).toBe(false);
+      expect(l.startsWith(' '), `line ${i} starts with a space`).toBe(i > 0);
+      expect(l.trim().length, `line ${i}`).toBeLessThanOrEqual(YORK_LABEL_CHARS);
+    });
+    expect(label.textContent).toBe(YORK_TRAVELLER_LABEL);
+  });
+
+  it('left-anchored lines start on their first letter: the space between two lines stays at the end of the first, and the sentence is unchanged', () => {
+    const nw: WorkshopData = { ...FIXTURE, named: [{ ...york, x: 0.0, y: 0.05 }] };       // north-west of the frame: the words start right of the mark
+    const label = draw(nw, reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, nw), on).querySelector('text.york-label')!;
+    expect(label.hasAttribute('text-anchor')).toBe(false);
+    const lines = [...label.querySelectorAll('tspan')].map((t) => t.textContent!);
+    lines.forEach((l, i) => {
+      expect(l.startsWith(' '), `line ${i} starts with a space`).toBe(false);
+      expect(l.endsWith(' '), `line ${i} ends in a space`).toBe(i < lines.length - 1);
+    });
+    expect(label.textContent).toBe(YORK_TRAVELLER_LABEL);
+  });
+
+  it('keeps every label line inside the plot box', () => {
+    const label = draw(data, roman, on).querySelector('text.york-label')!;
+    const lines = label.querySelectorAll('tspan').length;
+    expect(lines).toBeGreaterThanOrEqual(2);
+    for (const span of Array.from(label.querySelectorAll('tspan'))) expect(span.textContent!.trim().length).toBeLessThanOrEqual(YORK_LABEL_CHARS);
+    const y0 = Number(label.getAttribute('y'));
+    expect(y0).toBeGreaterThanOrEqual(PCA_VIEW.top);
+    expect(y0 + (lines - 1) * YORK_LINE).toBeLessThanOrEqual(PCA_VIEW.bottom);
+    const x = Number(label.getAttribute('x'));
+    expect(x).toBeGreaterThanOrEqual(PCA_VIEW.left);
+    expect(x).toBeLessThanOrEqual(PCA_VIEW.right);
+  });
+
+  it('puts the label on the plot-centre side of the marker: a marker in the right half ends its label (text-anchor end) above and left of it', () => {
+    const g = draw(data, roman, on).querySelector('g.york-traveller')!;
+    const label = g.querySelector('text.york-label')!;
+    const m = /^M(-?[\d.]+) (-?[\d.]+)/.exec(g.querySelector('path.york-marker')!.getAttribute('d') ?? '')!;
+    const markerLeft = Number(m[1]);                               // the square's top-left corner x; its centre is 0.9 r further right
+    const centreX = markerLeft + YORK_MARKER_R * 0.9;
+    expect(centreX).toBeGreaterThan((PCA_VIEW.left + PCA_VIEW.right) / 2);
+    expect(label.getAttribute('text-anchor')).toBe('end');
+    expect(Number(label.getAttribute('x'))).toBeLessThan(centreX);
+    const bottomLine = Number(label.getAttribute('y')) + (label.querySelectorAll('tspan').length - 1) * YORK_LINE;
+    const centreY = Number(m[2]) + YORK_MARKER_R * 0.9;
+    expect(bottomLine).toBeLessThan(centreY);                       // the block ends above the marker
+  });
+
+  // The data puts him south-east of the British frame, but the rule is general: wherever he is off the frame he is pinned to its nearest edge or
+  // corner, the pointer leads away from it toward where he lies, and the words sit on the plot-centre side of the mark, not over it, inside the box.
+  it('puts the words on the plot-centre side of the mark at every edge and corner of the frame, never over it, inside the plot box', () => {
+    const spots: Record<string, [number, number]> = {
+      NW: [0.0, 0.05], N: [0.02, 0.05], NE: [0.04, 0.05], E: [0.04, 0.03], SE: [0.045, 0.005], S: [0.02, 0.0], SW: [0.0, 0.0], W: [0.0, 0.03],
+    };
+    const WORD = 8.5;                                   // an estimate of a 15 px semi-bold character, in plot units
+    const fr = data.frames[roman.frame];
+    const sc = makeScale(fr);
+    for (const [name, [x, y]] of Object.entries(spots)) {
+      const d: WorkshopData = { ...FIXTURE, named: [{ ...york, x, y }] };
+      const svg = draw(d, reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, d), on);
+      const g = svg.querySelector('g.york-traveller');
+      expect(g, name).not.toBeNull();
+      const c = clampToFrame({ x, y }, fr);
+      const q = { x: sc.toX(c.x), y: sc.toY(c.y) };
+      const t = { x: sc.toX(x), y: sc.toY(y) };
+      const right = q.x > (PCA_VIEW.left + PCA_VIEW.right) / 2;
+      const below = q.y > (PCA_VIEW.top + PCA_VIEW.bottom) / 2;
+      expect(g!.querySelector('path.york-marker')!.getAttribute('d'), `${name}: the mark is pinned to the frame's edge`).toBe(shapePath(PERIOD_SHAPES.Roman, q.x, q.y, YORK_MARKER_R));
+      const tip = /^M(-?[\d.]+) (-?[\d.]+)/.exec(g!.querySelector('path.york-pointer')!.getAttribute('d') ?? '')!;
+      expect((Number(tip[1]) - q.x) * (t.x - q.x) + (Number(tip[2]) - q.y) * (t.y - q.y), `${name}: the pointer leads toward where he lies`).toBeGreaterThan(0);
+      const label = g!.querySelector('text.york-label')!;
+      const lines = label.querySelectorAll('tspan').length;
+      const lx = Number(label.getAttribute('x'));
+      const ly = Number(label.getAttribute('y'));
+      expect(label.getAttribute('text-anchor') === 'end', `${name}: right-anchored exactly in the right half`).toBe(right);
+      // The block's estimated extent: its width runs left of the anchor when right-anchored and right of it otherwise; 15 px type, lines YORK_LINE apart.
+      const wide = YORK_LABEL_CHARS * WORD;
+      const block = { left: right ? lx - wide : lx, right: right ? lx : lx + wide, top: ly - 15, bottom: ly + (lines - 1) * YORK_LINE + 4 };
+      expect(block.left, `${name}: the words start inside the plot box`).toBeGreaterThanOrEqual(PCA_VIEW.left);
+      expect(block.right, `${name}: the words end inside the plot box`).toBeLessThanOrEqual(PCA_VIEW.right);
+      expect(block.top, `${name}: the words start below the plot box's top`).toBeGreaterThanOrEqual(PCA_VIEW.top);
+      expect(block.bottom, `${name}: the words end above the plot box's bottom`).toBeLessThanOrEqual(PCA_VIEW.bottom);
+      const s = 0.9 * YORK_MARKER_R;                    // the square mark's half-width
+      const apart = block.right < q.x - s || block.left > q.x + s || block.bottom < q.y - s || block.top > q.y + s;
+      expect(apart, `${name}: the words are clear of the mark`).toBe(true);
+      expect(below ? block.bottom < q.y : block.top > q.y, `${name}: the block is on the plot-centre side vertically`).toBe(true);
+    }
+  });
+
+  it('lies wholly inside the 1000 x 760 drawing where the data puts him: the pointer\'s three corners and the square mark', () => {
+    const g = draw(data, roman, on).querySelector('g.york-traveller')!;
+    const corners = [...(g.querySelector('path.york-pointer')!.getAttribute('d') ?? '').matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])] as const);
+    expect(corners).toHaveLength(3);
+    for (const [x, y] of corners) expect(x >= 0 && x <= PCA_VIEW.width && y >= 0 && y <= PCA_VIEW.height, `pointer corner ${x}, ${y}`).toBe(true);
+    // The square is drawn "M x y h w v w h -w Z": its top-left corner, then its width and height.
+    const sq = /^M(-?[\d.]+) (-?[\d.]+)h([\d.]+)v([\d.]+)/.exec(g.querySelector('path.york-marker')!.getAttribute('d') ?? '')!;
+    const [x0, y0, w, h] = [sq[1], sq[2], sq[3], sq[4]].map(Number) as [number, number, number, number];
+    expect(x0 >= 0 && x0 + w <= PCA_VIEW.width && y0 >= 0 && y0 + h <= PCA_VIEW.height, 'the mark').toBe(true);
+  });
+
+  it('is drawn inside the plot group, after the centre labels and before the legend', () => {
+    const svg = draw(data, roman, on);
+    const world = svg.querySelector('g.world')!;
+    const mark = world.querySelector(':scope > g.york-traveller');
+    expect(mark, 'a child of g.world, so a frame change carries it along').not.toBeNull();
+    const labels = [...world.querySelectorAll(':scope > text.centre-label')];
+    expect(labels.length, 'the British frame has centre labels').toBeGreaterThan(0);
+    for (const l of labels) expect(l.compareDocumentPosition(mark!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(mark!.compareDocumentPosition(svg.querySelector('g.legend')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('draws nothing when the focus is not Roman', () => {
+    const ironAfter = reducePlot(roman, { kind: 'pca', period: 'IronAge' }, data);
+    expect(draw(data, ironAfter, on).querySelector('g.york-traveller')).toBeNull();
+    const all = reducePlot(roman, { kind: 'pca', period: 'all' }, data);
+    expect(draw(data, all, on).querySelector('g.york-traveller')).toBeNull();
+    const europe = reducePlot(roman, { kind: 'pca', period: 'Europe' }, data);
+    expect(draw(data, europe, on).querySelector('g.york-traveller')).toBeNull();
+  });
+
+  it('draws nothing without named data, or when the point is inside the frame (the label would be false)', () => {
+    const { named: _drop, ...noNamed } = data;
+    expect(draw(noNamed as WorkshopData, roman, on).querySelector('g.york-traveller')).toBeNull();
+    expect(draw({ ...FIXTURE, named: [] }, roman, on).querySelector('g.york-traveller')).toBeNull();
+    const inside: WorkshopData = { ...FIXTURE, named: [{ ...york, x: 0.02, y: 0.03 }] };
+    expect(yorkTravellerMark(inside, reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, inside), on)).toBeNull();
+  });
+
+  it('reads the first named point and never assumes there is only one (validateNamed accepts any count; the data build guarantees one)', () => {
+    const second: NamedPoint = { key: 'york_traveller', period: 'Roman', x: -0.2, y: 0.5 };
+    const two: WorkshopData = { ...FIXTURE, named: [york, second] };
+    const svg = draw(two, roman, on);
+    expect(svg.querySelectorAll('g.york-traveller')).toHaveLength(1);
+    expect(svg.querySelector('g.york-traveller path.york-marker')!.getAttribute('d')).toBe(draw(data, roman, on).querySelector('g.york-traveller path.york-marker')!.getAttribute('d'));
+  });
+
+  it('is not drawn on any other view', () => {
+    for (const view of ['admixture', 'trait', 'consumer', 'none'] as const) {
+      expect(yorkTravellerMark(data, { ...roman, view }, on), view).toBeNull();
+    }
+  });
+
+  it('the flag is read from the `features` argument, and from the shipped FEATURES when none is given', () => {
+    expect(yorkTravellerMark(data, roman, ALL_OFF)).toBeNull();
+    expect(yorkTravellerMark(data, roman, withFeatures({ yorkTraveller: true }))).not.toBeNull();
+    const shipped = yorkTravellerMark(data, roman);           // no features argument: the build's own flag set
+    const shown = draw(data, roman).querySelectorAll('g.york-traveller').length;
+    expect(shipped === null).toBe(shown === 0);
+    expect(withFeatures({ yorkTraveller: true }).yorkTraveller).toBe(true);
+  });
+});
+
+const REAL_JSON = resolve(__dirname, '../src/data/workshop_data.json');   // (not import.meta.url: under jsdom it is not a file URL)
+describe.runIf(process.env.REAL_DATA === '1' && existsSync(REAL_JSON))('York traveller on the real data (Task 29)', () => {
+  const real = validateData(JSON.parse(readFileSync(REAL_JSON, 'utf8')));
+  const p = reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, real);
+  const draw = (): SVGSVGElement => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    document.body.replaceChildren(svg);
+    renderPca(svg, real, p, { animate: false, features: withFeatures({ yorkTraveller: true }, ALL_OFF) });
+    return svg;
+  };
+
+  it('is drawn on the Roman focus as an edge marker inside the plot box', () => {
+    const label = draw().querySelector('g.york-traveller text.york-label');
+    expect(label?.textContent).toBe(YORK_TRAVELLER_LABEL);
+    const y0 = Number(label!.getAttribute('y'));
+    expect(y0).toBeGreaterThanOrEqual(PCA_VIEW.top);
+    expect(y0 + (label!.querySelectorAll('tspan').length - 1) * YORK_LINE).toBeLessThanOrEqual(PCA_VIEW.bottom);
+  });
+
+  it('is off the British frame to the east and south, so he is pinned to its south-east corner and points down and to the right', () => {
+    const named = real.named?.[0];
+    expect(named, 'the build has the named point').toBeDefined();
+    const fr = real.frames.britain;
+    expect(named!.x).toBeGreaterThan(fr.xmax);
+    expect(named!.y).toBeLessThan(fr.ymin);
+    const sc = makeScale(fr);
+    const corner = { x: sc.toX(fr.xmax), y: sc.toY(fr.ymin) };
+    const g = draw().querySelector('g.york-traveller')!;
+    expect(g.querySelector('path.york-marker')!.getAttribute('d')).toBe(shapePath(PERIOD_SHAPES.Roman, corner.x, corner.y, YORK_MARKER_R));
+    const tip = /^M(-?[\d.]+) (-?[\d.]+)/.exec(g.querySelector('path.york-pointer')!.getAttribute('d') ?? '')!;
+    expect(Number(tip[1])).toBeGreaterThan(corner.x);
+    expect(Number(tip[2])).toBeGreaterThan(corner.y);
   });
 });

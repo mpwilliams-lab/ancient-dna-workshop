@@ -221,6 +221,21 @@ describe('card overlay (spec §5.2, CONTRACT §4.11)', () => {
     const perCard = allRules(css).filter((r) => /data-card-id/.test(r.prelude) && /\.card-tile img/.test(r.prelude));
     expect(perCard.map((r) => r.prelude)).toEqual(['#card[data-card-id="F1"] .card-tile img']);
   });
+  // Task 29: F1's town inset is one more tile in the picture row. Four equal columns while the row carries it (the row says so with data-inset,
+  // which cardView sets), its map as tall as a picture may be (the spec's bound, the same expression as every tile picture), hidden by
+  // compact with the other optional tiles (the rule pinned above) and, with it, the Natural Earth credit that is only there for it.
+  it('F1\'s town inset: four equal columns in the row that carries it, a map no taller than the general picture cap, and no credit line once compact has hidden it', () => {
+    expect(rule('#card .card-tiles[data-inset]')['grid-template-columns']).toBe('repeat(4, minmax(0, 1fr))');
+    expect(rule('#card .card-tiles[data-inset] .card-tile')['grid-column']).toBe('span 1');
+    const general = rule('#card .card-tile img')['max-height'];
+    expect(rule('#card .card-inset .inset-svg')['height'], 'the inset map keeps the spec bound for a picture').toBe(general);
+    expect(rule('#card .card-inset .inset-svg')['max-width']).toBe('100%');
+    expect(rule('#card.compact .card-tiles[data-inset] ~ .card-source').display).toBe('none');
+    // The inset is hidden by the rule that hides every optional tile, which names `.card-tile.is-optional`: the inset has both classes.
+    expect(rule('#card.compact .card-lead, #card.compact .card-tile img, #card.compact .card-tile.is-optional').display).toBe('none');
+    // It is a picture of its own kind (an svg), so none of the picture-cap rules (which name `.card-tile img`) applies to it.
+    expect(allRules(css).filter((r) => /\.card-inset/.test(r.prelude) && 'max-height' in decls(r.body))).toEqual([]);
+  });
   // After Task 26 (review of Task 25): a card with a single picture (I1's diagram, J1's drawing) may draw it larger than the general cap, because
   // its tile spans the whole card and a picture held to min(26vh, 230px) sits small in a wide grey panel. The cap is a ramp, not a step: it leaves
   // the general cap at a window height of 640 px, grows 0.54 px per px of height, and stops at min(35vh, 380px), which it reaches at 768 px, the

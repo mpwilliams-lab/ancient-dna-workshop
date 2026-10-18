@@ -3,14 +3,14 @@
 // Every manifest here is an in-memory copy (tests/helpers/assetEnv.ts): nothing reads the committed manifest's checks.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { cardShowsUpgrade } from '../src/assets';
 import { renderCardMap } from '../src/cardMap';
 import { CARDS, cardSource, cardVars, distributionRows, fillCard } from '../src/cards';
 import { renderCardBody, sourceWithMapSuffix, upgradedFormShown } from '../src/cardView';
 import { IRELAND_FOOTNOTE, MAP_SOURCE_SUFFIX, MAP_TEXT } from '../src/content';
 import { ALL_OFF, ALL_ON } from '../src/features';
-import { A1_CONFIRMED_LABELS, mapSpec } from '../src/maps';
+import { A1_CONFIRMED_LABELS, MAP_SPECS_BUILT, mapSpec } from '../src/maps';
 import { cloneFixture, FIXTURE } from './fixtures/fixture';
 import { ruleViolations } from './contentRules';
 import { checkedManifest, fakeUrls, onlyChecked } from './helpers/assetEnv';
@@ -29,12 +29,19 @@ describe('the upgrade rule for D1, E1, G1', () => {
       expect(upgradedFormShown(CARDS[id], on, checkedManifest(), fakeUrls())).toBe(true);
     });
   }
-  // Task 27 built K2 and L3, so no card has an unbuilt map any more and Task 20's version of this test (it named K2 and L3) is gone. The rule
-  // is still the code's (assets.ts cardShowsUpgrade asks MAP_SPECS_BUILT), so it is pinned with a card whose map has no spec: F1's inset id,
-  // which Task 29 builds and takes out of this test.
+  // Task 27 built K2 and L3 and Task 29 built F1's inset, so no map id is unbuilt any more and Task 20's version of this test (it named K2
+  // and L3), then Task 27's (it named F1's inset id) are gone. The rule is still the code's (assets.ts cardShowsUpgrade asks MAP_SPECS_BUILT), so
+  // it is pinned by taking D1's spec out of the built set for the length of the test: its flag is on and its map is checked, and the card
+  // still shows its text form, which only that clause can cause.
   it('a card whose map spec is not built is never upgraded, whatever the flags and checks', () => {
-    const unbuilt = { ...CARDS.D1, map: 'F1inset' as const };
-    expect(cardShowsUpgrade(unbuilt, ALL_ON, checkedManifest(), fakeUrls())).toBe(false);
+    expect(cardShowsUpgrade(CARDS.D1, ALL_ON, checkedManifest(), fakeUrls())).toBe(true);
+    const built = vi.spyOn(MAP_SPECS_BUILT, 'has').mockImplementation((id) => id !== 'D1');
+    try {
+      expect(cardShowsUpgrade(CARDS.D1, ALL_ON, checkedManifest(), fakeUrls())).toBe(false);
+      expect(cardShowsUpgrade(CARDS.E1, ALL_ON, checkedManifest(), fakeUrls()), 'only the map named is affected').toBe(true);
+    } finally {
+      built.mockRestore();
+    }
     expect(cardShowsUpgrade(CARDS.D1, ALL_ON, checkedManifest(), fakeUrls())).toBe(true);
   });
 });

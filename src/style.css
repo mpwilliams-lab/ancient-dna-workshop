@@ -646,6 +646,52 @@ body {
   max-height: min(15vh, 230px);
 }
 
+/* ---- P3 F1 town inset (Task 29, flag romanInset): one more tile in F1's tile row, after the photos, as tall as a picture may be
+   (the spec's general bound, min(26vh, 230px)); its two labels are a text key under the map. The row has four equal columns while it
+   carries the inset (data-inset, set by cardView). `compact` hides the tile with every other optional tile (rule above), and with it the
+   Natural Earth credit that is only there for it. The tile takes more room than F1 has at 1366 x 768 (F1 has about 3 px to spare there with
+   its photos, and the inset, its key and its credit line need about 150 more), so there the card leaves `normal`: that is why romanInset
+   stays false (e2e/p3-roman.spec.ts keeps the measurement). ---- */
+#card .card-tiles[data-inset] {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+#card .card-tiles[data-inset] .card-tile {
+  grid-column: span 1;
+}
+
+#card .card-inset .inset-svg {
+  display: block;
+  height: min(26vh, 230px);
+  width: auto;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+#card .card-inset .inset-key {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+}
+
+#card .card-inset .inset-key-item {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+#card .card-inset .inset-swatch {
+  flex: none;
+  width: 0.8em;
+  height: 0.8em;
+  margin-top: 0.25em;
+}
+
+#card.compact .card-tiles[data-inset] ~ .card-source {
+  display: none;
+}
+
 #card .tile-image-caption {
   display: block;
   font-size: 0.8em;

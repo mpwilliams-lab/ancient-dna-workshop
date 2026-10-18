@@ -10,13 +10,16 @@ import {
 } from './cards';
 import {
   BACK_BUTTON, BACK_BUTTON_LABEL, CARD_CONTINUE, CARD_CONTINUE_DONE, CARD_CONTINUE_TO_PLOT, cardCounter, CREDITS_LINK, MAP_SOURCE_SUFFIX,
+  MAP_TEXT,
 } from './content';
 import { chipElement } from './icons';
 import { renderDiagram } from './diagrams';
 import { ASSET_MANIFEST, HIDDEN_WHEN_SHOWN, type AssetManifest } from './assetManifest';
-import { BUNDLED_IMAGES, cardMapId, cardShowsUpgrade, imageReady, imageUrl, type ImageUrls } from './assets';
+import { BUNDLED_IMAGES, cardMapId, cardShowsUpgrade, imageReady, imageUrl, mapReady, type ImageUrls } from './assets';
 import { renderCardMap } from './cardMap';
-import { mapDataReady } from './maps';
+import { F1_INSET_BOX, mapDataReady, mapSpec } from './maps';
+import { mapBase, project, renderMap, type MapView } from './plots/map';
+import { INK, SVG_NS, f1, svgEl } from './plots/svg';
 
 export interface CardRenderContext {
   data: WorkshopData; features: Features;
@@ -73,10 +76,13 @@ export function sourceWithMapSuffix(source: string | undefined, mapShown: boolea
  * the data is left out, never printed half-filled: A1's "{n_pops} groups, {n_people} people" when the JSON has no europe_fit
  * (cardVars gives '' for both). Carry-forward from the Task 10 review: A1's source is shown only with its map (Task 23), and
  * never without europe_fit. A card whose map is drawn (`upgraded` on a map card) always ends with the Natural Earth line
- * (sourceWithMapSuffix, Task 27: K2's §3.4 source is the one that lacks it).
+ * (sourceWithMapSuffix, Task 27: K2's §3.4 source is the one that lacks it), and so does F1 while its town inset is on screen
+ * (`insetShown`, Task 29: F1 has no source line of its own, so that line is all it shows).
  */
-export function cardSourceLine(card: Card, upgraded: boolean, vars: Readonly<Record<CardVar, string>>): string | undefined {
-  const source = sourceWithMapSuffix(cardSource(card, upgraded), upgraded && cardMapId(card) !== undefined);
+export function cardSourceLine(
+  card: Card, upgraded: boolean, vars: Readonly<Record<CardVar, string>>, insetShown: boolean = false,
+): string | undefined {
+  const source = sourceWithMapSuffix(cardSource(card, upgraded), (upgraded && cardMapId(card) !== undefined) || insetShown);
   if (source === undefined) return undefined;
   const missing = (Object.keys(vars) as CardVar[]).some((name) => vars[name] === '' && source.includes(`{${name}}`));
   return missing ? undefined : fillCard(source, vars);
@@ -157,12 +163,72 @@ function renderValues(doc: Document, gene: GeneId, data: WorkshopData): HTMLULis
   return list;
 }
 
+/** Marker radius on the F1 inset, in viewBox units of the cropped Europe-frame outline: 3.1 to 3.5 px at the picture's 200 to 230 px of
+ *  height (the stroke adds half a unit more), so a dot is 7 to 9 px across. */
+const INSET_MARKER_R = 2.6;
+
+/**
+ * The F1 town inset (P3, flag romanInset): the Europe-frame Natural Earth outline cropped to Britain (the spec's own window, so the
+ * rest of Europe is clipped away, not just off the edge), six filled town markers and one hollow countryside marker drawn at inset
+ * size, and the two labels as an HTML key under the map so they stay legible at tile size. The SVG holds no text, and no place
+ * name is written anywhere: the six towns and the county are build-internal (src/maps.ts F1_INSET_PLACES).
+ */
+export function renderF1Inset(doc: Document, data: WorkshopData): HTMLElement {
+  const spec = mapSpec('F1inset', data);
+  const c = mapBase(spec.frame).projection;
+  const a = project(c, F1_INSET_BOX.latMax, F1_INSET_BOX.lonMin);
+  const b = project(c, F1_INSET_BOX.latMin, F1_INSET_BOX.lonMax);
+  // One decimal, as the viewBox of every other drawing here (f1), so the attribute reads "x y width height" exactly.
+  const view: MapView = { x: Number(f1(a.x)), y: Number(f1(a.y)), width: Number(f1(b.x - a.x)), height: Number(f1(b.y - a.y)) };
+  const fig = doc.createElement('figure');
+  fig.className = 'card-tile card-inset is-optional';
+  fig.setAttribute('data-map', 'F1inset');
+  const svg = doc.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
+  renderMap(svg, { ...spec, points: [], view });      // the outline and the window; the markers are drawn here, at inset size
+  svg.classList.add('inset-svg');
+  for (const pt of spec.points ?? []) {
+    const q = project(c, pt.lat, pt.lon);
+    const town = pt.label === MAP_TEXT.F1inset[0];
+    svg.append(svgEl('circle', {
+      class: town ? 'inset-town' : 'inset-country', cx: q.x, cy: q.y, r: INSET_MARKER_R,
+      fill: town ? INK : '#FFFFFF', stroke: INK, 'stroke-width': 1.2,
+    }));
+  }
+  const key = doc.createElement('figcaption');
+  key.className = 'inset-key';
+  MAP_TEXT.F1inset.forEach((text, i) => {
+    const item = doc.createElement('span');
+    item.className = 'inset-key-item';
+    const swatch = doc.createElementNS(SVG_NS, 'svg');
+    swatch.setAttribute('class', 'inset-swatch');
+    swatch.setAttribute('viewBox', '0 0 12 12');
+    swatch.setAttribute('aria-hidden', 'true');
+    swatch.append(svgEl('circle', { cx: 6, cy: 6, r: 4.5, fill: i === 0 ? INK : '#FFFFFF', stroke: INK, 'stroke-width': 1.5 }));
+    item.append(swatch, doc.createTextNode(text));
+    key.append(item);
+  });
+  fig.append(svg, key);
+  return fig;
+}
+
+/** F1's town inset is on screen: the card has one, its flag is on, the instructor has checked the inset map and its spec is built. */
+function insetOnScreen(card: Card, ctx: CardRenderContext): boolean {
+  if (!card.inset || !ctx.features[card.inset.feature]) return false;
+  return mapReady(card.inset.map, ctx.manifest ?? ASSET_MANIFEST) && mapDataReady(card.inset.map, ctx.data);
+}
+
+/** F1's inset tile when the card has one, its flag is on and the instructor has checked the inset map; otherwise null. */
+export function insetTile(doc: Document, card: Card, ctx: CardRenderContext): HTMLElement | null {
+  return insetOnScreen(card, ctx) ? renderF1Inset(doc, ctx.data) : null;
+}
+
 /** The card body in the §5.2 order (pure DOM build; the footer is added by mountCardView). */
 export function renderCardBody(doc: Document, card: Card, ctx: CardRenderContext): HTMLElement {
   const vars = cardVars(ctx.data);
   const fill = (s: string): string => fillCard(s, vars);
   const mapId = cardMapId(card);
   const upgraded = upgradeOnScreen(card, ctx);
+  const inset = insetTile(doc, card, ctx);
   const body = make(doc, 'div', 'card-body');
 
   const title = make(doc, 'h2', 'card-title', fill(card.title));
@@ -174,8 +240,16 @@ export function renderCardBody(doc: Document, card: Card, ctx: CardRenderContext
     for (const key of card.chips) chips.append(chipElement(doc, key));
     body.append(chips);
   }
-  const tiles = renderTiles(doc, card, ctx);
-  if (tiles !== null) body.append(tiles);
+  // The tile row, with F1's inset as one more tile after the photos (or its text captions). data-count stays the number of photo
+  // tiles, which is what the stylesheet's picture-count rules mean; data-inset marks the row that has the extra tile.
+  const tiles = renderTiles(doc, card, ctx) ?? (inset !== null ? make(doc, 'div', 'card-tiles') : null);
+  if (tiles !== null) {
+    if (inset !== null) {
+      tiles.append(inset);
+      tiles.setAttribute('data-inset', 'true');
+    }
+    body.append(tiles);
+  }
   if (upgraded && mapId !== undefined) body.append(renderCardMap(doc, card, ctx.data));
   if (card.diagram) {
     const slot = make(doc, 'div', 'card-diagram');
@@ -221,7 +295,7 @@ export function renderCardBody(doc: Document, card: Card, ctx: CardRenderContext
     body.append(list);
   }
   if (card.puzzle !== undefined) body.append(make(doc, 'p', 'card-puzzle', fill(card.puzzle)));
-  const source = cardSourceLine(card, upgraded, vars);
+  const source = cardSourceLine(card, upgraded, vars, inset !== null);
   if (source !== undefined) body.append(make(doc, 'p', 'card-source', source));
   return body;
 }

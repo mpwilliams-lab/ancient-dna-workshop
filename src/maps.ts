@@ -15,8 +15,8 @@ export { MAP_LABEL_FONT_PX };
 export const MAP_LABEL_CHAR_EM = 0.58;
 
 /** Maps whose spec exists. A card is upgraded to its map only if its id is here (assets.ts cardShowsUpgrade), so an
- *  unbuilt map is never drawn, whatever the flags. Task 29 adds the F1 inset. */
-export const MAP_SPECS_BUILT: ReadonlySet<MapId> = new Set<MapId>(['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3']);
+ *  unbuilt map is never drawn, whatever the flags. Every id of the MapId union is built now (Task 29 built the F1 inset). */
+export const MAP_SPECS_BUILT: ReadonlySet<MapId> = new Set<MapId>(['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3', 'F1inset']);
 
 type Anchor = 'start' | 'middle' | 'end';
 const ll = (lat: number, lon: number): LatLon => ({ lat, lon });
@@ -551,6 +551,31 @@ function distributionLayout(id: DistributionMapId, data: WorkshopData): { spec: 
   return { spec: { ...spec, view: dotMapView(frame, drawingBox(spec) as LabelBox) }, clear: found !== null };
 }
 
+// ---- F1 town inset (P3, flag romanInset; spec §3.3 P3 additions, §6) ----
+
+/** One place on the F1 inset. */
+export interface InsetPlace { lat: number; lon: number; kind: 'town' | 'country' }
+
+/**
+ * F1 town inset (P3, flag romanInset; spec §3.3 P3 additions). Approximate coordinates (lat, lon), WGS84, rounded to
+ * 0.01 deg. Place names are build-internal and never rendered:
+ *   towns and forts where newcomers were found: York 53.96, -1.08; Catterick 54.38, -1.65; Colchester 51.89, 0.90;
+ *   Canterbury 51.28, 1.08; Winchester 51.06, -1.31; Gloucester 51.86, -2.24;
+ *   countryside, mostly the same families: Cambridgeshire, the county's approximate centre, 52.38, 0.00.
+ */
+export const F1_INSET_PLACES: readonly InsetPlace[] = [
+  { lat: 53.96, lon: -1.08, kind: 'town' },
+  { lat: 54.38, lon: -1.65, kind: 'town' },
+  { lat: 51.89, lon: 0.9, kind: 'town' },
+  { lat: 51.28, lon: 1.08, kind: 'town' },
+  { lat: 51.06, lon: -1.31, kind: 'town' },
+  { lat: 51.86, lon: -2.24, kind: 'town' },
+  { lat: 52.38, lon: 0, kind: 'country' },
+];
+
+/** The part of the Europe frame the inset shows: Britain (and the edges of Ireland and France). */
+export const F1_INSET_BOX = { latMin: 49.8, latMax: 59.0, lonMin: -8.0, lonMax: 2.2 } as const;
+
 /** The map for a card (CONTRACT §4.13). Throws for a map whose spec is not built yet (see MAP_SPECS_BUILT). */
 export function mapSpec(id: MapId, data: WorkshopData): MapSpec {
   switch (id) {
@@ -568,6 +593,15 @@ export function mapSpec(id: MapId, data: WorkshopData): MapSpec {
     case 'K2':
     case 'L3':
       return distributionSpec(id, data);
+    case 'F1inset':
+      // Markers only, no arrows and no map text: the two labels are the HTML key under the inset (cardView renderF1Inset).
+      return {
+        id, frame: 'europe',
+        points: F1_INSET_PLACES.map((p) => ({
+          lat: p.lat, lon: p.lon, role: 'marker' as const,
+          label: p.kind === 'town' ? MAP_TEXT.F1inset[0] : MAP_TEXT.F1inset[1],
+        })),
+      };
     default:
       throw new Error(`mapSpec: map ${id} is not built yet`);
   }

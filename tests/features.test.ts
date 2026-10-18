@@ -8,6 +8,7 @@ import { ALL_OFF, ALL_ON, FEATURE_FLAGS, FEATURES, withFeatures, type FeatureFla
 import { CONSUMER_BARS_LOG, HELP_LINES, helpLines } from '../src/content';
 import { INITIAL_PLOT, reducePlot } from '../src/plotState';
 import { plotIsAnimating, renderPlot } from '../src/plots/index';
+import { renderPca } from '../src/plots/pca';
 import { ruleViolations } from './contentRules';
 import { FIXTURE } from './fixtures/fixture';
 import { checkedManifest, fakeUrls, onlyChecked } from './helpers/assetEnv';
@@ -374,6 +375,63 @@ describe('images.H1 / images.I1 / images.J1 (Task 25, spec §10.3)', () => {
         const el = renderCardBody(document, CARDS[id], cardCtx(FIXTURE, only, checkedManifest(), before));
         expect(el.querySelectorAll('img'), `${id} with only ${on} on`).toHaveLength(id === on ? (CARDS[id].tiles ?? []).length : 0);
       }
+    }
+  });
+});
+
+// Task 29. Both states of each flag are proved with an explicit feature set and an in-memory manifest (onlyChecked, CONTRACT §8 R6), never
+// the shipped FEATURES or the committed assets/manifest.json, whose visual_check only the instructor fills: these pass with both flags
+// still false in src/features.ts, and after they ship.
+describe('yorkTraveller (Task 29, spec §10.3)', () => {
+  const named = [{ key: 'york_traveller' as const, period: 'Roman' as const, x: 0.045, y: 0.005 }];
+  const data = { ...FIXTURE, named };
+  const roman = reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, data);
+  const drawn = (features: ReturnType<typeof withFeatures>): SVGSVGElement => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    renderPca(svg, data, roman, { animate: false, features });
+    return svg;
+  };
+
+  it('false: a Roman-focus PCA with named data draws no york-traveller group', () => {
+    expect(drawn(withFeatures({ yorkTraveller: false })).querySelector('g.york-traveller')).toBeNull();
+    expect(drawn(withFeatures({ yorkTraveller: false }, ALL_ON)).querySelector('g.york-traveller')).toBeNull();
+  });
+  it('true: the same plot draws him, and nothing else on the plot changes', () => {
+    const off = drawn(withFeatures({ yorkTraveller: false }, ALL_OFF));
+    const on = drawn(withFeatures({ yorkTraveller: true }, ALL_OFF));
+    expect(on.querySelectorAll('g.york-traveller')).toHaveLength(1);
+    on.querySelector('g.york-traveller')!.remove();
+    expect(on.outerHTML).toBe(off.outerHTML);
+  });
+  it('has its own flag: no other flag draws him', () => {
+    for (const f of FEATURE_FLAGS.filter((x) => x !== 'yorkTraveller')) {
+      expect(drawn(withFeatures({ [f]: true }, ALL_OFF)).querySelector('g.york-traveller'), f).toBeNull();
+    }
+  });
+});
+
+describe('romanInset (Task 29, spec §10.3)', () => {
+  const f1 = (features: ReturnType<typeof flagSet>, checked: readonly 'F1inset'[]): HTMLElement =>
+    renderCardBody(document, CARDS.F1, cardCtx(FIXTURE, features, onlyChecked(checked), { placement: 'after' }));
+
+  it('false: F1 renders no inset tile and no Natural Earth source line, even with the inset checked', () => {
+    const el = f1(flagSet('romanInset', false, ALL_ON), ['F1inset']);
+    expect(el.querySelector('.card-inset')).toBeNull();
+    expect(el.textContent ?? '').not.toContain('Made with Natural Earth');
+  });
+  it('true with the inset checked: F1 shows the inset tile and the Natural Earth source line', () => {
+    const el = f1(flagSet('romanInset', true, ALL_OFF), ['F1inset']);
+    expect(el.querySelectorAll('.card-inset[data-map="F1inset"]')).toHaveLength(1);
+    expect(el.querySelector('.card-source')?.textContent).toBe('Map outline: Made with Natural Earth.');
+  });
+  it('true with the inset unchecked: F1 is as with the flag off', () => {
+    const off = f1(flagSet('romanInset', false, ALL_OFF), []);
+    const on = f1(flagSet('romanInset', true, ALL_OFF), []);
+    expect(on.outerHTML).toBe(off.outerHTML);
+  });
+  it('has its own flag: no other flag shows the inset', () => {
+    for (const f of FEATURE_FLAGS.filter((x) => x !== 'romanInset')) {
+      expect(f1(flagSet(f, true, ALL_OFF), ['F1inset']).querySelector('.card-inset'), f).toBeNull();
     }
   });
 });

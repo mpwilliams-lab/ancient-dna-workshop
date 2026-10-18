@@ -7,8 +7,9 @@ import { MAP_TEXT } from '../src/content';
 import { EUROPE_WEST_LAND } from '../src/generated/map-europe-west';
 import {
   A1_CONFIRMED_LABELS, A1_DOT_R, A1_LABEL_PX, BAND_MAX_ASPECT, BAND_PAD, DISTRIBUTION_LABEL_OVERHANG, DISTRIBUTION_LABEL_PX,
-  DISTRIBUTION_MAP_FRAME, DISTRIBUTION_MAP_GENE, DOT_LABEL_WIDTH_FACTOR, bandView, distributionSpec, drawingBox, frameBox, labelAt, labelBox,
-  MAP_LABEL_FONT_PX, MAP_SPECS_BUILT, mapDataReady, mapSpec, placeDotLabels, placeLabels, specA1, type LabelBox,
+  DISTRIBUTION_MAP_FRAME, DISTRIBUTION_MAP_GENE, DOT_LABEL_WIDTH_FACTOR, F1_INSET_BOX, F1_INSET_PLACES, bandView, distributionSpec,
+  drawingBox, frameBox, labelAt, labelBox, MAP_LABEL_FONT_PX, MAP_SPECS_BUILT, mapDataReady, mapSpec, placeDotLabels, placeLabels, specA1,
+  type LabelBox,
 } from '../src/maps';
 import {
   ARROW_WIDTH, MAP_FRAMES, MAP_VIEW, WIDE_ARROW_WIDTH, arrowReach, catmullRomSegments, dotRadius, makeProjection, project, projectUnits,
@@ -201,8 +202,15 @@ describe('mapSpec D1, E1, G1 (spec §6)', () => {
   }
 
   it('a map that is not built yet throws, and mapDataReady says no', () => {
-    expect(() => mapSpec('F1inset', FIXTURE)).toThrow(/not built/);
-    expect(mapDataReady('F1inset', FIXTURE)).toBe(false);
+    // Written over every map id, so that it names none of the maps a later task builds: it checks whichever are still unbuilt (none now
+    // that Task 29 has built F1inset, so the unknown id below is what proves the throw and the `false`).
+    for (const id of ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3', 'F1inset'] as const) {
+      if (MAP_SPECS_BUILT.has(id)) continue;
+      expect(() => mapSpec(id, FIXTURE)).toThrow(/not built/);
+      expect(mapDataReady(id, FIXTURE)).toBe(false);
+    }
+    expect(() => mapSpec('Z9' as never, FIXTURE)).toThrow(/not built/);
+    expect(mapDataReady('Z9' as never, FIXTURE)).toBe(false);
   });
 });
 
@@ -947,9 +955,10 @@ describe('distribution maps K2 and L3 (Task 27, spec §3.4 P3 form, §6)', () =>
     });
   }
 
-  it('both are built, and the rest of the built set is as Tasks 20, 23 and 24 left it', () => {
+  it('both are built, and the rest of the built set is as Tasks 20, 23 and 24 left it, plus the F1 inset (Task 29)', () => {
     for (const id of ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3'] as const) expect(MAP_SPECS_BUILT.has(id), id).toBe(true);
-    expect(MAP_SPECS_BUILT.has('F1inset')).toBe(false);   // Task 29's
+    expect(MAP_SPECS_BUILT.has('F1inset')).toBe(true);    // Task 29 built it (the ten ids of the MapId union are all built now)
+    expect(MAP_SPECS_BUILT.size).toBe(10);
   });
 
   // ---- K2: TYK2, one decimal, the fixed 0-15 scale (spec §3.4 K2; open issue O1) ----
@@ -1086,4 +1095,69 @@ describe('distribution maps K2 and L3 (Task 27, spec §3.4 P3 form, §6)', () =>
       }
     });
   }
+});
+
+describe('F1 town inset spec (Task 29, spec §3.3 P3 additions)', () => {
+  it('labels are the verbatim §3.3 text and pass the content rules', () => {
+    expect(MAP_TEXT.F1inset).toEqual(['Newcomers found here', 'Countryside: mostly the same families']);
+    expect(MAP_TEXT.F1inset.filter((t) => ruleViolations(t).length > 0)).toEqual([]);
+  });
+
+  it('is built and data ready', () => {
+    expect(MAP_SPECS_BUILT.has('F1inset')).toBe(true);
+    expect(mapDataReady('F1inset', FIXTURE)).toBe(true);
+  });
+
+  it('sits on the Europe frame: six town markers and one countryside marker, no arrows or map text', () => {
+    const spec = mapSpec('F1inset', FIXTURE);
+    expect(spec.frame).toBe('europe');
+    const pts = spec.points ?? [];
+    expect(pts).toHaveLength(7);
+    expect(pts.filter((p) => p.label === MAP_TEXT.F1inset[0])).toHaveLength(6);
+    expect(pts.filter((p) => p.label === MAP_TEXT.F1inset[1])).toHaveLength(1);
+    expect(pts.every((p) => p.role === 'marker')).toBe(true);
+    expect(spec.arrows ?? []).toEqual([]);
+    expect(spec.texts ?? []).toEqual([]);
+  });
+
+  it('uses the documented coordinates, all inside the Britain crop box', () => {
+    expect(F1_INSET_PLACES.map((p) => [p.lat, p.lon, p.kind])).toEqual([
+      [53.96, -1.08, 'town'], [54.38, -1.65, 'town'], [51.89, 0.9, 'town'],
+      [51.28, 1.08, 'town'], [51.06, -1.31, 'town'], [51.86, -2.24, 'town'], [52.38, 0, 'country'],
+    ]);
+    for (const p of mapSpec('F1inset', FIXTURE).points ?? []) {
+      expect(p.lat).toBeGreaterThan(F1_INSET_BOX.latMin);
+      expect(p.lat).toBeLessThan(F1_INSET_BOX.latMax);
+      expect(p.lon).toBeGreaterThan(F1_INSET_BOX.lonMin);
+      expect(p.lon).toBeLessThan(F1_INSET_BOX.lonMax);
+    }
+  });
+
+  it('crops Britain: latitude 49.8 to 59.0 and longitude -8.0 to 2.2 (the edges of Ireland and France are in, the rest of Europe is out)', () => {
+    expect(F1_INSET_BOX).toEqual({ latMin: 49.8, latMax: 59.0, lonMin: -8.0, lonMax: 2.2 });
+  });
+
+  it('needs no data: the same spec from every data set, so the inset can never be blocked by a missing key', () => {
+    const { named: _drop, ...bare } = FIXTURE;
+    expect(mapSpec('F1inset', bare as typeof FIXTURE)).toEqual(mapSpec('F1inset', FIXTURE));
+    expect(mapDataReady('F1inset', bare as typeof FIXTURE)).toBe(true);
+  });
+
+  it('the crop box lies inside the Europe frame, and each marker is a little way in from its edge so its dot is whole', () => {
+    const f = MAP_FRAMES.europe;
+    expect(F1_INSET_BOX.latMin).toBeGreaterThanOrEqual(f.latMin);
+    expect(F1_INSET_BOX.latMax).toBeLessThanOrEqual(f.latMax);
+    expect(F1_INSET_BOX.lonMin).toBeGreaterThanOrEqual(f.lonMin);
+    expect(F1_INSET_BOX.lonMax).toBeLessThanOrEqual(f.lonMax);
+    const c = makeProjection(f);
+    const a = project(c, F1_INSET_BOX.latMax, F1_INSET_BOX.lonMin);
+    const b = project(c, F1_INSET_BOX.latMin, F1_INSET_BOX.lonMax);
+    for (const p of F1_INSET_PLACES) {
+      const q = project(c, p.lat, p.lon);
+      expect(q.x - a.x, `${p.lat}, ${p.lon} from the west edge`).toBeGreaterThan(6);
+      expect(b.x - q.x, `${p.lat}, ${p.lon} from the east edge`).toBeGreaterThan(6);
+      expect(q.y - a.y, `${p.lat}, ${p.lon} from the north edge`).toBeGreaterThan(6);
+      expect(b.y - q.y, `${p.lat}, ${p.lon} from the south edge`).toBeGreaterThan(6);
+    }
+  });
 });

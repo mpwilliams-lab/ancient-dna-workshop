@@ -35,6 +35,11 @@ export const MAP_TEXT: Readonly<Record<MapId, readonly string[]>> = {
   F1inset: ['Newcomers found here', 'Countryside: mostly the same families'],
 };
 
+/** P3 (flag yorkTraveller): label of the York traveller edge marker on Roman-focus PCA plots (spec §3.3 F1 P3 additions).
+ *  Martiniano et al. 2016, its source, is cited on card F1 (rule 9). */
+export const YORK_TRAVELLER_LABEL =
+  'A man buried in York whose DNA is most like people in the Middle East today (off this zoomed map)';
+
 export const APP_TITLE = 'Ancient DNA of Britain';
 export const PAGES_URL = 'https://mpwilliams-lab.github.io/ancient-dna-workshop/';
 

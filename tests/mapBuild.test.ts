@@ -10,7 +10,10 @@ import { PORTRAIT_HEIGHT, THUMB_WIDTH } from '../scripts/fetch-assets.mjs';
 import { CARDS } from '../src/cards';
 import { MAP_SPECS_BUILT } from '../src/maps';
 import { CARD_IDS } from '../src/types';
-import { a1LabelCandidates, forceImages, forceMaps, IMAGE_CARD_IDS, MAP_CARD_IDS, PHOTO_SIZES, standInPicture } from '../e2e/mapBuild';
+import {
+  a1LabelCandidates, forceImages, forceMaps, IMAGE_CARD_IDS, MAP_CARD_IDS, mapPlugins, PHOTO_SIZES, ROMAN_INSET_ID, ROMAN_OPTIONS,
+  ROMAN_PLOT_FLAG, standInPicture,
+} from '../e2e/mapBuild';
 
 type Transform = (code: string, id: string) => { code: string; map: null } | null;
 const transformOf = (ids?: Parameters<typeof forceMaps>[0], options?: Parameters<typeof forceMaps>[1]): Transform =>
@@ -28,7 +31,9 @@ describe('forceMaps: the flags (src/features.ts)', () => {
   it('covers the nine map cards built so far, and every one is in MAP_SPECS_BUILT (the seam cannot force a map that has no spec)', () => {
     expect([...MAP_CARD_IDS]).toEqual(['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3']);
     for (const id of MAP_CARD_IDS) expect(MAP_SPECS_BUILT.has(id), id).toBe(true);
-    expect([...MAP_SPECS_BUILT].filter((id) => !MAP_CARD_IDS.includes(id)), 'a built map the proofs do not cover').toEqual([]);
+    // The one built map that is not a map card's is F1's town inset (Task 29): a map of a picture card, forced through its own id.
+    expect([...MAP_SPECS_BUILT].filter((id) => !MAP_CARD_IDS.includes(id)), 'a built map the proofs do not cover').toEqual([ROMAN_INSET_ID]);
+    expect(ROMAN_INSET_ID).toBe('F1inset');
   });
 
   it('sets the map flags to true and changes no other line of the module', () => {
@@ -304,5 +309,90 @@ describe('forceMaps and forceImages together (the build the layout matrix uses)'
     const out = JSON.parse(imagesOf()(transformOf()(manifestJson, MANIFEST_ID)!.code, MANIFEST_ID)!.code) as ManifestShape;
     for (const id of MAP_CARD_IDS) expect(out.maps[id]!.visual_check, id).not.toBeNull();
     for (const e of out.images) expect(e.visual_check, e.id).not.toBeNull();
+  });
+});
+
+// ---- Task 29: the P3 Roman additions (the F1 town inset and the York traveller) ----
+// The inset is a map, but of a picture card, so it has its own id (ROMAN_INSET_ID) and its own flag (romanInset, a bare key of the FEATURES
+// literal like back and cartoons, where the map flags are quoted); the York traveller is a point on a plot with nothing to check, so it is
+// forced through options.flags. mapPlugins adds F1's pictures. The scratch build that has all three is what proves them where they must fit
+// (e2e/p3-roman.spec.ts).
+describe('forceMaps: the Roman additions (Task 29)', () => {
+  const changedLines = (out: string): [before: string, after: string][] => {
+    const before = featuresTs.split('\n');
+    const after = out.split('\n');
+    expect(after).toHaveLength(before.length);
+    return after.map((line, i) => [before[i]!, line] as [string, string]).filter(([a, b]) => a !== b);
+  };
+
+  it('are flags of the module, written as bare keys that the quoted list of flag names above them does not confuse', () => {
+    expect(featuresTs.match(/^\s*romanInset\s*:\s*(?:false|true),/gm)).toHaveLength(1);
+    expect(featuresTs.match(/^\s*yorkTraveller\s*:\s*(?:false|true),/gm)).toHaveLength(1);
+    expect(featuresTs).toMatch(/'yorkTraveller', 'romanInset'/);
+    expect(ROMAN_PLOT_FLAG).toBe('yorkTraveller');
+  });
+
+  it('the inset is forced through its own id: romanInset goes true and no other line of the module changes', () => {
+    const out = transformOf([ROMAN_INSET_ID])(featuresTs, FEATURES_ID)!.code;
+    const changed = changedLines(out);
+    expect(changed.length).toBeLessThanOrEqual(1);
+    for (const [a, b] of changed) expect(b).toBe(a.replace(/false\b/, 'true'));
+    expect(out).toMatch(/^\s*romanInset: true,/m);
+    expect(out).not.toMatch(/'map\.F1inset'/);
+    // Already on (shipped): set again, nothing thrown.
+    expect(transformOf([ROMAN_INSET_ID])(out, FEATURES_ID)!.code).toBe(out);
+  });
+
+  it('the York traveller is forced through options.flags: yorkTraveller goes true and no other line changes', () => {
+    const out = transformOf([], { flags: [ROMAN_PLOT_FLAG] })(featuresTs, FEATURES_ID)!.code;
+    const changed = changedLines(out);
+    expect(changed.length).toBeLessThanOrEqual(1);
+    for (const [a, b] of changed) expect(b).toBe(a.replace(/false\b/, 'true'));
+    expect(out).toMatch(/^\s*yorkTraveller: true,/m);
+    expect(out).toMatch(/^\s*romanInset: (?:false|true),/m);
+  });
+
+  it('the default build (the nine map cards) still touches neither of them', () => {
+    const out = transformOf()(featuresTs, FEATURES_ID)!.code;
+    const state = (source: string, flag: string): string | undefined => new RegExp(`^\\s*${flag}: (false|true),`, 'm').exec(source)?.[1];
+    for (const flag of ['romanInset', 'yorkTraveller']) expect(state(out, flag), flag).toBe(state(featuresTs, flag));
+  });
+
+  it('records maps.F1inset as checked, with the stand-in stamp, and touches no other map or image', () => {
+    const original = JSON.parse(manifestJson) as ManifestShape;
+    const out = JSON.parse(transformOf([ROMAN_INSET_ID])(manifestJson, MANIFEST_ID)!.code) as ManifestShape;
+    expect(out.maps.F1inset!.visual_check).toEqual({ by: 'instructor', at: '2026-10-19T15:00:00-07:00' });
+    for (const id of Object.keys(original.maps).filter((k) => k !== 'F1inset')) expect(out.maps[id], id).toEqual(original.maps[id]);
+    expect(out.images).toEqual(original.images);
+  });
+
+  it('fails the build when a module no longer has the entry, so the proof can never test the text form by accident', () => {
+    expect(() => transformOf([ROMAN_INSET_ID])(featuresTs.replace(/\bromanInset(\s*:)/, 'romanInsetX$1'), FEATURES_ID)).toThrow(/no 'romanInset' entry/);
+    expect(() => transformOf([], { flags: [ROMAN_PLOT_FLAG] })(featuresTs.replace(/\byorkTraveller(\s*:)/, 'yorkTravellerX$1'), FEATURES_ID)).toThrow(/no 'yorkTraveller' entry/);
+    expect(() => transformOf([ROMAN_INSET_ID])(JSON.stringify({ images: [], maps: {} }), MANIFEST_ID)).toThrow(/no maps\.F1inset/);
+  });
+
+  it('the Roman build is the inset, the York traveller and F1\'s pictures: exactly romanInset, yorkTraveller and images.F1 go true, and F1inset and the pictures of F1 are recorded as checked', () => {
+    expect(ROMAN_OPTIONS).toEqual({ flags: ['yorkTraveller'], images: ['F1'] });
+    const plugins = mapPlugins([ROMAN_INSET_ID], ROMAN_OPTIONS);
+    expect(plugins.map((p) => p.name)).toEqual(['adw-force-maps', 'adw-force-images']);
+    const through = (code: string, id: string): string => plugins.reduce((acc, p) => (p.transform as unknown as Transform)(acc, id)?.code ?? acc, code);
+    const features = through(featuresTs, FEATURES_ID);
+    const on = (source: string): string[] => [...source.matchAll(/^\s*'?([a-zA-Z0-9.]+)'?: true,/gm)].map((m) => m[1]!).sort();
+    expect(on(features)).toEqual([...on(featuresTs), 'images.F1', 'romanInset', 'yorkTraveller'].filter((v, i, a) => a.indexOf(v) === i).sort());
+    const manifest = JSON.parse(through(manifestJson, MANIFEST_ID)) as ManifestShape;
+    const original = JSON.parse(manifestJson) as ManifestShape;
+    expect(manifest.maps.F1inset!.visual_check).not.toBeNull();
+    for (const e of manifest.images) expect(e.visual_check, e.id).toEqual(e.card === 'F1' ? { by: 'instructor', at: '2026-10-19T15:00:00-07:00' } : original.images.find((x) => x.id === e.id)!.visual_check);
+  });
+
+  it('a map build with no images option has no picture plugin, and the Roman build is not part of the all-forms build', () => {
+    expect(mapPlugins().map((p) => p.name)).toEqual(['adw-force-maps']);
+    expect(mapPlugins([ROMAN_INSET_ID], { images: [] }).map((p) => p.name)).toEqual(['adw-force-maps']);
+    // buildFormsApp forces the nine map flags and all eight image flags and nothing of the Roman additions (the inset does not fit F1 at 1366 x 768).
+    const both = imagesOf()(transformOf()(featuresTs, FEATURES_ID)!.code, FEATURES_ID)!.code;
+    const stateOf = (flag: string): string | undefined => new RegExp(`^\\s*${flag}: (false|true),`, 'm').exec(both)?.[1];
+    expect(stateOf('romanInset')).toBe(new RegExp('^\\s*romanInset: (false|true),', 'm').exec(featuresTs)?.[1]);
+    expect(stateOf('yorkTraveller')).toBe(new RegExp('^\\s*yorkTraveller: (false|true),', 'm').exec(featuresTs)?.[1]);
   });
 });

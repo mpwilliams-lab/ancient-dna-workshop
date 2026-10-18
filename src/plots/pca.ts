@@ -1,10 +1,12 @@
-import type { Frame, PeriodId, PersonPt, Pt, WorkshopData } from '../types';
+import type { Frame, NamedPoint, PeriodId, PersonPt, Pt, WorkshopData } from '../types';
+import { FEATURES, type Features } from '../features';
 import { layerOpacity, type PcaCaptionItem, type PlotState } from '../plotState';
 import {
-  EAST_ENGLAND_LEGEND, LEGEND_ANCIENT, LEGEND_LIVING, MAP_GROUP_LABELS, NORTH_SEA_LABEL, PCA_CAPTION, PERIOD_LABELS, withN,
+  EAST_ENGLAND_LEGEND, LEGEND_ANCIENT, LEGEND_LIVING, MAP_GROUP_LABELS, NORTH_SEA_LABEL, PCA_CAPTION, PERIOD_LABELS, YORK_TRAVELLER_LABEL,
+  withN,
 } from '../content';
 import { chipElement } from '../icons';
-import { INK, MAP_GREY, PERIOD_COLORS, PERIOD_SHAPES, clearPlotMarkers, shapePath, svgEl, wireTips } from './svg';
+import { INK, MAP_GREY, PERIOD_COLORS, PERIOD_SHAPES, clearPlotMarkers, f1, shapePath, svgEl, textBlock, wireTips, wrapText } from './svg';
 
 /**
  * Plot box inside the fixed 1000 x 760 viewBox (spec §2.3). The plot box is unchanged from v2.1; legend rows run under
@@ -138,7 +140,72 @@ function renderLegend(groups: [key: 'ancient' | 'living', heading: string, items
   return legend;
 }
 
-export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState, opts: { animate?: boolean } = {}): void {
+/** York traveller marker (P3, flag yorkTraveller): Roman colour and shape, hollow, a little bigger than a point. */
+export const YORK_MARKER_R = 8;
+/** The label wraps at this many characters, in 15 px type of weight 600 with a white outline, lines YORK_LINE apart. */
+export const YORK_LABEL_CHARS = 36;
+export const YORK_LINE = 18;
+
+/**
+ * The York traveller from data.named (Martiniano et al. 2016; Task 28), drawn only on a Roman-focus PCA and only where he
+ * is off the current frame, because his label says "(off this zoomed map)". He is pinned to the frame edge like any clipped
+ * point, with a small pointer toward where he really lies, and labelled on the plot-centre side of the marker.
+ * Returns null when nothing should be drawn. Reads the first named point: validateNamed accepts any number of them, the data
+ * build writes exactly one, and the key is checked too, so nothing else is ever drawn as him.
+ */
+export function yorkTravellerMark(data: WorkshopData, p: PlotState, features: Features = FEATURES): SVGGElement | null {
+  if (!features.yorkTraveller || p.view !== 'pca' || p.focus !== 'Roman') return null;
+  const named: NamedPoint | undefined = data.named?.[0];
+  if (named?.key !== 'york_traveller') return null;
+  const fr = data.frames[p.frame];
+  const c = clampToFrame(named, fr);
+  if (!c.clipped) return null;
+  const sc = makeScale(fr);
+  const q = { x: sc.toX(c.x), y: sc.toY(c.y) };
+  const t = { x: sc.toX(named.x), y: sc.toY(named.y) };
+  const len = Math.hypot(t.x - q.x, t.y - q.y) || 1;
+  const u = { x: (t.x - q.x) / len, y: (t.y - q.y) / len };
+
+  const g = svgEl('g', { class: 'york-traveller', 'data-named': 'york_traveller', 'data-tip': YORK_TRAVELLER_LABEL });
+  g.append(svgEl('path', {
+    class: 'york-marker', d: shapePath(PERIOD_SHAPES.Roman, q.x, q.y, YORK_MARKER_R),
+    fill: '#FFFFFF', stroke: PERIOD_COLORS.Roman, 'stroke-width': 3,
+  }));
+  const tip = { x: q.x + u.x * 22, y: q.y + u.y * 22 };
+  const base = { x: q.x + u.x * 12, y: q.y + u.y * 12 };
+  const side = { x: -u.y * 6, y: u.x * 6 };
+  g.append(svgEl('path', {
+    class: 'york-pointer',
+    d: `M${f1(tip.x)} ${f1(tip.y)}L${f1(base.x + side.x)} ${f1(base.y + side.y)}L${f1(base.x - side.x)} ${f1(base.y - side.y)}Z`,
+    fill: PERIOD_COLORS.Roman,
+  }));
+
+  const right = q.x > (PCA_VIEW.left + PCA_VIEW.right) / 2;
+  const below = q.y > (PCA_VIEW.top + PCA_VIEW.bottom) / 2;
+  const lines = wrapText(YORK_TRAVELLER_LABEL, YORK_LABEL_CHARS).length;
+  const x = Math.min(Math.max(right ? q.x - 16 : q.x + 16, PCA_VIEW.left + 4), PCA_VIEW.right - 4);
+  const yTop = below ? q.y - 16 - (lines - 1) * YORK_LINE : q.y + 26;
+  const y = Math.min(Math.max(yTop, PCA_VIEW.top + 16), PCA_VIEW.bottom - 4 - (lines - 1) * YORK_LINE);
+  const { el } = textBlock(YORK_TRAVELLER_LABEL, YORK_LABEL_CHARS, x, y, YORK_LINE, {
+    class: 'york-label', 'font-size': 15, 'font-weight': '600', fill: INK,
+    stroke: '#FFFFFF', 'stroke-width': 4, 'paint-order': 'stroke', 'pointer-events': 'none',
+    ...(right ? { 'text-anchor': 'end' } : {}),
+  });
+  if (right) {
+    // textBlock keeps the space between two lines at the end of the first, and a right-anchored line counts it in its width, so those lines
+    // would stop one space (about 4 units) short of the last one. The space moves to the front of the next line instead, where a
+    // line that ends at the anchor does not show it; the sentence in textContent is the same.
+    const lineEls = Array.from(el.querySelectorAll('tspan'));
+    lineEls.forEach((t, i) => {
+      const text = t.textContent ?? '';
+      t.textContent = `${i > 0 ? ' ' : ''}${i < lineEls.length - 1 ? text.trimEnd() : text}`;
+    });
+  }
+  g.append(el);
+  return g;
+}
+
+export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState, opts: { animate?: boolean; features?: Features } = {}): void {
   const fr = data.frames[p.frame];
   const sc = makeScale(fr);
   // Only an svg that currently shows a PCA has a frame worth animating from: data-frame can be a stale leftover
@@ -308,6 +375,11 @@ export function renderPca(svg: SVGSVGElement, data: WorkshopData, p: PlotState, 
       }, PERIOD_LABELS[c.id]));
     }
   }
+
+  // 5b. York traveller (P3, flag yorkTraveller): only on the Roman focus, only where he is off the frame; on top of everything else
+  //     in the plot group, so a frame change carries him along with the points.
+  const york = yorkTravellerMark(data, p, opts.features ?? FEATURES);
+  if (york) world.append(york);
 
   // 6. Legend: "Ancient Britons" (period layers, plus the east outline with Anglo-Saxon focus) and "People living today"
   //    (continental groups, then Britain today once shown). In the British frame anything non-focus with no point in the

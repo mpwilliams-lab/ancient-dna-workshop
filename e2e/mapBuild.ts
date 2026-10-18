@@ -6,6 +6,9 @@
 //   - maps (forceMaps, buildMapApp): the map cards A1, D1, E1, G1, H2, I2, J3, K2 and L3 so far (MAP_CARD_IDS);
 //   - pictures (forceImages, buildFormsApp): the image cards B1, C1, E2, F1, G2, H1, I1 and J1 (IMAGE_CARD_IDS), with stand-in pictures
 //     of the exact pixel size of each staged photo.
+// And the P3 Roman additions (Task 29, buildRomanApp), which are neither: the town inset on the Roman slide F1 (a map, id ROMAN_INSET_ID,
+// of a picture card; forceMaps takes it like a map card and turns romanInset on) and the York traveller on the Roman plot (a flag with
+// nothing to check, ROMAN_PLOT_FLAG; options.flags), seen with F1's photographs (options.images) beside which the inset has to fit.
 //
 // This is a test seam, not a feature switch: the changes are made IN MEMORY, while Vite reads four modules, into a fresh temporary
 // directory outside the repo: src/features.ts (the flags go true), assets/manifest.json (the maps and the pictures are recorded as
@@ -26,14 +29,22 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PNG } from 'pngjs';
 import { build, type Plugin } from 'vite';
+import type { FeatureFlag } from '../src/features.ts';
 import type { CardId, MapId } from '../src/types.ts';
 
 /** The repo root: read when a build starts, not when the module loads, so the plugin can be imported anywhere (the unit tests do). */
 const repoRoot = (): string => fileURLToPath(new URL('..', import.meta.url));
 
-/** The map cards built so far (Tasks 20, 23, 24 and 27): the card, its flag (`map.<id>`) and its manifest key are all this id. Task 29
- *  adds its own (the Roman inset of F1, which is a map of a card that is not itself a map card). */
+/** The map cards built so far (Tasks 20, 23, 24 and 27): the card, its flag (`map.<id>`) and its manifest key are all this id. The Roman
+ *  inset of F1 (Task 29) is a map of a card that is not itself a map card, so it is not here: see ROMAN_INSET_ID. */
 export const MAP_CARD_IDS: readonly MapId[] = ['A1', 'D1', 'E1', 'G1', 'H2', 'I2', 'J3', 'K2', 'L3'];
+
+/** The P3 Roman additions (Task 29). The F1 town inset is a map, but not of a map card: F1 is a picture card (flag images.F1), and the inset
+ *  has a flag of its own, romanInset, and a manifest key, maps.F1inset. forceMaps takes this id like any map id and sets both. */
+export const ROMAN_INSET_ID: MapId = 'F1inset';
+/** The other P3 Roman addition is a point on the Roman plot, the York traveller (flag yorkTraveller). It is not an image or a map, so there
+ *  is nothing for the instructor to check in the manifest: it is forced on through ForceOptions.flags. */
+export const ROMAN_PLOT_FLAG: FeatureFlag = 'yorkTraveller';
 
 /** The cards with photographs or drawings (Tasks 16, 21 and 25): the card and its flag (`images.<id>`) are this id; its pictures are the
  *  manifest entries whose `card` is this id. */
@@ -64,6 +75,21 @@ export interface ForceOptions {
    *  stays empty until the instructor confirms open check 14, and the map ships unlabelled; this is how the layout proof and the preview
    *  see the labelled map before he has. Left out, the list is whatever the repo has. */
   a1Labels?: readonly string[];
+  /** Further flags to turn on that have no asset to record as checked: the York traveller (ROMAN_PLOT_FLAG), a point on the Roman plot. */
+  flags?: readonly FeatureFlag[];
+  /** Cards whose pictures are forced on as well, with stand-ins of the staged photos (forceImages), for the builds made by mapPlugins and
+   *  buildMapApp: F1's, so that its inset is seen in the row of three photographs it has to fit beside. */
+  images?: readonly CardId[];
+}
+
+/** The flag that draws a map: `map.<id>`, and romanInset for the F1 inset (the mapping of mapFlag in src/release.ts). */
+const flagOfMap = (map: MapId): FeatureFlag => (map === 'F1inset' ? 'romanInset' : (`map.${map}` as FeatureFlag));
+
+/** The entry of a flag in the FEATURES literal of src/features.ts. A key with a dot is quoted (`'map.A1': false`), the others are bare words
+ *  (`back: true`); the array of flag names above the literal has them all quoted and followed by a comma, so only the literal matches. */
+function featureEntry(flag: string): RegExp {
+  const key = flag.includes('.') ? `'${flag.replace(/\./g, '\\.')}'` : `\\b${flag}`;
+  return new RegExp(`(${key}\\s*:\\s*)(?:false|true)\\b`);
 }
 
 /** The groups the data build chose for A1 labels (open check 14): the non-isolate `map_label` names of the real data, in europe_pops
@@ -79,10 +105,10 @@ export function a1LabelCandidates(root: string = repoRoot()): string[] {
 const pathOf = (id: string): string => id.split('?')[0]!.replace(/\\/g, '/');
 
 /** Turns the listed map flags on and records the listed maps as checked while the build reads their modules (and, with
- *  options.a1Labels, fills A1_CONFIRMED_LABELS). A flag that is already on (the instructor has checked the map and the release task
- *  has shipped it), a check that is already recorded and a list that is already filled are simply set again. Fails the build if a
- *  module no longer has the shape this rewrites, so a reformatted features.ts, manifest or maps.ts can never leave the proof
- *  testing the text form or the unlabelled map. */
+ *  options.a1Labels, fills A1_CONFIRMED_LABELS; with options.flags, turns those flags on too). A flag that is already on (the instructor
+ *  has checked the map and the release task has shipped it), a check that is already recorded and a list that is already filled are
+ *  simply set again. The F1 inset's id (ROMAN_INSET_ID) turns romanInset on. Fails the build if a module no longer has the shape this
+ *  rewrites, so a reformatted features.ts, manifest or maps.ts can never leave the proof testing the text form or the unlabelled map. */
 export function forceMaps(ids: readonly MapId[] = MAP_CARD_IDS, options: ForceOptions = {}): Plugin {
   return {
     name: 'adw-force-maps',
@@ -97,9 +123,9 @@ export function forceMaps(ids: readonly MapId[] = MAP_CARD_IDS, options: ForceOp
       }
       if (file.endsWith('/src/features.ts')) {
         let out = code;
-        for (const map of ids) {
-          const entry = new RegExp(`('map\\.${map}'\\s*:\\s*)(?:false|true)\\b`);
-          if (!entry.test(out)) throw new Error(`adw-force-maps: src/features.ts has no 'map.${map}' entry to turn on`);
+        for (const flag of [...ids.map(flagOfMap), ...(options.flags ?? [])]) {
+          const entry = featureEntry(flag);
+          if (!entry.test(out)) throw new Error(`adw-force-maps: src/features.ts has no '${flag}' entry to turn on`);
           out = out.replace(entry, '$1true');
         }
         return { code: out, map: null };
@@ -204,9 +230,15 @@ async function buildInto(plugins: Plugin[], prefix: string): Promise<MapApp> {
   return { url: pathToFileURL(join(dir, 'index.html')).href, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
+/** The plugins of a map build: forceMaps, and forceImages for the cards in options.images. */
+export function mapPlugins(ids: readonly MapId[] = MAP_CARD_IDS, options: ForceOptions = {}): Plugin[] {
+  const images = options.images ?? [];
+  return [forceMaps(ids, options), ...(images.length > 0 ? [forceImages(images)] : [])];
+}
+
 /** The app with the listed map flags forced on (real data, shipped everything else). */
 export function buildMapApp(ids: readonly MapId[] = MAP_CARD_IDS, options: ForceOptions = {}): Promise<MapApp> {
-  return buildInto([forceMaps(ids, options)], 'adw-maps-');
+  return buildInto(mapPlugins(ids, options), 'adw-maps-');
 }
 
 /** The app with every upgraded form forced on: the nine built maps and the pictures of all eight image cards (real data). Of the 23 cards
@@ -214,4 +246,15 @@ export function buildMapApp(ids: readonly MapId[] = MAP_CARD_IDS, options: Force
  *  upgrade built, so they stay as they ship. */
 export function buildFormsApp(options: ForceOptions = {}): Promise<FormsApp> {
   return buildInto([forceMaps(MAP_CARD_IDS, options), forceImages()], 'adw-forms-');
+}
+
+/** The options of the Roman build: the York traveller on, and F1's photographs, because the inset is one more tile in the row they fill. */
+export const ROMAN_OPTIONS: ForceOptions = { flags: [ROMAN_PLOT_FLAG], images: ['F1'] };
+
+/** The app with the P3 Roman additions forced on (Task 29), to see them where they must fit: the York traveller on the Roman plot, the F1
+ *  town inset and F1's photographs (stand-ins). Real data, shipped everything else. It is not part of buildFormsApp: the inset does not fit
+ *  F1 beside its photographs at 1366 x 768 (it takes the card to `compact`), so the all-forms matrix would fail there; the Roman proofs
+ *  (e2e/p3-roman.spec.ts) say what fits where. Once the inset fits at both lab-standard screens it joins buildFormsApp. */
+export function buildRomanApp(): Promise<MapApp> {
+  return buildMapApp([ROMAN_INSET_ID], ROMAN_OPTIONS);
 }

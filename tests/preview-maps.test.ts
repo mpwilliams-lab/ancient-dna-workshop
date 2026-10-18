@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { CARDS } from '../src/cards';
-import { MAP_TEXT } from '../src/content';
+import { MAP_TEXT, YORK_TRAVELLER_LABEL } from '../src/content';
 import { A1_CONFIRMED_LABELS, MAP_SPECS_BUILT } from '../src/maps';
 
 // Every test here runs `npm run preview-maps`: a Vite build and a Node run, about 3 s alone and 5 s or more when the whole suite runs in
@@ -45,15 +45,22 @@ describe('npm run preview-maps', () => {
     const ids = [...MAP_SPECS_BUILT];
     expect(ids.length).toBeGreaterThanOrEqual(3);
     for (const id of ids) {
+      // The F1 inset (Task 29) is a tile of the Roman slide, so its section is titled by that card, and its two labels are the text key
+      // under the map, not map text.
+      const inset = id === 'F1inset';
       expect(html, id).toContain(`<section id="${id}">`);
-      expect(text, id).toContain(CARDS[id as keyof typeof CARDS].title);
-      // Each map is drawn by renderMap, whose text elements carry the approved labels.
-      for (const label of MAP_TEXT[id]) expect(text, `${id} "${label}"`).toContain(`>${label}</text>`);
-      // Once per lab screen; A1 twice per screen while its names are unconfirmed (as it ships, and with the eight names: see below).
-      const drawn = id === 'A1' && A1_CONFIRMED_LABELS.length === 0 ? 4 : 2;
+      expect(text, id).toContain(CARDS[inset ? 'F1' : (id as keyof typeof CARDS)].title);
+      // Each other map is drawn by renderMap, whose text elements carry the approved labels.
+      for (const label of MAP_TEXT[id]) expect(text, `${id} "${label}"`).toContain(inset ? `${label}</span>` : `>${label}</text>`);
+      // Once per lab screen; A1 twice per screen while its names are unconfirmed (as it ships, and with the eight names: see below); the
+      // inset's figure and its svg both carry its id, so it counts twice per screen.
+      const drawn = id === 'A1' && A1_CONFIRMED_LABELS.length === 0 ? 4 : inset ? 4 : 2;
       expect(html.match(new RegExp(`data-map="${id}"`, 'g')), `${id} drawn ${drawn} times`).toHaveLength(drawn);
     }
     expect(text).toContain(`npm run visual-check -- ${ids.join(' ')}`);
+    // The whole page ends with the York traveller, a point on a plot (no visual check, so not in the command above).
+    expect(html).toContain('<section id="york-traveller">');
+    expect(html.indexOf('<section id="york-traveller">')).toBeGreaterThan(html.lastIndexOf(`<section id="${ids.at(-1)}">`));
     expect(html).not.toMatch(/<script/i);
     expect(html).not.toMatch(/https?:\/\//);
     // The instructor alone records a check: the preview never touches the manifest.
@@ -184,10 +191,72 @@ describe('npm run preview-maps', () => {
     expect(sha(MANIFEST)).toBe(before);
   });
 
+  // Task 29: the Roman slide's town inset. It is a tile of the slide, cropped to Britain, with a text key, so it is drawn by the slide's own
+  // renderer (not renderMap) and each lab screen gets the inset alone; the card pictures need a browser and are not taken here (--no-cards).
+  it('F1inset: what to look for, the inset drawn as the slide draws it (six filled dots, one hollow, the two-line key, no place name), and the command for it alone', () => {
+    const before = sha(MANIFEST);
+    const r = preview('F1inset');
+    expect(r.status, r.stderr).toBe(0);
+    const html = readFileSync(join(r.dir, 'maps.html'), 'utf8');
+    const text = unescape(html);
+    expect(text).toContain('<section id="F1inset">');
+    expect(text).toContain(`F1inset: ${CARDS.F1.title} (the town inset on the Roman slide)`);
+    expect(text).toContain('npm run visual-check -- F1inset</code>');
+    expect(html.match(/class="card-tile card-inset is-optional"/g)).toHaveLength(2);       // once per lab screen
+    expect(html.match(/class="inset-town"/g)).toHaveLength(12);
+    expect(html.match(/class="inset-country"/g)).toHaveLength(2);
+    for (const label of MAP_TEXT.F1inset) expect(text.match(new RegExp(`${label}</span>`, 'g')), label).toHaveLength(2);
+    expect(html.match(/<svg[^>]*class="[^"]*inset-svg/g)).toHaveLength(2);
+    // What he is told to look for: the six towns, the countryside dot, the key and the credit line.
+    for (const word of ['York and Catterick', 'Colchester and Canterbury', 'Winchester', 'Gloucester', 'Cambridgeshire', 'Newcomers found here', 'Map outline: Made with Natural Earth.']) {
+      expect(text, word).toContain(word);
+    }
+    // The drawing itself names no place: the towns are only in the words to him, never in the picture.
+    const drawings = [...html.matchAll(/<div class="inset-alone"[^>]*>(.*?)<\/figure><\/div>/gs)].map((m) => m[1]!);
+    expect(drawings).toHaveLength(2);
+    for (const d of drawings) for (const name of ['York', 'Catterick', 'Colchester', 'Canterbury', 'Winchester', 'Gloucester', 'Cambridgeshire']) expect(d, name).not.toContain(name);
+    // Without the card pictures the sizes are estimates, and the page says so; the York section belongs to the whole page only.
+    expect(text).toContain('(the most the slide gives it, estimated)');
+    expect(html).not.toContain('<section id="york-traveller">');
+    expect(readdirSync(r.dir)).toEqual(['maps.html']);
+    expect(html).not.toMatch(/<script/i);
+    expect(html).not.toMatch(/https?:\/\//);
+    expect(sha(MANIFEST)).toBe(before);
+  });
+
+  // Task 29: the York traveller is a point on a plot, so the page draws the Roman plot with his mark (a drawing that can be zoomed) and, with
+  // the card pictures, a picture of the plot pane at each lab screen. It has no visual check, so it is not in the visual-check command.
+  it('the whole page ends with the York traveller on the Roman plot: his words, the mark at each lab screen, no visual-check command for him', () => {
+    const r = preview();
+    expect(r.status, r.stderr).toBe(0);
+    const html = readFileSync(join(r.dir, 'maps.html'), 'utf8');
+    const text = unescape(html);
+    const section = text.slice(text.indexOf('<section id="york-traveller">'), text.indexOf('</section>', text.indexOf('<section id="york-traveller">')));
+    expect(section).toContain('York traveller: a point on the Roman plot, off the zoomed map (no visual check)');
+    expect(section).toContain(`"${YORK_TRAVELLER_LABEL}"`);                                  // the words he is asked about, verbatim
+    expect(section).toContain('Martiniano et al. 2016');
+    expect(section).toContain('There is no visual-check command for a point on a plot');
+    expect(section).not.toContain('npm run visual-check');
+    // The Roman plot with his mark, drawn once at each lab screen, at the plot's real widths without the pictures (745 and 1047 px).
+    expect(section.match(/<g class="york-traveller"/g)).toHaveLength(2);
+    expect(section.match(new RegExp(`${YORK_TRAVELLER_LABEL.slice(0, 20)}`, 'g'))!.length).toBeGreaterThanOrEqual(2);
+    expect(section).toContain('745 px wide (estimated)');
+    expect(section).toContain('1047 px wide (estimated)');
+    expect(section.match(/data-view="pca"/g)).toHaveLength(2);
+    // It is the Roman plot: the Roman layer is in focus, and the page says nothing a Roman plot would not.
+    expect(section.match(/data-focus="Roman"/g)).toHaveLength(2);
+    // No sample number, group code or site name: the mark is a key, a square, an arrow and the words.
+    expect(section).not.toMatch(/3DT26|Driffield|oLevant|Britannia|\.SG\b/);
+    expect(html).not.toMatch(/<script/i);
+    expect(html).not.toMatch(/https?:\/\//);
+    // Only the whole page has it: a page of named maps does not.
+    expect(readFileSync(join(preview('G1').dir, 'maps.html'), 'utf8')).not.toContain('york-traveller');
+  });
+
   it('refuses a map that is not built, and an option it does not know, and writes nothing', () => {
-    const unbuilt = preview('F1inset');
+    const unbuilt = preview('Z9');
     expect(unbuilt.status).toBe(1);
-    expect(unbuilt.stderr).toMatch(/F1inset is not a built map/);
+    expect(unbuilt.stderr).toMatch(/Z9 is not a built map/);
     expect(readdirSync(unbuilt.dir)).toEqual([]);
     const odd = preview('--frobnicate');
     expect(odd.status).toBe(1);
