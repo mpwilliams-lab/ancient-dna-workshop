@@ -6,9 +6,9 @@ import { DISTRIBUTION_SCALE_MAX, distributionRows } from '../src/cards';
 import { MAP_TEXT } from '../src/content';
 import { EUROPE_WEST_LAND } from '../src/generated/map-europe-west';
 import {
-  A1_CONFIRMED_LABELS, A1_DOT_R, A1_LABEL_PX, BAND_MAX_ASPECT, BAND_PAD, DISTRIBUTION_LABEL_PX, DISTRIBUTION_MAP_FRAME,
-  DISTRIBUTION_MAP_GENE, DOT_LABEL_WIDTH_FACTOR, bandView, distributionSpec, drawingBox, frameBox, labelAt, labelBox, MAP_LABEL_FONT_PX,
-  MAP_SPECS_BUILT, mapDataReady, mapSpec, placeDotLabels, placeLabels, specA1, type LabelBox,
+  A1_CONFIRMED_LABELS, A1_DOT_R, A1_LABEL_PX, BAND_MAX_ASPECT, BAND_PAD, DISTRIBUTION_LABEL_OVERHANG, DISTRIBUTION_LABEL_PX,
+  DISTRIBUTION_MAP_FRAME, DISTRIBUTION_MAP_GENE, DOT_LABEL_WIDTH_FACTOR, bandView, distributionSpec, drawingBox, frameBox, labelAt, labelBox,
+  MAP_LABEL_FONT_PX, MAP_SPECS_BUILT, mapDataReady, mapSpec, placeDotLabels, placeLabels, specA1, type LabelBox,
 } from '../src/maps';
 import {
   ARROW_WIDTH, MAP_FRAMES, MAP_VIEW, WIDE_ARROW_WIDTH, arrowReach, catmullRomSegments, dotRadius, makeProjection, project, projectUnits,
@@ -18,7 +18,7 @@ import { SVG_NS } from '../src/plots/svg';
 import type { EuropePop } from '../src/types';
 import { FIXTURE, cloneFixture } from './fixtures/fixture';
 import { ruleViolations } from './contentRules';
-import { labelLayoutViolations, layoutViolations, specDots } from './helpers/mapLayout';
+import { labelLayoutViolations, layoutViolations, specDots, wordExtent } from './helpers/mapLayout';
 import { mulberry32 } from './helpers/rng';
 
 const ll = (lat: number, lon: number): LatLon => ({ lat, lon });
@@ -698,7 +698,8 @@ describe('placeDotLabels (Task 24): a clear place for every label, or none', () 
 
 describe('distribution maps H2, I2, J3, K2, L3 (Tasks 24 and 27, spec §3.4, §6)', () => {
   const IDS = ['H2', 'I2', 'J3', 'K2', 'L3'] as const;
-  /** The rows with coordinates the fixture (a copy of the real rows, tests/real-data.test.ts) draws as dots: spec §3.4's value lists less the gnomAD rows. */
+  /** How many rows with coordinates the (synthetic) fixture has, so how many dots each map draws from it: the same places as spec §3.4's value
+   *  lists less the gnomAD rows, with made-up numbers (tests/real-data.test.ts holds the real rows to the same counts). */
   const DOTS: Readonly<Record<(typeof IDS)[number], number>> = { H2: 20, I2: 10, J3: 10, K2: 7, L3: 4 };
   const hasCoords = (r: { lat?: number; lon?: number }): boolean => r.lat !== undefined && r.lon !== undefined;
 
@@ -993,8 +994,12 @@ describe('distribution maps K2 and L3 (Task 27, spec §3.4 P3 form, §6)', () =>
       }
     });
 
-    it('its words are drawn at 28 map units or more: at 24 they were 13.7 px tall at 1366 x 768 (its side list takes 200 of the card\'s 702 px, leaving the picture 488), under the 14 px that e2e/maps.spec.ts holds every map to', () => {
-      expect(DISTRIBUTION_LABEL_PX.K2).toBeGreaterThanOrEqual(28);
+    // The 14 px floor is a measurement in a browser, so it is e2e/maps.spec.ts's (every map's words at the lab-standard screens at 100%). What a
+    // unit test can say is why K2 is not at I2's and J3's 24: its side list is the widest, so its picture is the narrowest (488 px of the card's 702
+    // at 1366 x 768, where theirs have 573), and at 24 its words came out 13.7 px tall there, 0.3 px under that floor.
+    it('its words are drawn larger than I2\'s and J3\'s, because its picture is narrower than theirs (its side list is the widest); the 14 px floor itself is e2e/maps.spec.ts\'s', () => {
+      expect(DISTRIBUTION_LABEL_PX.K2).toBeGreaterThan(DISTRIBUTION_LABEL_PX.I2);
+      expect(DISTRIBUTION_LABEL_PX.K2).toBeGreaterThan(DISTRIBUTION_LABEL_PX.J3);
       expect(mapSpec('K2', FIXTURE).labelPx).toBe(DISTRIBUTION_LABEL_PX.K2);
       expect(rendered(mapSpec('K2', FIXTURE)).querySelector('text.map-label')!.getAttribute('font-size')).toBe(String(DISTRIBUTION_LABEL_PX.K2));
     });
@@ -1045,5 +1050,40 @@ describe('distribution maps K2 and L3 (Task 27, spec §3.4 P3 form, §6)', () =>
       expect(layoutViolations(s)).toEqual([]);
       expect(layoutViolations(s, WIDER)).toEqual([]);
     });
+
+    // With the 150 units of overhang H2, I2 and J3 have, L3's Finland word was placed to the right of its dot and hung 60 units (37 px at
+    // 1366 x 768, 51 px at 1920 x 1080) over the frame's east edge. L3 has room, so it takes none (src/maps.ts DISTRIBUTION_LABEL_OVERHANG).
+    it('no word hangs over the frame, even drawn 8% wider: the Finland word sits left of its dot', () => {
+      expect(DISTRIBUTION_LABEL_OVERHANG.L3).toBe(0);
+      const s = mapSpec('L3', FIXTURE);
+      const f = frameBox('europeWest');
+      const c = makeProjection(MAP_FRAMES.europeWest);
+      expect((s.texts ?? []).length).toBe(4);
+      for (const t of s.texts ?? []) {
+        const e = wordExtent(c, t, s.labelPx!, WIDER);
+        expect(e.left, `"${t.text}" left`).toBeGreaterThanOrEqual(f.left);
+        expect(e.right, `"${t.text}" right`).toBeLessThanOrEqual(f.right);
+      }
+      expect(s.texts!.find((t) => t.text.startsWith('Finland '))!.anchor).toBe('end');
+    });
   });
+
+  // ---- The label overhang of each map (Task 24's rule for the maps that need it, Task 27's exception) ----
+  it('H2, I2, J3 and K2 keep the 150 units of overhang of Task 24 (so their layouts are as they were); L3 takes none', () => {
+    expect(DISTRIBUTION_LABEL_OVERHANG).toEqual({ H2: 150, I2: 150, J3: 150, K2: 150, L3: 0 });
+  });
+
+  for (const id of ['H2', 'I2', 'J3', 'K2', 'L3'] as const) {
+    it(`${id}: no word hangs over the frame's west or east edge by more than the map's overhang (${DISTRIBUTION_LABEL_OVERHANG[id]} units), drawn 8% wider as well`, () => {
+      const s = mapSpec(id, FIXTURE);
+      const f = frameBox(s.frame);
+      const c = makeProjection(MAP_FRAMES[s.frame]);
+      const room = DISTRIBUTION_LABEL_OVERHANG[id];
+      for (const t of s.texts ?? []) {
+        const e = wordExtent(c, t, s.labelPx!, WIDER);
+        expect(e.left, `${id} "${t.text}" left`).toBeGreaterThanOrEqual(f.left - room - 1e-6);
+        expect(e.right, `${id} "${t.text}" right`).toBeLessThanOrEqual(f.right + room + 1e-6);
+      }
+    });
+  }
 });

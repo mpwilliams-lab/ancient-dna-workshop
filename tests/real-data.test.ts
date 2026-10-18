@@ -14,7 +14,7 @@ import { steppePct } from '../src/plots/admixture';
 import { MAP_FRAMES, makeProjection, project, projectUnits } from '../src/plots/map';
 import { GENE_IDS, TRAIT_MAP_ORDER, type GeneId } from '../src/types';
 import { ruleViolations } from './contentRules';
-import { layoutViolations, specDots } from './helpers/mapLayout';
+import { layoutViolations, specDots, wordExtent } from './helpers/mapLayout';
 
 const REAL = fileURLToPath(new URL('../src/data/workshop_data.json', import.meta.url));
 
@@ -450,6 +450,20 @@ describe.runIf(process.env.REAL_DATA === '1')('real data: distribution maps K2 a
   it('L3 Britain shows 16 and Spain 25, as the card\'s value list prints them; the gnomAD European sample 22 is in the side list', () => {
     expect(mapSpec('L3', d()).texts!.map((t) => t.text)).toEqual(['Spain 25', 'Tuscany 21', 'Britain 16', 'Finland 9']);
     expect((mapSpec('L3', d()).sideList ?? []).map((r) => `${r.label} ${r.display}`)).toEqual(['Europe (large sample) 22']);
+  });
+
+  // With the 150 units of overhang of the other maps the real "Finland 9" sat right of its dot and hung 60 units over the frame's east edge
+  // (37 px at 1366 x 768, 51 px at 1920 x 1080, measured in the browser); L3 takes none, so every word, even drawn 8% wider, is inside the frame.
+  it('L3: no word hangs over the Europe-west frame, even drawn 8% wider: "Finland 9" sits left of its dot', () => {
+    const s = mapSpec('L3', d());
+    const f = frameBox('europeWest');
+    const c = makeProjection(MAP_FRAMES.europeWest);
+    for (const t of s.texts ?? []) {
+      const e = wordExtent(c, t, s.labelPx!, 1.08);
+      expect(e.left, `"${t.text}" left`).toBeGreaterThanOrEqual(f.left);
+      expect(e.right, `"${t.text}" right`).toBeLessThanOrEqual(f.right);
+    }
+    expect(s.texts!.find((t) => t.text === 'Finland 9')!.anchor).toBe('end');
   });
 
   it('the 1000 Genomes sites are where the spec §6 table puts them, so every dot is in its own country or city', () => {

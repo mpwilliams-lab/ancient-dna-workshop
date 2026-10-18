@@ -14,6 +14,20 @@ const overlaps = (a: Box, b: Box): boolean =>
   Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0;
 
 /**
+ * A word's left and right edge on the map (Task 27: tests/maps.test.ts and tests/real-data.test.ts ask whether one hangs over a frame's edge):
+ * labelBox's estimate, drawn `widthFactor` times as wide from the edge it is anchored at (1: as estimated), as labelLayoutViolations draws it.
+ */
+export function wordExtent(c: MapProjectionConstants, t: MapText, fontPx: number, widthFactor = 1): { left: number; right: number } {
+  const b = labelBox(c, t, fontPx);
+  const w = (b.right - b.left) * widthFactor;
+  const anchor = t.anchor ?? 'middle';
+  if (anchor === 'start') return { left: b.left, right: b.left + w };
+  if (anchor === 'end') return { left: b.right - w, right: b.right };
+  const mid = (b.left + b.right) / 2;
+  return { left: mid - w / 2, right: mid + w / 2 };
+}
+
+/**
  * What is wrong with `texts` (label i belongs to dot i) on a map drawn in `view`, as readable lines; [] when nothing is:
  * every label and every dot (a stroke is drawn beyond its radius, so one more unit) lies inside the window, no two labels overlap, no
  * label covers any dot (its own included), and each label is nearer to its own dot than to any other, so no reader can mistake whose

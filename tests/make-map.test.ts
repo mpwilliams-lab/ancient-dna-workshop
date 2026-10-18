@@ -185,8 +185,20 @@ describe('generated outlines (src/generated, committed)', () => {
   it('the Europe outline keeps Orkney, Shetland, the Isle of Man and Malta', () => {
     for (const box of KEEP_ISLANDS) expect(keptIsland(EUROPE_LAND, EUROPE_PROJECTION, box), box.name).toBe(true);
   });
-  it('the Europe-west outline keeps Orkney, Shetland and the Isle of Man (Malta lies south of its frame)', () => {
+  it('the Europe-west outline keeps Orkney, Shetland and the Isle of Man, and only a sliver of Malta, which straddles its southern edge', () => {
     for (const box of KEEP_ISLANDS.filter((k) => k.name !== 'Malta')) expect(keptIsland(EUROPE_WEST_LAND, EUROPE_WEST_PROJECTION, box), box.name).toBe(true);
+    // Malta (35.75 to 36.1 N) is cut by the frame's south edge at 36 N: what the shared island rule keeps is one ring under 3 units across, on
+    // the bottom edge of the 1000 x 700 space, below every window a card draws (it is a sliver of the keep-list's, not a map error).
+    const malta = KEEP_ISLANDS.find((k) => k.name === 'Malta')!;
+    const a = project(EUROPE_WEST_PROJECTION, malta.latMax, malta.lonMin);
+    const b = project(EUROPE_WEST_PROJECTION, malta.latMin, malta.lonMax);
+    const slivers = EUROPE_WEST_LAND.flatMap((d) => rings(d)).filter((r) => r.every(([x, y]) => x >= a.x - 0.1 && x <= b.x + 0.1 && y >= a.y - 0.1 && y <= b.y + 0.1));
+    expect(slivers).toHaveLength(1);
+    const xs = slivers[0]!.map((p) => p[0]);
+    const ys = slivers[0]!.map((p) => p[1]);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(3);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(3);
+    expect(Math.max(...ys)).toBeGreaterThan(697);
   });
   it('every coordinate has at most one decimal and stays inside the viewBox (allowing for the frame box edge)', () => {
     for (const d of [...EUROPE_LAND, ...OLDWORLD_LAND, ...EUROPE_WEST_LAND]) {

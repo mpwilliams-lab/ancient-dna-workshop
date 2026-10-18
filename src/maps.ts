@@ -455,21 +455,27 @@ export const DISTRIBUTION_MAP_FRAME: Readonly<Record<DistributionMapId, MapFrame
 /**
  * The size of each distribution map's labels in map units (the arrow maps use MAP_LABEL_FONT_PX = 20; A1 uses A1_LABEL_PX). These
  * pictures are drawn small on a card: the window is cut to the dots and their labels, and at 1366 x 768 the card leaves it about 300 px,
- * so 20 units would be 11 px (H2, whose window is the tallest) to 13 px. H2's 26 and the others' 24 give 14.4 to 16 px there, the least
+ * so 20 units would be 11 px (H2, whose window is the tallest) to 13 px. H2's 26 and I2's and J3's 24 give 14.4 to 16 px there, the least
  * that e2e/maps.spec.ts accepts (14); 26 is about the most the twenty labels of H2 can have and still all lie clear of each other and of
  * the dots (28 cannot be laid out).
  * K2 and L3 (Task 27) have few, short labels ("Britain 2.7", "Tuscany 21"), so they ask for more: 30. At 24 K2 drew 13.7 px at 1366 x 768,
  * under that floor: its side list, whose longest row is "Europe (large sample) 4.4", takes 200 of the card's 702 px and leaves the picture
- * 488. At 30 (measured in Chromium, same in Edge) K2 is 16.9 px there and 27.4 px at 1920 x 1080, L3 18.8 and 25.4; the window grows by
- * only 1% (K2) and 5% (L3), and the labels still lie clear (e2e/maps.spec.ts, tests/real-data.test.ts: 34 would too).
+ * 488. At 30 (measured in Chromium, same in Edge) K2 is 16.9 px there and 27.4 px at 1920 x 1080, L3 18.8 and 25.4; the side of the window
+ * that limits each picture (K2's width, L3's height) grows by only 1%, and the labels still lie clear (e2e/maps.spec.ts,
+ * tests/real-data.test.ts: 34 would too).
  */
 export const DISTRIBUTION_LABEL_PX: Readonly<Record<DistributionMapId, number>> = { H2: 26, I2: 24, J3: 24, K2: 30, L3: 30 };
 const isDistributionMap = (id: MapId): id is DistributionMapId => id in DISTRIBUTION_MAP_GENE;
 const hasCoordinates = (r: { lat?: number; lon?: number }): boolean => r.lat !== undefined && r.lon !== undefined;
 
-/** How far a label may hang out of the frame's box to the west or east: Ireland and Portugal (H2) and Spain (I2, J3) sit near the
- *  frame's west edge, and a label placed beside them runs off it. The window is cut round the labels, so nothing is cut off. */
-const LABEL_OVERHANG = 150;
+/**
+ * How far a label may hang out of the frame's box to the west or east, in map units, for each map. Ireland and Portugal (H2) and Spain
+ * (I2, J3) sit near the frame's west edge, and a label placed beside them runs off it (H2's Russia, the same in the east). The window is cut
+ * round the labels, so nothing is cut off. L3 takes none (Task 27): with the rule above its Finland word hung 60 units (37 px at 1366 x 768,
+ * 51 px at 1920 x 1080) over the frame's east edge, and it has no need to, so every L3 word stays inside the frame (Finland's sits on the
+ * other side of its dot). K2 keeps the rule of the maps that use it, though none of its words hangs out, so its layout is as it was.
+ */
+export const DISTRIBUTION_LABEL_OVERHANG: Readonly<Record<DistributionMapId, number>> = { H2: 150, I2: 150, J3: 150, K2: 150, L3: 0 };
 /** Room above and below the outermost dots, in em of the label size, in which a label may sit. */
 const LABEL_HEADROOM_EM = 2.5;
 
@@ -535,8 +541,9 @@ function distributionLayout(id: DistributionMapId, data: WorkshopData): { spec: 
   const headroom = LABEL_HEADROOM_EM * labelPx;
   const top = Math.max(f.top, Math.min(...ys) - headroom);
   const bottom = Math.min(f.bottom, Math.max(...ys) + headroom);
-  const left = Math.max(0, f.left - LABEL_OVERHANG);
-  const right = Math.min(MAP_VIEW.width, f.right + LABEL_OVERHANG);
+  const overhang = DISTRIBUTION_LABEL_OVERHANG[id];
+  const left = Math.max(0, f.left - overhang);
+  const right = Math.min(MAP_VIEW.width, f.right + overhang);
   const room: MapView = { x: left, y: top, width: right - left, height: bottom - top };
   const found = placeDotLabels(frame, items, room, labelPx);
   const texts = found ?? placeLabels(frame, items, [], { within: room, fontPx: labelPx });

@@ -7,10 +7,15 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { CARDS } from '../src/cards';
 import { MAP_TEXT } from '../src/content';
 import { A1_CONFIRMED_LABELS, MAP_SPECS_BUILT } from '../src/maps';
+
+// Every test here runs `npm run preview-maps`: a Vite build and a Node run, about 3 s alone and 5 s or more when the whole suite runs in
+// parallel, which is over vitest's default 5 s (the first test, which draws every built map, timed out at 5.27 s once Task 27 added two
+// maps to it). The script itself is given 120 s below.
+vi.setConfig({ testTimeout: 60_000 });
 
 const ROOT = resolve(__dirname, '..');
 const MANIFEST = resolve(ROOT, 'assets/manifest.json');
@@ -157,6 +162,9 @@ describe('npm run preview-maps', () => {
     expect(text).toContain('Britain, Finland, Tuscany and Spain in Europe. Each dot in its own country or city.');
     expect(text).toContain('No number here is 0, so there are no hollow rings: even the smallest (Finland 9) is a filled dot');
     expect(text).toContain('This map shows Europe only, on its own western-Europe frame');
+    // No word hangs over the frame (the Finland word used to): the page tells him so, and no longer says it hangs.
+    expect(text).toContain('Every word is inside the frame; Finland\'s sits to the left of its dot.');
+    expect(text).not.toContain('hangs over the frame');
     expect(text).toContain('Europe (large sample) 22: no point for it');
     expect(text).toContain('On the card the side list sits beside it: Europe (large sample) 22.');
     expect(text).toContain('>Spain 25</text>');

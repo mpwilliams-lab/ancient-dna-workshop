@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { CARDS, distributionRows } from '../src/cards';
 import { IRELAND_FOOTNOTE, MAP_TEXT } from '../src/content';
 import { FEATURES } from '../src/features';
-import { A1_CONFIRMED_LABELS, DISTRIBUTION_MAP_GENE } from '../src/maps';
+import { A1_CONFIRMED_LABELS, DISTRIBUTION_LABEL_OVERHANG, DISTRIBUTION_MAP_FRAME, DISTRIBUTION_MAP_GENE, frameBox } from '../src/maps';
 import type { CardId } from '../src/types';
 import { a1LabelCandidates, buildMapApp, MAP_CARD_IDS, type MapApp } from './mapBuild';
 import { DATA, idle, intersects, prompt, screenViolations, settle, watch, type Rect } from './helpers';
@@ -306,6 +306,15 @@ test.describe('map cards in their map form', () => {
                 const nearest = Math.hypot(Math.max(t.glyphs.left - v.cx, 0, v.cx - t.glyphs.right), Math.max(t.glyphs.top - v.cy, 0, v.cy - t.glyphs.bottom));
                 expect(nearest, `${id}: "${t.text}" covers the ${at}`).toBeGreaterThanOrEqual(v.r);
               }
+            }
+            // A word may hang over the frame's west or east edge only by its map's overhang (src/maps.ts DISTRIBUTION_LABEL_OVERHANG: the
+            // Ireland, Portugal, Spain and Russia words of H2, I2 and J3 need it; L3 takes none, so "Finland 9" sits inside its frame). The
+            // glyph boxes are the real words in the real browser, in map units, the frame's box the same units.
+            const frame = frameBox(DISTRIBUTION_MAP_FRAME[id]);
+            const overhang = DISTRIBUTION_LABEL_OVERHANG[id];
+            for (const t of m!.labels) {
+              expect(t.glyphs.left, `${id}: "${t.text}" hangs over the frame's west edge by more than ${overhang} units`).toBeGreaterThanOrEqual(frame.left - overhang - 0.5);
+              expect(t.glyphs.right, `${id}: "${t.text}" hangs over the frame's east edge by more than ${overhang} units`).toBeLessThanOrEqual(frame.right + overhang + 0.5);
             }
             if (c.fit === 'normal') {
               const filled = m!.values.filter((v) => !v.zero).map((v) => v.px);
