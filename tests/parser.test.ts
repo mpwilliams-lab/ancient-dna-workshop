@@ -7,6 +7,7 @@ import {
   completions, completionsCore, editDistance, formatCommand, leadInOf, normKey, parse, parseCore,
   type Command, type ParseResult,
 } from '../src/parser';
+import { HELP_LINES } from '../src/content';
 import { ruleViolations } from './contentRules';
 
 const ok = (command: Command): ParseResult => ({ ok: true, command });
@@ -289,7 +290,9 @@ describe('parse: errors and did-you-mean (RF1, spec §4.2)', () => {
     });
     expect(parse('allele_freq(gene = "BRCA1")')).toMatchObject({ message: 'That is not a gene in this workshop. Genes: LCT, SLC45A2, HERC2, TYK2, HLA-DQ2.' });
     expect(parse('asdfghjkl')).toMatchObject({ message: "I don't know that command. Type help() to see the list." });
-    expect(parse('run_pca()')).toMatchObject({ message: 'run_pca needs a period, for example run_pca(period = "Today").' });
+    // The examples are the one help() shows, not the reveal (final review F2: a station that ran run_pca(period = "Today") from a message lost step 9).
+    expect(parse('run_pca()')).toMatchObject({ message: 'run_pca needs a period, for example run_pca(period = "IronAge").' });
+    expect(parse('()')).toEqual({ ok: false, kind: 'syntax', message: 'I could not read that. Commands look like run_pca(period = "IronAge").' });
     expect(parse('')).toMatchObject({ kind: 'syntax', message: 'Type a command and press Enter, or press Esc to fill in the hint.' });
     expect(parse('x'.repeat(201))).toEqual({ ok: false, kind: 'too_long', message: 'That is too long: commands are at most 200 characters.' });
   });
@@ -607,6 +610,61 @@ describe('PARSE_TEXT obeys the section 6 content rules', () => {
     }
     expect(offending).toEqual([]);
   });
+});
+
+// ---------- final review F2: no message hands the student the reveal ----------
+// An error message carries an example, and a student who is stuck copies it. run_pca(period = "Today") is step 9, which the class predicts before
+// it runs, so a message that offers it spoils the step: Britain today then stays in the legend and the bars of that station's every later plot.
+// The examples are now the one help() shows. Britain today still appears where it is a value the student may pick: the period lists name it
+// (unquoted, as help() does), and a did-you-mean quotes what the student's own typing was close to.
+
+/** The fixed messages: every static PARSE_TEXT entry, and every function entry called with each command and parameter. didYouMean is left out, because all it prints is a suggestion built from what the student typed. */
+function fixedParseTextStrings(): string[] {
+  const out: string[] = [];
+  for (const [key, value] of Object.entries(PARSE_TEXT)) {
+    if (key === 'didYouMean') continue;
+    if (typeof value === 'string') { out.push(value); continue; }
+    const produce = value as unknown as (...args: string[]) => string;
+    for (const name of COMMAND_NAMES) for (const param of PARAM_NAMES) out.push(produce(name, param));
+  }
+  return [...new Set(out)];
+}
+
+describe('no parser message hands the student the reveal (final review F2)', () => {
+  it('no fixed message quotes "Today", so none can be copied as an argument; only the three period lists name it at all', () => {
+    const strings = fixedParseTextStrings();
+    expect(strings.length).toBeGreaterThan(30);
+    expect(strings.filter((s) => s.includes('"Today"'))).toEqual([]);
+    expect(strings.filter((s) => s.includes('Today')).sort()).toEqual([PARSE_TEXT.pcaPeriodList, PARSE_TEXT.periodList, PARSE_TEXT.personList].sort());
+  });
+
+  it('every example command in a fixed message parses and none runs Today; the run_pca example is the one help() shows', () => {
+    const examples = [...new Set(fixedParseTextStrings().flatMap((s) => [...s.matchAll(/\b(?:run_pca|run_admixture|allele_freq|ancestry_test)\(\w+ = "[^"]*"\)/g)].map((m) => m[0])))];
+    // a new example in a message has to be added here, and so has to pass the loop below
+    expect(examples.sort()).toEqual(['allele_freq(gene = "LCT")', 'ancestry_test(person = "me")', 'run_pca(period = "IronAge")']);
+    for (const example of examples) {
+      const r = parse(example);
+      expect(r.ok, example).toBe(true);
+      expect(JSON.stringify(r), example).not.toContain('Today');
+    }
+    const helpExample = HELP_LINES.find((l) => l.trim().startsWith('run_pca('))?.trim() ?? '';
+    expect(helpExample).toBe('run_pca(period = "IronAge")');
+    expect(PARSE_TEXT.syntax).toContain(helpExample);
+    expect(PARSE_TEXT.needs('run_pca', 'period')).toContain(helpExample);
+  });
+
+  // The slips a student makes while typing a command at steps 2 to 7, each of which answers with one of the two messages that carry an example.
+  it.each(['run_pca', 'run pca', 'run_pca(', 'run_pca()', 'run_pca(period =', 'run_pca(period = "', 'run_pca(period = "")', '()', '(('])(
+    'the answer to %j does not mention Today, and a suggestion with it, if any, does not run it',
+    (input) => {
+      const r = parse(input);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.message).not.toContain('Today');
+        expect(r.suggestion ?? '').not.toContain('Today');
+      }
+    },
+  );
 });
 
 // ---------- the safety net and its seam ----------

@@ -148,11 +148,13 @@ export function formatCommand(c: Command): string {
 }
 
 // ---- on-screen text (never includes the student's input) ----
+// An example inside a message is what a student copies and runs. It must never be the reveal, run_pca(period = "Today"): that is step 9, which
+// the class predicts first (final review F2). The two examples below are the one help() shows, a period that gives nothing away.
 const PCA_LIST = `${PARSER_PCA_ORDER.join(', ')}, all`;
 export const PARSE_TEXT = {
   empty: 'Type a command and press Enter, or press Esc to fill in the hint.',
   tooLong: 'That is too long: commands are at most 200 characters.',
-  syntax: 'I could not read that. Commands look like run_pca(period = "Today").',
+  syntax: 'I could not read that. Commands look like run_pca(period = "IronAge").',
   oneAtATime: 'Run one command at a time, in the form name(arg = "value").',
   duplicate: 'Give each argument only once.',
   unknownCommand: "I don't know that command.",
@@ -170,7 +172,7 @@ export const PARSE_TEXT = {
   personList: `Choose "me" or a period: ${PARSER_PERIOD_ORDER.join(', ')}.`,
   badK: "K must be a number; this workshop's run uses K = 3.",
   needs: (n: CommandName, p: ParamName) => {
-    if (n === 'run_pca') return 'run_pca needs a period, for example run_pca(period = "Today").';
+    if (n === 'run_pca') return 'run_pca needs a period, for example run_pca(period = "IronAge").';
     if (n === 'allele_freq') return 'allele_freq needs a gene, for example allele_freq(gene = "LCT").';
     if (n === 'ancestry_test') return 'ancestry_test needs a person, for example ancestry_test(person = "me").';
     return p === 'K' ? 'run_admixture needs K.' : 'run_admixture needs a period.';
