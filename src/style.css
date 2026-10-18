@@ -366,19 +366,21 @@ body {
 }
 
 /* A card with a single picture (I1's melanocyte diagram, J1's irises): its tile spans the whole card, so a picture held to the general
-   cap above sits small in a wide grey panel. It may be drawn larger, up to min(35vh, 380px) (a ruling after Task 26's review; it
-   supersedes spec §5.2's image bound min(26vh, 230px) for a one-picture tile row only: every other tile row keeps the bound, F1 a
-   smaller cap still). Drawn: the diagram (5:4) 336 x 269 at 1366 x 768 and 473 x 378 at 1920 x 1080, where it was 250 x 200 and
-   288 x 230; the drawing as wide as its tile (702 x 234 and 1004 x 335). The card stays `normal` at both lab-standard screens with 81 px
-   to spare at 1366 x 768 (a line of its 19 px text is 26 px) and 334 px at 1920 x 1080, and with at least 41 px to spare at every other
-   window of e2e/viewports.ts that gets the bigger picture (the least is CSS 1280 x 720): the lab font (Segoe UI) is not measured, so
-   the cap leaves room for it. Two places keep the general cap because the card has little height to spare there: a window shorter
-   than 600 px (27 px to spare at CSS 682 x 512, where the bigger picture tipped the card to dense and then to compact, which hides
-   it) and the stacked layout (the override in the stacked block below), where the card is only the lower half of the window. */
-@media (min-height: 600px) {
-  #card .card-tiles[data-count="1"] .card-tile img {
-    max-height: min(35vh, 380px);
-  }
+   cap above sits small in a wide grey panel. It may be drawn larger: the cap leaves the general one at a window height of 640 px, grows
+   0.54 px for every px of height, and stops at min(35vh, 380px), which it reaches at 768 px, the height of the 1366 x 768 lab screen (a
+   ruling after Task 26's review; it supersedes spec §5.2's image bound min(26vh, 230px) for a one-picture tile row only: every other
+   tile row keeps the bound, F1 a smaller cap still). Drawn: the diagram (5:4) 336 x 269 at 1366 x 768 and 473 x 378 at 1920 x 1080,
+   where it was 250 x 200 and 288 x 230; the drawing as wide as its tile (702 x 234 and 1004 x 335). The card stays `normal` at both
+   lab-standard screens, with 81 px to spare at 1366 x 768 (a line of its 19 px text is 26 px) and 334 px at 1920 x 1080.
+   A ramp and not a step, because the spare height of these cards grows with the window's height (at the width where it is least, about
+   53 px at 640 and 92 at 720) and dips near 1340 px wide, where the text wraps once more. A step at 600 px gave a picture 54 px taller
+   to windows with 35 px to spare and tipped the card to dense in 138 of the 13,080 card-and-window pairs tried (6,540 windows, 600 to
+   2,560 px wide and 600 to 900 tall); a step at 720 px left 27 px to spare at 1340 x 720. With the ramp none of the pairs fits worse
+   than with the general cap, and the least spare height where the picture grew is 43 px (at 1355 x 680): the lab font (Segoe UI) is
+   not measured, so that room is deliberate. Under 640 px the general cap stays (27 px to spare at CSS 682 x 512), and so it does in
+   the stacked layout (the override in the stacked block below), where the card is only the lower half of the window. */
+#card .card-tiles[data-count="1"] .card-tile img {
+  max-height: max(min(26vh, 230px), min(35vh, 380px, calc(26vh + 0.54 * (100vh - 640px))));
 }
 
 #card .card-tile figcaption {

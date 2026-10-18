@@ -789,15 +789,40 @@ async function pictures(page: Page): Promise<{ form: string | null; pictures: Pi
   });
 }
 
+/** The fit levels in the order of spec §5.2: each is worse than the one before it. */
+const FIT_ORDER: readonly string[] = ['normal', 'dense', 'compact', 'scroll'];
+
+/**
+ * The open card's fit level as it would be if its single picture were held to the general cap, min(26vh, 230px): the stylesheet's rule for a
+ * single picture is overridden for a moment, the card refitted (the card view refits on every resize), the level read, and the page put back as
+ * it was. A single picture's larger cap must never make the card fit worse than this.
+ */
+async function fitUnderGeneralCap(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const style = document.createElement('style');
+    style.textContent = '#card .card-tiles[data-count="1"] .card-tile img { max-height: min(26vh, 230px) !important; }';
+    document.head.append(style);
+    window.dispatchEvent(new Event('resize'));
+    const fit = document.querySelector('#card')!.getAttribute('data-fit')!;
+    style.remove();
+    window.dispatchEvent(new Event('resize'));
+    return fit;
+  });
+}
+
 /**
  * The tallest a picture may be drawn at this window, in CSS px. Spec §5.2's bound is min(26vh, 230px). A card with a single picture (I1, J1)
- * may go higher (src/style.css, a ruling after Task 26's review): min(35vh, 380px), in a window at least 600 px tall that is not stacked.
- * A window shorter than 600 px and the stacked layout (narrower than 600 px, or at most 3:4: the card is the lower half of the window) keep
- * the bound.
+ * may go higher (src/style.css, a ruling after Task 26's review): a ramp that leaves the bound at a window height of 640 px, grows 0.54 px
+ * per px of height and stops at min(35vh, 380px), which it reaches at 768 px. (A step at 600 px tipped I1 to dense in windows 1280 to 1600
+ * px wide and 600 to 640 tall; the ramp has no step.) The stacked layout (narrower than 600 px, or at most 3:4: the card is the lower half
+ * of the window) keeps the bound. This mirrors the stylesheet's expression: `max(min(26vh, 230px), min(35vh, 380px, calc(26vh + 0.54 *
+ * (100vh - 640px))))`.
  */
 function pictureCap(c: Case, single: boolean): number {
+  const general = Math.min(0.26 * c.height, 230);
   const stacked = c.width <= 599 || c.width / c.height <= 3 / 4;
-  return single && !stacked && c.height >= 600 ? Math.min(0.35 * c.height, 380) : Math.min(0.26 * c.height, 230);
+  if (!single || stacked) return general;
+  return Math.max(general, Math.min(0.35 * c.height, 380, 0.26 * c.height + 0.54 * (c.height - 640)));
 }
 
 /**
@@ -894,6 +919,39 @@ test.describe('every upgraded form at once (all flags forced on, in memory)', ()
         await expectHeaderUsable(page, 'F1');   // a picture card with three pictures, the tallest of the lot
         console.log(`fit levels at ${c.name} with every upgrade on: ${JSON.stringify(fits)}`);
         console.log(`single-picture cards at ${c.name}: picture drawn ${JSON.stringify(singles)} CSS px`);
+        expect(w.requests).toEqual([]);
+        expect(w.errors).toEqual([]);
+      });
+    });
+  }
+
+  // The single picture's cap is a ramp (src/style.css), and a single picture must never make its card fit worse than the general cap would.
+  // The 26 viewport cases above do not have the windows where that mattered or could, so these are added: the ones a flat guard at 600 px of
+  // height tipped I1 from normal to dense in (1366 x 600, 1366 x 620, 1280 x 620, 1600 x 620, 1300 x 640), 1366 x 640, the windows on the ramp
+  // where the spare height of the card is least (1300 x 660, 1355 x 680, 1320 x 700, 1340 x 720), the 1280 x 720 screen (1920 x 1080 at 150%)
+  // and a 1366 x 720 one, and two stacked windows (768 x 1024, 820 x 1180), where the card is only the lower half of the window and the
+  // general cap stays. For I1 and J1 at each: the card fits no worse than it does with the general cap forced on its picture, and the
+  // picture is drawn as tall as pictureCap says (the ramp, or the general cap in a stacked window).
+  const RAMP_WINDOWS: readonly (readonly [number, number])[] = [
+    [1366, 600], [1366, 620], [1280, 620], [1600, 620], [1300, 640], [1366, 640],
+    [1300, 660], [1355, 680], [1320, 700], [1340, 720], [1280, 720], [1366, 720],
+    [768, 1024], [820, 1180],
+  ];
+  for (const [width, height] of RAMP_WINDOWS) {
+    const c: Case = { name: `${width}x${height}`, width, height, dsf: 1, fit: 'any' };
+    test(`a single picture fits its card no worse than the general cap would, and is as tall as its cap lets it: ${c.name}`, async ({ browser }) => {
+      await withPage(browser, c, async (page) => {
+        const w = watch(page);
+        await startForCards(page, testUrl(app.url));
+        for (const id of ['I1', 'J1'] as const) {
+          await openTestCard(page, id);
+          const fit = (await page.locator('#card').getAttribute('data-fit'))!;
+          const general = await fitUnderGeneralCap(page);
+          expect(FIT_ORDER.indexOf(fit), `${id} at ${c.name}: the card fits ${fit}; with the general cap on its picture it would fit ${general}`).toBeLessThanOrEqual(FIT_ORDER.indexOf(general));
+          await expectFormShown(page, c, id, fit);
+          await expectNoPageScroll(page);
+          await closeWithContinue(page, id);
+        }
         expect(w.requests).toEqual([]);
         expect(w.errors).toEqual([]);
       });
