@@ -17,6 +17,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { JSDOM } from 'jsdom';
+import { guidedPlot, playGuided } from '../e2e/guidedPlay';
 import { buildMapApp } from '../e2e/mapBuild';
 
 // The built file sits in <repo>/.preview-maps/ (the source in <repo>/scripts/): the repo root is one folder up either way.
@@ -151,19 +152,17 @@ function parseArgs(argv: string[]): Options {
  *  when the map is not on the card at this screen: the F1 inset is an optional tile, and the card drops it (and its photographs) when it
  *  has no room (the `compact` fit level), in which case the box is 0 x 0. */
 interface CardShot { file: string; mapWidth: number; mapHeight: number; fit: string | null; shown: boolean }
-/** The Roman plot with the York traveller at one screen: where the picture of the plot pane was saved and the size of the plot itself. */
-interface PlotShot { file: string; width: number; height: number }
+/** The Roman plot with the York traveller at one screen: where the picture of the plot pane was saved, the size of the plot itself, and how many
+ *  guided commands were typed from the start to reach the Roman step (a class types them all). */
+interface PlotShot { file: string; width: number; height: number; commands: number }
 interface Pictures { cards: Map<string, CardShot>; york: Map<number, PlotShot> }
 
 /** The card a map is shown on: its own id, or F1 for the Roman inset (a map that has no card of its own). */
 const cardIdOf = (mapId: string): string => (mapId === 'F1inset' ? 'F1' : mapId);
 
-/** The two commands that put the Roman plot on screen the way a class gets there: the Iron Age first, then the Roman period (off the guided script, so no card opens). */
-const ROMAN_COMMANDS = ['run_pca(period = "IronAge")', 'run_pca(period = "Roman")'] as const;
-
 /** Pictures of the cards at the lab screens (and, with `york`, of the Roman plot), from a scratch copy of the app with these maps drawn
- *  (the F1 inset beside F1's three photographs, drawn as stand-ins) and the York traveller on. Null (with the reason on stderr) when it
- *  cannot be done. */
+ *  (the F1 inset beside F1's three photographs, drawn as stand-ins) and the York traveller on. The Roman plot is the one a class has: the
+ *  guided commands typed from the start, up to the Roman step (e2e/guidedPlay.ts). Null (with the reason on stderr) when it cannot be done. */
 async function takeCardPictures(ids: string[], out: string, york: boolean): Promise<Pictures | null> {
   const pictures: Pictures = { cards: new Map(), york: new Map() };
   let app: Awaited<ReturnType<typeof buildMapApp>> | undefined;
@@ -183,20 +182,16 @@ async function takeCardPictures(ids: string[], out: string, york: boolean): Prom
       });
       await idle();
       if (york) {
-        const prompt = page.locator('#terminal').locator('input, textarea').first();
-        for (const command of ROMAN_COMMANDS) {
-          await prompt.click();
-          await prompt.pressSequentially(command);
-          await prompt.press('Enter');
-          await idle();
-        }
+        // The guided script from the start, each command typed and each card closed, as a class does it: at the Roman step the plot then holds
+        // all six of its layers and the legend under it runs its full length, which a shortcut to the Roman period would not show.
+        const typed = await playGuided(page, 'roman');
         // The 0.5 s change from the Europe frame to the British one must be over before the plot is photographed.
         await page.waitForFunction(() => (document.querySelector('#plot')?.getAnimations({ subtree: true }) ?? []).every((a) => a.playState !== 'running'), null, { polling: 50 });
         const box = await page.locator('#plot svg.plot-svg').boundingBox();
         if (box === null || (await page.locator('#plot g.york-traveller').count()) !== 1) throw new Error('the Roman plot drew no York traveller in the scratch build');
         const file = `plots/york-${screen.width}x${screen.height}.png`;
         await page.locator('#plot').screenshot({ path: resolve(out, file) });
-        pictures.york.set(screen.width, { file, width: Math.round(box.width), height: Math.round(box.height) });
+        pictures.york.set(screen.width, { file, width: Math.round(box.width), height: Math.round(box.height), commands: typed.length });
       }
       for (const id of ids) {
         const cardId = cardIdOf(id);
@@ -239,9 +234,8 @@ async function main(argv: string[]): Promise<void> {
   const { dotRadius, renderMap } = await import('../src/plots/map');
   const { CARDS, DISTRIBUTION_SCALE_MAX, distributionRows } = await import('../src/cards');
   const { sourceWithMapSuffix, renderF1Inset } = await import('../src/cardView');
-  const { IRELAND_FOOTNOTE, YORK_TRAVELLER_LABEL } = await import('../src/content');
+  const { IRELAND_FOOTNOTE, PERIOD_LABELS, YORK_TRAVELLER_LABEL, withN } = await import('../src/content');
   const { ALL_OFF, withFeatures } = await import('../src/features');
-  const { INITIAL_PLOT, reducePlot } = await import('../src/plotState');
   const { renderPca } = await import('../src/plots/pca');
   const { SVG_NS } = await import('../src/plots/svg');
   for (const id of options.ids) {
@@ -307,14 +301,16 @@ async function main(argv: string[]): Promise<void> {
    * the mark and its words read well, and the flag is switched on or not on his word.
    */
   const yorkSection = (): string => {
-    const state = reducePlot(reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'IronAge' }, DATA), { kind: 'pca', period: 'Roman' }, DATA);
+    // The plot a class has at the Roman step: the guided commands from the start, replayed (e2e/guidedPlay.ts), under the shipped flags.
+    const state = guidedPlot(DATA, 'roman', withFeatures({ yorkTraveller: true }));
     const plot = dom.window.document.createElementNS(SVG_NS, 'svg') as unknown as SVGSVGElement;
     renderPca(plot, DATA, state, { animate: false, features: withFeatures({ yorkTraveller: true }, ALL_OFF) });
     plot.setAttribute('class', 'plot-svg');
+    const nRoman = DATA.periods.find((p) => p.id === 'Roman')?.n_pca ?? 0;
     const expect = [
-      'The Roman plot, as the Roman step draws it (the zoomed British view: the Iron Age cloud, the Roman people, the zoom note under it), with one extra mark: a hollow orange square (the Roman colour and shape) at the bottom right corner of the plot, with a small orange arrow just below it pointing down and a little to the right, off the plot.',
+      `The Roman plot, as the Roman step draws it for a class that has typed the guided commands from the start (the zoomed British view: the Iron Age cloud, the Roman people, the zoom note under it, and the legend under the plot with all its entries), with one extra mark: a hollow orange square (the Roman colour and shape) near the bottom right of the plot, a little above the bottom edge of the plot, with a small orange arrow just below it pointing down and a little to the right, toward where he really lies, off the zoomed map. The mark and its arrow stay inside the plot: the arrow does not touch the legend or "${withN(PERIOD_LABELS.Roman, nRoman)}" in it.`,
       `Its words, to the left of the square and above it, in three lines with a white outline: "${YORK_TRAVELLER_LABEL}" (Martiniano et al. 2016, which the Roman slide cites). Do they read well at projector size, over the dots behind them?`,
-      'He is not one of the 17 Roman-group people: the Roman layer, its count and the legend are the same with or without the mark. The mark appears only on the Roman plot, never on another period or on the Europe view. Hovering over the square, or tapping it, shows the same sentence at the top of the plot.',
+      `He is not one of the ${nRoman} Roman-group people: the Roman layer, its count and the legend are the same with or without the mark. The mark appears only on the Roman plot, never on another period or on the Europe view. Hovering over the square, or tapping it, shows the same sentence at the top of the plot.`,
       'No sample number, group code or site name is written anywhere in the mark. There is no visual-check command for a point on a plot: if it reads well, tell me and I switch it on (the flag yorkTraveller).',
     ].map((line) => `<li>${escapeHtml(line)}</li>`).join('');
     const figures = SCREENS.map((screen) => {
@@ -324,7 +320,7 @@ async function main(argv: string[]): Promise<void> {
       const width = shot?.width ?? (screen.width === 1366 ? 745 : 1047);
       const pane = shot === undefined ? '' :
         `<figure><img class="card" src="${escapeHtml(shot.file)}" alt="The Roman plot with the York traveller at ${label}">` +
-        `<figcaption>The plot pane as the students would see it at ${label} (picture size: its real size).</figcaption></figure>`;
+        `<figcaption>The plot pane as the students would see it at ${label}, after the ${shot.commands} guided commands a class types from the start to reach the Roman step (picture size: its real size).</figcaption></figure>`;
       const alone = `<figure><div class="plot-alone" style="width:${width}px">${plot.outerHTML}</div>` +
         `<figcaption>The Roman plot alone at ${label}: ${width} px wide${shot === undefined ? ' (estimated)' : ''}. Zoom in to look closer.</figcaption></figure>`;
       return `<h3>At ${label}</h3>${pane}${alone}`;
@@ -373,6 +369,13 @@ async function main(argv: string[]): Promise<void> {
     sections.push(`<section id="${escapeHtml(id)}"><h2>${escapeHtml(id)}: ${escapeHtml(title)}</h2><ul class="expect">${expect}</ul>${figures.join('')}</section>`);
   }
   if (showYork) sections.push(yorkSection());
+  // The F1 inset stays off for the event (P3: the smaller lab screen has no room for it), so it is not in the main batch of the visual check:
+  // it has a batch of its own (docs/instructor-photo-map-check.md, batch 6), for a bigger lab screen or for after the event.
+  const batch = ids.filter((id) => id !== 'F1inset');
+  const insetBatch = '<code>npm run visual-check -- F1inset</code>';
+  const command = batch.length > 0
+    ? ` Then, in your own terminal: <code>npm run visual-check -- ${escapeHtml(batch.join(' '))}</code>${ids.includes('F1inset') ? ` The town inset (F1inset) is not in that command: it stays off at the smaller lab screen, so check it on its own, with ${insetBatch}, only if the lab screen is 1600 x 900 or bigger, or after the event.` : ''}`
+    : ` Then, only if the lab screen is 1600 x 900 or bigger (the town inset stays off at the smaller one), or after the event, in your own terminal: ${insetBatch}`;
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Map preview</title><style>
 :root { --map-land: ${token('map-land', '#e4dfd3')}; --card-bg: ${token('card-bg', '#ffffff')}; --card-muted: ${token('card-muted', '#4a5560')}; }
 body { margin: 24px; font-family: "Segoe UI", system-ui, sans-serif; background: #f2f2f2; color: #1a1a1a; }
@@ -394,7 +397,7 @@ img.card { display: block; border: 1px solid #8a8a8a; }
 ${mapRules}
 </style></head><body><h1>Map preview for the visual check (not shipped)</h1>
 <p>Check each map: places in the right spots, every label readable at projector size, no dates or banned words, coastlines look right.
-Open this page full screen on the projector if you can. Then, in your own terminal: <code>npm run visual-check -- ${escapeHtml(ids.join(' '))}</code>${showYork ? ' The last section, the York traveller, is a point on a plot: it has no visual-check command.' : ''}</p>
+Open this page full screen on the projector if you can.${command}${showYork ? ' The last section, the York traveller, is a point on a plot: it has no visual-check command.' : ''}</p>
 ${sections.join('\n')}</body></html>`;
   const page = resolve(options.out, 'maps.html');
   writeFileSync(page, html);

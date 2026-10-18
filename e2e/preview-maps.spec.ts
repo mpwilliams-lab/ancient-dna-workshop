@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
+import { SCRIPT_STEPS } from '../src/hints';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -36,6 +37,11 @@ test('the whole preview page takes the card pictures of the F1 inset and the plo
     const york = html.slice(html.indexOf('<section id="york-traveller">'), html.indexOf('</section>', html.indexOf('<section id="york-traveller">')));
     for (const f of ['plots/york-1366x768.png', 'plots/york-1920x1080.png']) expect(york, f).toContain(`src="${f}"`);
     expect(york).not.toContain('estimated');
+    // Each plot picture is taken at the Roman step of the guided run: every guided command from the start typed, as a class gets there, not a
+    // shortcut (the Iron Age, then the Roman period) that leaves the plot and its legend short (Task 29, fix round 1). The caption says how many.
+    const typed = SCRIPT_STEPS.findIndex((s) => s.id === 'roman') + 1;
+    expect(typed, 'more commands than the shortcut\'s two').toBeGreaterThan(2);
+    expect(york.match(new RegExp(`after the ${typed} guided commands a class types from the start`, 'g')), 'one picture at each screen, after every guided command up to the Roman step').toHaveLength(2);
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

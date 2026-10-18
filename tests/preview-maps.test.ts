@@ -57,7 +57,14 @@ describe('npm run preview-maps', () => {
       const drawn = id === 'A1' && A1_CONFIRMED_LABELS.length === 0 ? 4 : inset ? 4 : 2;
       expect(html.match(new RegExp(`data-map="${id}"`, 'g')), `${id} drawn ${drawn} times`).toHaveLength(drawn);
     }
-    expect(text).toContain(`npm run visual-check -- ${ids.join(' ')}`);
+    // The main batch of the visual check leaves the F1 inset out: it stays off for the event (the smaller lab screen has no room for it), so it
+    // has a batch of its own, which the page words as for a bigger screen or for after the event (docs/instructor-photo-map-check.md, batch 6).
+    const batch = ids.filter((id) => id !== 'F1inset');
+    expect(ids).toContain('F1inset');
+    expect(text).toContain(`npm run visual-check -- ${batch.join(' ')}</code>`);
+    expect(text).not.toContain(`npm run visual-check -- ${ids.join(' ')}`);
+    expect(text.match(/npm run visual-check -- [^<]*F1inset/g)).toEqual(['npm run visual-check -- F1inset']);
+    expect(text).toContain('only if the lab screen is 1600 x 900 or bigger, or after the event');
     // The whole page ends with the York traveller, a point on a plot (no visual check, so not in the command above).
     expect(html).toContain('<section id="york-traveller">');
     expect(html.indexOf('<section id="york-traveller">')).toBeGreaterThan(html.lastIndexOf(`<section id="${ids.at(-1)}">`));
@@ -74,6 +81,7 @@ describe('npm run preview-maps', () => {
     expect(html).toContain('<section id="G1">');
     for (const other of ['A1', 'D1', 'E1']) expect(html).not.toContain(`<section id="${other}">`);
     expect(unescape(html)).toContain('npm run visual-check -- G1</code>');
+    expect(html, 'a page of named maps says nothing of the inset').not.toContain('F1inset');
     expect(html).toContain('At 1366 x 768');
     expect(html).toContain('At 1920 x 1080');
   });
@@ -202,6 +210,7 @@ describe('npm run preview-maps', () => {
     expect(text).toContain('<section id="F1inset">');
     expect(text).toContain(`F1inset: ${CARDS.F1.title} (the town inset on the Roman slide)`);
     expect(text).toContain('npm run visual-check -- F1inset</code>');
+    expect(text, 'its command is for a bigger lab screen or after the event').toContain('only if the lab screen is 1600 x 900 or bigger (the town inset stays off at the smaller one), or after the event');
     expect(html.match(/class="card-tile card-inset is-optional"/g)).toHaveLength(2);       // once per lab screen
     expect(html.match(/class="inset-town"/g)).toHaveLength(12);
     expect(html.match(/class="inset-country"/g)).toHaveLength(2);
@@ -245,6 +254,12 @@ describe('npm run preview-maps', () => {
     expect(section.match(/data-view="pca"/g)).toHaveLength(2);
     // It is the Roman plot: the Roman layer is in focus, and the page says nothing a Roman plot would not.
     expect(section.match(/data-focus="Roman"/g)).toHaveLength(2);
+    // It is the plot a class has at the Roman step, the guided commands from the start (fix round 1), not the one a shortcut (the Iron Age and
+    // then the Roman period) leaves: every earlier step's layer is on it, and so are the legend entries whose row the mark's arrow once touched.
+    for (const layer of ['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'Today']) {
+      expect(section.match(new RegExp(`data-layer="${layer}"`, 'g')), `layer ${layer}`).toHaveLength(2);
+    }
+    for (const entry of ['BellBeaker', 'BronzeAge', 'IronAge', 'Roman']) expect(section.match(new RegExp(`data-legend="${entry}"`, 'g')), `legend ${entry}`).toHaveLength(2);
     // No sample number, group code or site name: the mark is a key, a square, an arrow and the words.
     expect(section).not.toMatch(/3DT26|Driffield|oLevant|Britannia|\.SG\b/);
     expect(html).not.toMatch(/<script/i);
