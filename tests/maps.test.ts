@@ -886,7 +886,7 @@ describe('distribution maps H2, I2, J3, K2, L3 (Tasks 24 and 27, spec §3.4, §6
 
 // ---- Task 27: K2 (TYK2, Old World frame, fixed 0-15 scale) and L3 (HLA-DQ2, Europe only, Europe-west frame) ----
 // They go through the same distribution builder as H2, I2 and J3 (Task 24): no new builder. The checks above already run over all five; these
-// are the brief's own and what only these two have: one decimal, the fixed scale, the Europe-west outline.
+// restate the contract for the two and add what only they have: one decimal, the fixed 0-15 scale, the Europe-west outline.
 describe('distribution maps K2 and L3 (Task 27, spec §3.4 P3 form, §6)', () => {
   const CASES = [
     { id: 'K2', gene: 'TYK2', frame: 'oldWorld', scaleMax: 15 },
@@ -939,7 +939,7 @@ describe('distribution maps K2 and L3 (Task 27, spec §3.4 P3 form, §6)', () =>
       for (const t of s.texts ?? []) expect(svg.textContent).toContain(t.text);
     });
 
-    it(`${id}: nothing new in the spec: it is exactly what the distribution builder gives, and a map built for the card is not a new kind of map`, () => {
+    it(`${id}: no new builder: mapSpec gives exactly what distributionSpec gives, with no arrows and no links`, () => {
       expect(mapSpec(id, FIXTURE)).toEqual(distributionSpec(id, FIXTURE));
       expect(mapSpec(id, FIXTURE).arrows ?? []).toHaveLength(0);
       expect(mapSpec(id, FIXTURE).links ?? []).toHaveLength(0);
