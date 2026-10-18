@@ -18,10 +18,12 @@ import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { MAP_SOURCE_SUFFIX, MAP_TEXT, YORK_TRAVELLER_LABEL } from '../src/content';
 import { FEATURES } from '../src/features';
-import { PCA_VIEW, makeScale } from '../src/plots/pca';
+import { PCA_VIEW, YORK_EDGE_INSET, YORK_POINTER_BASE, YORK_POINTER_HALF, YORK_POINTER_REACH, makeScale } from '../src/plots/pca';
+import { playGuided } from './guidedPlay';
 import { buildRomanApp, type MapApp } from './mapBuild';
 import {
-  APP_URL, DATA, expectNoPageScroll, expectOnTop, idle, intersects, openTestCard, plotSettled, prompt, run, testUrl, watch, type Rect,
+  APP_URL, DATA, expectNoPageScroll, expectOnTop, freshStart, idle, intersects, openTestCard, plotSettled, prompt, run, settle, testUrl, watch,
+  type Rect,
 } from './helpers';
 import { ALLOWED_FITS, CASES, LAB_STANDARD_CASES, withPage, type Case } from './viewports';
 
@@ -33,21 +35,16 @@ const LAB_SIZES = [{ width: 1366, height: 768 }, { width: 1920, height: 1080 }] 
 
 // ---- 1. The shipped page (skipped while a flag is false) ----
 
-test('the Roman plot shows the York traveller as an edge marker inside the plot', async ({ page }) => {
+test('the Roman plot shows the York traveller as a mark inside the plot box, clear of the legend, at the Roman step of the guided run', async ({ page }) => {
   test.skip(!FEATURES.yorkTraveller, 'yorkTraveller not shipped');
-  await page.goto(`${APP_URL}?reset`);
-  await run(page, 'run_pca(period = "Roman")');
+  await freshStart(page);
+  await playGuided(page, 'roman');                 // the way a class reaches the Roman step: every earlier layer, and every earlier legend entry
   await plotSettled(page);
   const g = page.locator('#plot g.york-traveller');
   await expect(g).toHaveCount(1);
   expect(await g.locator('text.york-label').evaluate((t) => t.textContent)).toBe(YORK_TRAVELLER_LABEL);
-  const svgBox = (await page.locator('#plot svg.plot-svg').boundingBox())!;
-  const labelBox = (await g.locator('text.york-label').boundingBox())!;
-  expect(labelBox.x).toBeGreaterThanOrEqual(svgBox.x);
-  expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(svgBox.x + svgBox.width);
-  expect(labelBox.y).toBeGreaterThanOrEqual(svgBox.y);
-  expect(labelBox.y + labelBox.height).toBeLessThanOrEqual(svgBox.y + svgBox.height);
-  await run(page, 'run_pca(period = "IronAge")');
+  expectYorkPlaced(await readYork(page), 'the shipped page at the Roman step');
+  await run(page, 'run_pca(period = "Viking")');   // off the script: another period in focus has no mark
   await expect(page.locator('#plot g.york-traveller')).toHaveCount(0);
 });
 
@@ -151,6 +148,102 @@ async function expectCardUsable(page: Page, g: InsetGeometry, label: string): Pr
 
 const inside = (inner: Rect, outer: Rect, slack = 0.5): boolean =>
   inner.left >= outer.left - slack && inner.right <= outer.right + slack && inner.top >= outer.top - slack && inner.bottom <= outer.bottom + slack;
+const overlap = (a: Box, b: Box): boolean => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0;
+const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
+
+/** The York mark as the page draws it, in CSS px and in the plot's own units (the 1000 x 760 drawing), and every legend entry in plot units. */
+interface YorkGeometry {
+  svg: Rect; scale: number;
+  marker: { css: Rect; user: Box };
+  /** The three corners of the arrow, tip first, in plot units. */
+  pointer: { css: Rect; user: Box; corners: [number, number][] };
+  label: { css: Rect; user: Box; font: number; lines: number; ends: number[]; anchor: number };
+  legend: { key: string; box: Box }[];
+}
+
+async function readYork(page: Page): Promise<YorkGeometry> {
+  return page.evaluate((): YorkGeometry => {
+    const svg = document.querySelector<SVGSVGElement>('#plot svg.plot-svg')!;
+    const mk = svg.querySelector<SVGGElement>('g.york-traveller')!;
+    const css = (e: Element): Rect => {
+      const r = e.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+    };
+    const user = (e: Element): Box => {
+      const b = (e as SVGGraphicsElement).getBBox();
+      return { left: b.x, right: b.x + b.width, top: b.y, bottom: b.y + b.height };
+    };
+    const label = mk.querySelector('text.york-label')!;
+    const pointer = mk.querySelector('path.york-pointer')!;
+    const box = svg.getBoundingClientRect();
+    return {
+      svg: css(svg), scale: Math.min(box.width / svg.viewBox.baseVal.width, box.height / svg.viewBox.baseVal.height),
+      marker: { css: css(mk.querySelector('path.york-marker')!), user: user(mk.querySelector('path.york-marker')!) },
+      pointer: {
+        css: css(pointer), user: user(pointer),
+        corners: [...(pointer.getAttribute('d') ?? '').matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])] as [number, number]),
+      },
+      label: {
+        css: css(label), user: user(label), font: parseFloat(getComputedStyle(label).fontSize), lines: label.querySelectorAll('tspan').length,
+        // Where each line's last letter ends, in plot units, and the x the lines are anchored at.
+        ends: [...label.querySelectorAll('tspan')].map((t) => {
+          const last = (t as SVGTSpanElement).getExtentOfChar((t.textContent ?? '').trimEnd().length - 1);
+          return last.x + last.width;
+        }),
+        anchor: Number(label.getAttribute('x')),
+      },
+      legend: [...svg.querySelectorAll('g.legend-item')].map((e) => ({ key: e.getAttribute('data-legend') ?? '', box: user(e) })),
+    };
+  });
+}
+
+/**
+ * Where the York mark must be, read off the page at the Roman step of the guided run (Task 29 fix round 1: the mark and its arrow lie inside
+ * the plot box and touch no legend entry). The checks are in plot units wherever they can be, so they hold at every viewport.
+ */
+function expectYorkPlaced(g: YorkGeometry, where: string): void {
+  // Inside the plot, in CSS px (what the student sees) and in the plot's own units, and inside the plot box (the legend starts under it).
+  for (const part of ['marker', 'pointer', 'label'] as const) {
+    expect(inside(g[part].css, g.svg), `${where}: the ${part} lies inside the plot (CSS px)`).toBe(true);
+    const u = g[part].user;
+    expect(u.left >= PCA_VIEW.left - 0.5 && u.right <= PCA_VIEW.right + 0.5 && u.top >= PCA_VIEW.top - 0.5 && u.bottom <= PCA_VIEW.bottom + 0.5, `${where}: the ${part} lies inside the plot box (left ${u.left.toFixed(1)}, right ${u.right.toFixed(1)}, top ${u.top.toFixed(1)}, bottom ${u.bottom.toFixed(1)})`).toBe(true);
+  }
+  // He is pinned to the corner of the British frame he is off (the real data puts him south-east of it), kept YORK_EDGE_INSET inside the plot box.
+  const fr = DATA.frames.britain;
+  const sc = makeScale(fr);
+  const centre = { x: (g.marker.user.left + g.marker.user.right) / 2, y: (g.marker.user.top + g.marker.user.bottom) / 2 };
+  const want = {
+    x: clamp(sc.toX(fr.xmax), PCA_VIEW.left + YORK_EDGE_INSET, PCA_VIEW.right - YORK_EDGE_INSET),
+    y: clamp(sc.toY(fr.ymin), PCA_VIEW.top + YORK_EDGE_INSET, PCA_VIEW.bottom - YORK_EDGE_INSET),
+  };
+  expect(Math.abs(centre.x - want.x), `${where}: the mark is at the frame's east edge (x ${centre.x.toFixed(1)}, want ${want.x.toFixed(1)})`).toBeLessThan(0.5);
+  expect(Math.abs(centre.y - want.y), `${where}: the mark is at the frame's south edge, ${YORK_EDGE_INSET} inside the plot box (y ${centre.y.toFixed(1)}, want ${want.y.toFixed(1)})`).toBeLessThan(0.5);
+  // The arrow: its tip YORK_POINTER_REACH from the mark's centre, its base YORK_POINTER_BASE away and 2 x YORK_POINTER_HALF wide, leading east and south.
+  const [tip, b1, b2] = g.pointer.corners as [[number, number], [number, number], [number, number]];
+  expect(g.pointer.corners, `${where}: the arrow is a triangle`).toHaveLength(3);
+  expect(Math.hypot(tip[0] - centre.x, tip[1] - centre.y), `${where}: the arrow's tip is ${YORK_POINTER_REACH} from the mark`).toBeCloseTo(YORK_POINTER_REACH, 0);
+  expect(Math.hypot((b1[0] + b2[0]) / 2 - centre.x, (b1[1] + b2[1]) / 2 - centre.y), `${where}: the arrow's base is ${YORK_POINTER_BASE} from the mark`).toBeCloseTo(YORK_POINTER_BASE, 0);
+  expect(Math.hypot(b1[0] - b2[0], b1[1] - b2[1]) / 2, `${where}: the arrow's base is ${2 * YORK_POINTER_HALF} wide`).toBeCloseTo(YORK_POINTER_HALF, 0);
+  expect(tip[0], `${where}: the arrow leads east`).toBeGreaterThan(centre.x);
+  expect(tip[1], `${where}: the arrow leads south`).toBeGreaterThan(centre.y);
+  // His words end above and to the left of the square (they do not cover it), in three lines, each ending on its last letter at the anchor.
+  expect(g.label.user.right, `${where}: the words end left of the square`).toBeLessThanOrEqual(g.marker.user.left + 0.5);
+  expect(g.label.user.bottom, `${where}: the words end above the square`).toBeLessThanOrEqual(g.marker.user.top + 0.5);
+  expect(g.label.lines, `${where}: in three lines`).toBe(3);
+  g.label.ends.forEach((end, k) => expect(Math.abs(end - g.label.anchor), `${where}: line ${k + 1} of the words ends at the anchor`).toBeLessThan(0.75));
+  // A little bigger than a data point: a Roman point is a square of 9 units across, his mark one of 14.4.
+  expect(g.marker.user.right - g.marker.user.left, `${where}: the mark is bigger than a data point`).toBeGreaterThan(10);
+  // The legend is the class's, not a shortcut's: Bell Beaker, Bronze Age, Iron Age and Roman along its first row (the First farmers have no point in
+  // the British frame, so the legend leaves them out), and nothing of the mark touches any of its entries.
+  const keys = g.legend.map((e) => e.key);
+  for (const key of ['BellBeaker', 'BronzeAge', 'IronAge', 'Roman']) expect(keys, `${where}: the legend at the Roman step of the guided run`).toContain(key);
+  for (const item of g.legend) {
+    expect(item.box.top, `${where}: the legend entry ${item.key} starts under the plot box`).toBeGreaterThan(PCA_VIEW.bottom);
+    for (const part of ['marker', 'pointer', 'label'] as const) {
+      expect(overlap(g[part].user, item.box), `${where}: the ${part} lies over the legend entry ${item.key}`).toBe(false);
+    }
+  }
+}
 
 test.describe('the P3 Roman additions in a scratch build (both flags forced on, in memory)', () => {
   let app: MapApp;
@@ -169,17 +262,24 @@ test.describe('the P3 Roman additions in a scratch build (both flags forced on, 
     expect(features).toEqual({ ...FEATURES, yorkTraveller: true, romanInset: true, 'images.F1': true });
   });
 
-  // ---- The York traveller on the Roman plot, at every viewport ----
-  for (const c of CASES) {
-    test(`the York traveller is an edge marker inside the Roman plot, with its words, at ${c.name}`, async ({ browser }, testInfo) => {
-      test.setTimeout(120_000);
-      await withPage(browser, c, async (page) => {
+  // ---- The York traveller on the Roman plot, at every viewport, at the Roman step of the guided run ----
+  // The step is reached the way a class reaches it (playGuided: every hinted command typed, every card closed), because what the plot and its
+  // legend hold there depends on it: a shortcut (the Iron Age, then the Roman period) left the legend two entries short, and the arrow's landing
+  // on the Roman entry went unseen (Task 29, fix round 1). A browser context has one device scale factor, so there is one test for each: the
+  // guided run is played once in it, from a fresh session, and the window is then resized through every viewport case of that scale (e2e/
+  // viewports.ts), each judged on that page. Playing the run 26 times would add minutes to the suite and nothing to what is checked.
+  for (const dsf of [...new Set(CASES.map((c) => c.dsf))]) {
+    const cases = CASES.filter((c) => c.dsf === dsf);
+    test(`the York traveller is a mark inside the Roman plot box, clear of the legend, with its words, at every viewport of device scale ${dsf}`, async ({ browser }, testInfo) => {
+      test.setTimeout(300_000);
+      const context = await browser.newContext({ viewport: { width: cases[0]!.width, height: cases[0]!.height }, deviceScaleFactor: dsf });
+      try {
+        const page = await context.newPage();
         const w = watch(page);
         await page.goto(`${app.url}?reset`);
         await expect(prompt(page)).toBeVisible();
         await idle(page);
-        await run(page, 'run_pca(period = "IronAge")');
-        await run(page, 'run_pca(period = "Roman")');
+        await playGuided(page, 'roman');
         await plotSettled(page);
         const mark = page.locator('#plot g.york-traveller');
         await expect(mark, 'one York mark on the Roman plot').toHaveCount(1);
@@ -188,68 +288,28 @@ test.describe('the P3 Roman additions in a scratch build (both flags forced on, 
         expect(await mark.locator('text.york-label').evaluate((t) => t.textContent), 'his words, verbatim').toBe(YORK_TRAVELLER_LABEL);
         expect(await mark.locator('text').count(), 'no other text in the mark').toBe(1);
 
-        const g = await page.evaluate(() => {
-          const svg = document.querySelector<SVGSVGElement>('#plot svg.plot-svg')!;
-          const mk = svg.querySelector<SVGGElement>('g.york-traveller')!;
-          const css = (e: Element): Rect => {
-            const r = e.getBoundingClientRect();
-            return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
-          };
-          const user = (e: Element): Box => {
-            const b = (e as SVGGraphicsElement).getBBox();
-            return { left: b.x, right: b.x + b.width, top: b.y, bottom: b.y + b.height };
-          };
-          const label = mk.querySelector('text.york-label')!;
-          const box = svg.getBoundingClientRect();
-          return {
-            svg: css(svg), scale: Math.min(box.width / svg.viewBox.baseVal.width, box.height / svg.viewBox.baseVal.height),
-            marker: { css: css(mk.querySelector('path.york-marker')!), user: user(mk.querySelector('path.york-marker')!) },
-            pointer: { css: css(mk.querySelector('path.york-pointer')!), user: user(mk.querySelector('path.york-pointer')!) },
-            label: {
-              css: css(label), user: user(label), font: parseFloat(getComputedStyle(label).fontSize), lines: label.querySelectorAll('tspan').length,
-              // Where each line's last letter ends, in plot units, and the x the lines are anchored at.
-              ends: [...label.querySelectorAll('tspan')].map((t) => {
-                const last = (t as SVGTSpanElement).getExtentOfChar((t.textContent ?? '').trimEnd().length - 1);
-                return last.x + last.width;
-              }),
-              anchor: Number(label.getAttribute('x')),
-            },
-          };
-        });
-        // Inside the plot, in CSS px (what the student sees) and in the plot's own units (the 1000 x 760 drawing).
-        for (const part of ['marker', 'pointer', 'label'] as const) {
-          expect(inside(g[part].css, g.svg), `${part} lies inside the plot (CSS px)`).toBe(true);
-          expect(g[part].user.left >= 0 && g[part].user.right <= PCA_VIEW.width && g[part].user.top >= 0 && g[part].user.bottom <= PCA_VIEW.height, `${part} lies inside the 1000 x 760 drawing`).toBe(true);
+        for (const c of cases) {
+          await page.setViewportSize({ width: c.width, height: c.height });
+          await settle(page);
+          await plotSettled(page);
+          const g = await readYork(page);
+          expectYorkPlaced(g, c.name);
+
+          // Projector legibility, as e2e/layout.spec.ts judges the plots' smallest text: at the lab-standard sizes the words are drawn at 10 device px or more.
+          const device = g.label.font * g.scale * c.dsf;
+          testInfo.annotations.push({ type: 'projector text size', description: `York words at ${c.name}: ${device.toFixed(1)} device px tall` });
+          if (LAB_STANDARD_CASES.includes(c)) expect(device, `the York words are ${device.toFixed(1)} device px tall at ${c.name}`).toBeGreaterThanOrEqual(10);
+
+          // Hovering over the mark (or tapping it) shows the same sentence in the plot's tip, and leaving the plot clears it.
+          await mark.locator('path.york-marker').hover();
+          await expect(page.locator('#plot .plot-tip'), `${c.name}: the tip`).toHaveText(YORK_TRAVELLER_LABEL);
+          await page.mouse.move(0, 0);
+          await expect(page.locator('#plot .plot-tip'), `${c.name}: the tip after the pointer leaves`).toHaveText('');
         }
-        // He is pinned to the corner of the British frame he is off (the real data puts him south-east of it) and the pointer leads away from it.
-        const fr = DATA.frames.britain;
-        const sc = makeScale(fr);
-        const centre = { x: (g.marker.user.left + g.marker.user.right) / 2, y: (g.marker.user.top + g.marker.user.bottom) / 2 };
-        expect(Math.abs(centre.x - sc.toX(fr.xmax)), 'the marker sits at the frame\'s east edge').toBeLessThan(0.5);
-        expect(Math.abs(centre.y - sc.toY(fr.ymin)), 'the marker sits at the frame\'s south edge').toBeLessThan(0.5);
-        const tip = { x: (g.pointer.user.left + g.pointer.user.right) / 2, y: (g.pointer.user.top + g.pointer.user.bottom) / 2 };
-        expect(tip.x, 'the pointer leads east').toBeGreaterThan(centre.x);
-        expect(tip.y, 'the pointer leads south').toBeGreaterThan(centre.y);
-        // His words end above and to the left of the square (they do not cover it) and inside the plot box, clear of the legend below it.
-        expect(g.label.user.right, 'the words end left of the square').toBeLessThanOrEqual(g.marker.user.left + 0.5);
-        expect(g.label.user.bottom, 'the words end above the plot box\'s bottom edge, clear of the legend').toBeLessThanOrEqual(PCA_VIEW.bottom + 0.5);
-        expect(g.label.user.top, 'the words start inside the plot box').toBeGreaterThanOrEqual(PCA_VIEW.top - 0.5);
-        expect(g.label.lines, 'in three lines').toBe(3);
-        // The three lines are right-aligned: each ends on its last letter at the anchor (a line that kept a trailing space would stop a space short).
-        g.label.ends.forEach((end, k) => expect(Math.abs(end - g.label.anchor), `line ${k + 1} of the words ends at the anchor`).toBeLessThan(0.75));
-        // A little bigger than a data point: a Roman point is a square of 9 units across, his mark one of 14.4.
-        expect(g.marker.user.right - g.marker.user.left, 'the mark is bigger than a data point').toBeGreaterThan(10);
-        // Projector legibility, as e2e/layout.spec.ts judges the plots' smallest text: at the lab-standard sizes the words are drawn at 10 device px or more.
-        const device = g.label.font * g.scale * c.dsf;
-        testInfo.annotations.push({ type: 'projector text size', description: `York words at ${c.name}: ${device.toFixed(1)} device px tall` });
-        if (LAB_STANDARD_CASES.includes(c)) expect(device, `the York words are ${device.toFixed(1)} device px tall at ${c.name}`).toBeGreaterThanOrEqual(10);
 
-        // Hovering over the mark (or tapping it) shows the same sentence in the plot's tip.
-        await mark.locator('path.york-marker').hover();
-        await expect(page.locator('#plot .plot-tip')).toHaveText(YORK_TRAVELLER_LABEL);
-
-        // He is on the Roman plot only: another period in focus, or the Europe view, has no mark.
-        await run(page, 'run_pca(period = "AngloSaxon")');
+        // He is on the Roman plot only: another period in focus, or the Europe view, has no mark. (Off the script now: the hint is at the next step,
+        // the Anglo-Saxon period, so these three commands open no card; the Viking period is not a guided step at all.)
+        await run(page, 'run_pca(period = "Viking")');
         await expect(page.locator('#plot g.york-traveller')).toHaveCount(0);
         await run(page, 'run_pca(period = "Roman")');
         await expect(page.locator('#plot g.york-traveller')).toHaveCount(1);
@@ -257,7 +317,9 @@ test.describe('the P3 Roman additions in a scratch build (both flags forced on, 
         await expect(page.locator('#plot g.york-traveller')).toHaveCount(0);
         expect(w.requests).toEqual([]);
         expect(w.errors).toEqual([]);
-      });
+      } finally {
+        await context.close();
+      }
     });
   }
 

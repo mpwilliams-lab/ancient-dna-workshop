@@ -3,13 +3,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fixture from './fixtures/data.fixture.json';
-import type { ChipKey, NamedPoint, PeriodId, WorkshopData } from '../src/types';
+import type { ChipKey, Frame, NamedPoint, PeriodId, WorkshopData } from '../src/types';
 import { validateData } from '../src/data';
 import { ALL_OFF, withFeatures, type Features } from '../src/features';
 import { INITIAL_PLOT, layerOpacity, reducePlot, type PcaCaptionItem, type PlotState } from '../src/plotState';
+import { guidedPlot } from '../e2e/guidedPlay';
 import {
-  PCA_VIEW, TODAY_RING, YORK_LABEL_CHARS, YORK_LINE, YORK_MARKER_R, clampToFrame, frameTransition, makeScale, renderPca,
-  renderPcaCaptions, yorkTravellerMark,
+  PCA_VIEW, TODAY_RING, YORK_EDGE_INSET, YORK_LABEL_CHARS, YORK_LINE, YORK_MARKER_R, YORK_POINTER_BASE, YORK_POINTER_HALF, YORK_POINTER_REACH,
+  clampToFrame, frameTransition, makeScale, renderPca, renderPcaCaptions, yorkTravellerMark,
 } from '../src/plots/pca';
 import { INK, MAP_GREY, OKABE_ITO, PERIOD_COLORS, PERIOD_SHAPES, f1, shapePath, textBlock, wrapText } from '../src/plots/svg';
 import { CHIP_ICON_PATHS, chipElement } from '../src/icons';
@@ -902,6 +903,58 @@ describe('caption strip and chips (renderPcaCaptions, icons.ts)', () => {
 // ---- Task 29 (P3, flag yorkTraveller): the York traveller on the Roman plot ----
 // The point sits off the British frame (the label says "off this zoomed map"), so it is drawn pinned to the frame edge with a pointer
 // toward where it really lies. Both flag states are driven by an explicit `features` argument, never by the shipped FEATURES.
+
+// The mark's three parts and the legend's entries as boxes in the drawing's own units, read from the svg's attributes. jsdom has no layout,
+// so the words and the legend text are sized at 8.5 units a character: wider than 15 px semi-bold or 14 px regular type run in Chrome, and
+// independent of the renderer's own 7.6 and 8.4 estimates. e2e/p3-roman.spec.ts measures the same in a browser.
+const WIDE = 8.5;
+const nums = (d: string | null): number[] => [...(d ?? '').matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
+function yorkBoxes(g: Element): Record<'mark' | 'arrow' | 'words', Box> {
+  const [x0, y0, w, h] = nums(g.querySelector('path.york-marker')!.getAttribute('d')) as [number, number, number, number];   // "M x y h w v w h -w Z"
+  const corners = nums(g.querySelector('path.york-pointer')!.getAttribute('d'));                                           // "M tip L base L base Z"
+  const xs = corners.filter((_, i) => i % 2 === 0);
+  const ys = corners.filter((_, i) => i % 2 === 1);
+  const label = g.querySelector('text.york-label')!;
+  const lines = [...label.querySelectorAll('tspan')].map((t) => (t.textContent ?? '').trim().length);
+  const lx = num(label, 'x');
+  const wide = Math.max(...lines) * WIDE;
+  const end = label.getAttribute('text-anchor') === 'end';
+  return {
+    mark: { left: x0 - 1.5, right: x0 + w + 1.5, top: y0 - 1.5, bottom: y0 + h + 1.5 },       // its outline is 3 wide
+    arrow: { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) },
+    words: { left: end ? lx - wide : lx, right: end ? lx : lx + wide, top: num(label, 'y') - 15, bottom: num(label, 'y') + (lines.length - 1) * YORK_LINE + 4 },
+  };
+}
+const legendBox = (item: Element): Box => {
+  const t = item.querySelector('text')!;
+  return { left: num(t, 'x') - 20, right: num(t, 'x') + (t.textContent ?? '').length * WIDE, top: num(t, 'y') - 14, bottom: num(t, 'y') + 4 };
+};
+/** None of the mark's three parts touches any entry of the legend under the plot. */
+function expectClearOfLegend(svg: SVGSVGElement, where: string): void {
+  const g = svg.querySelector('g.york-traveller');
+  expect(g, `${where}: he is drawn`).not.toBeNull();
+  const parts = yorkBoxes(g!);
+  const items = [...svg.querySelectorAll('g.legend-item')];
+  expect(items.length, `${where}: the legend has entries`).toBeGreaterThan(0);
+  for (const item of items) {
+    for (const [name, box] of Object.entries(parts)) {
+      expect(overlap(box, legendBox(item)), `${where}: the ${name} lies over the legend entry "${item.textContent}"`).toBe(false);
+    }
+  }
+}
+/**
+ * Where the tip of his arrow was before Task 29's fix round 1, when the mark sat right on the frame's edge (the box's bottom edge at the
+ * south-east corner): 22 on from the mark toward where he really lies. It then lay inside the legend's Roman entry in the guided run.
+ */
+function oldArrowTip(fr: Frame, named: NamedPoint): { x: number; y: number } {
+  const sc = makeScale(fr);
+  const c = clampToFrame(named, fr);
+  const edge = { x: sc.toX(c.x), y: sc.toY(c.y) };
+  const t = { x: sc.toX(named.x), y: sc.toY(named.y) };
+  const len = Math.hypot(t.x - edge.x, t.y - edge.y);
+  return { x: edge.x + (22 * (t.x - edge.x)) / len, y: edge.y + (22 * (t.y - edge.y)) / len };
+}
+
 describe('York traveller edge marker (Task 29, flag yorkTraveller)', () => {
   const york: NamedPoint = { key: 'york_traveller', period: 'Roman', x: 0.045, y: 0.005 };
   const data: WorkshopData = { ...FIXTURE, named: [york] };
@@ -941,18 +994,48 @@ describe('York traveller edge marker (Task 29, flag yorkTraveller)', () => {
     expect(g.textContent).toBe(YORK_TRAVELLER_LABEL);
   });
 
-  it('pins the marker to the frame edge and points toward the real position', () => {
+  // The mark is pinned to the frame's edge, but kept 30 units inside the plot box (src/plots/pca.ts YORK_EDGE_INSET): the legend runs under the
+  // box and its first row reaches under the south-east corner in the guided run, where the arrow, which reaches 22 beyond the mark, once landed on
+  // the Roman entry (Task 29, fix round 1). The 30 and the 22 are written out here, not read from the module, so changing either is noticed.
+  it('pins the marker to the frame edge, 30 inside the plot box, and points toward the real position', () => {
     const fr = data.frames[roman.frame];
     const sc = makeScale(fr);
     const c = clampToFrame(york, fr);
     expect(c.clipped).toBe(true);
-    const q = { x: sc.toX(c.x), y: sc.toY(c.y) };
+    const edge = { x: sc.toX(c.x), y: sc.toY(c.y) };
+    // the fixture's frame is square: its south-east corner is the plot box's (785, 590)
+    expect(edge.x).toBeCloseTo(785, 3);
+    expect(edge.y).toBeCloseTo(590, 3);
+    const q = { x: Math.min(Math.max(edge.x, PCA_VIEW.left + 30), PCA_VIEW.right - 30), y: Math.min(Math.max(edge.y, PCA_VIEW.top + 30), PCA_VIEW.bottom - 30) };
+    expect(q.x, 'on the frame\'s east edge').toBeCloseTo(785, 3);
+    expect(q.y, '30 above the box\'s bottom edge').toBeCloseTo(560, 3);
     const t = { x: sc.toX(york.x), y: sc.toY(york.y) };
     const g = draw(data, roman, on).querySelector('g.york-traveller')!;
     expect(g.querySelector('path.york-marker')!.getAttribute('d')).toBe(shapePath(PERIOD_SHAPES.Roman, q.x, q.y, YORK_MARKER_R));
     const tip = (g.querySelector('path.york-pointer')!.getAttribute('d') ?? '').match(/^M(-?[\d.]+) (-?[\d.]+)/)!;
     const v = { x: Number(tip[1]) - q.x, y: Number(tip[2]) - q.y };
     expect(v.x * (t.x - q.x) + v.y * (t.y - q.y)).toBeGreaterThan(0);
+  });
+
+  it('pins the arrow: a triangle whose tip is 22 from the mark\'s centre toward where he lies, its base 12 from the centre and 12 wide; the mark sits 30 inside the box', () => {
+    expect([YORK_EDGE_INSET, YORK_POINTER_REACH, YORK_POINTER_BASE, YORK_POINTER_HALF]).toEqual([30, 22, 12, 6]);
+    // The arrow reaches at most YORK_POINTER_REACH beyond the mark, and the square is 0.9 x 8 = 7.2 to its edge and 1.5 more with its stroke, so a
+    // mark kept YORK_EDGE_INSET inside the box has both entirely inside it.
+    expect(YORK_EDGE_INSET).toBeGreaterThanOrEqual(YORK_POINTER_REACH);
+    expect(YORK_EDGE_INSET).toBeGreaterThanOrEqual(0.9 * YORK_MARKER_R + 1.5);
+    const g = draw(data, roman, on).querySelector('g.york-traveller')!;
+    const c = { x: 785, y: 560 };
+    const pts = [...(g.querySelector('path.york-pointer')!.getAttribute('d') ?? '').matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])] as const);
+    expect(pts).toHaveLength(3);
+    const [tip, b1, b2] = pts as [readonly [number, number], readonly [number, number], readonly [number, number]];
+    expect(Math.hypot(tip[0] - c.x, tip[1] - c.y)).toBeCloseTo(22, 0);
+    expect(Math.hypot((b1[0] + b2[0]) / 2 - c.x, (b1[1] + b2[1]) / 2 - c.y)).toBeCloseTo(12, 0);
+    expect(Math.hypot(b1[0] - b2[0], b1[1] - b2[1])).toBeCloseTo(12, 0);
+    // The tip, the middle of the base and the mark's centre lie on one line (the arrow points straight away from the mark).
+    const cross = (tip[0] - c.x) * ((b1[1] + b2[1]) / 2 - c.y) - (tip[1] - c.y) * ((b1[0] + b2[0]) / 2 - c.x);
+    expect(Math.abs(cross)).toBeLessThan(1);
+    // And the whole of it lies inside the plot box, so it can touch nothing under the box.
+    for (const [x, y] of [tip, b1, b2]) expect(x >= PCA_VIEW.left && x <= PCA_VIEW.right && y >= PCA_VIEW.top && y <= PCA_VIEW.bottom, `${x}, ${y}`).toBe(true);
   });
 
   it('sets the words in three lines (wrapped at 36 characters, 18 apart) of 15 px type with a white outline, so they read over the dots', () => {
@@ -1020,7 +1103,8 @@ describe('York traveller edge marker (Task 29, flag yorkTraveller)', () => {
   });
 
   // The data puts him south-east of the British frame, but the rule is general: wherever he is off the frame he is pinned to its nearest edge or
-  // corner, the pointer leads away from it toward where he lies, and the words sit on the plot-centre side of the mark, not over it, inside the box.
+  // corner, kept 30 inside the plot box; the pointer leads away from the mark toward where he lies; the words sit on the plot-centre side of the
+  // mark, not over it; and the mark, its arrow and its words all lie inside the box, so none of them can reach the legend under it.
   it('puts the words on the plot-centre side of the mark at every edge and corner of the frame, never over it, inside the plot box', () => {
     const spots: Record<string, [number, number]> = {
       NW: [0.0, 0.05], N: [0.02, 0.05], NE: [0.04, 0.05], E: [0.04, 0.03], SE: [0.045, 0.005], S: [0.02, 0.0], SW: [0.0, 0.0], W: [0.0, 0.03],
@@ -1028,19 +1112,28 @@ describe('York traveller edge marker (Task 29, flag yorkTraveller)', () => {
     const WORD = 8.5;                                   // an estimate of a 15 px semi-bold character, in plot units
     const fr = data.frames[roman.frame];
     const sc = makeScale(fr);
+    const pin = (e: { x: number; y: number }): { x: number; y: number } => ({     // the frame-edge point, 30 inside the plot box (YORK_EDGE_INSET)
+      x: Math.min(Math.max(e.x, PCA_VIEW.left + 30), PCA_VIEW.right - 30),
+      y: Math.min(Math.max(e.y, PCA_VIEW.top + 30), PCA_VIEW.bottom - 30),
+    });
     for (const [name, [x, y]] of Object.entries(spots)) {
       const d: WorkshopData = { ...FIXTURE, named: [{ ...york, x, y }] };
       const svg = draw(d, reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, d), on);
       const g = svg.querySelector('g.york-traveller');
       expect(g, name).not.toBeNull();
       const c = clampToFrame({ x, y }, fr);
-      const q = { x: sc.toX(c.x), y: sc.toY(c.y) };
+      const q = pin({ x: sc.toX(c.x), y: sc.toY(c.y) });
       const t = { x: sc.toX(x), y: sc.toY(y) };
       const right = q.x > (PCA_VIEW.left + PCA_VIEW.right) / 2;
       const below = q.y > (PCA_VIEW.top + PCA_VIEW.bottom) / 2;
-      expect(g!.querySelector('path.york-marker')!.getAttribute('d'), `${name}: the mark is pinned to the frame's edge`).toBe(shapePath(PERIOD_SHAPES.Roman, q.x, q.y, YORK_MARKER_R));
+      expect(g!.querySelector('path.york-marker')!.getAttribute('d'), `${name}: the mark is at the frame's edge, kept 30 inside the plot box`).toBe(shapePath(PERIOD_SHAPES.Roman, q.x, q.y, YORK_MARKER_R));
       const tip = /^M(-?[\d.]+) (-?[\d.]+)/.exec(g!.querySelector('path.york-pointer')!.getAttribute('d') ?? '')!;
       expect((Number(tip[1]) - q.x) * (t.x - q.x) + (Number(tip[2]) - q.y) * (t.y - q.y), `${name}: the pointer leads toward where he lies`).toBeGreaterThan(0);
+      const parts = yorkBoxes(g!);
+      for (const part of ['mark', 'arrow'] as const) {
+        const b = parts[part];
+        expect(b.left >= PCA_VIEW.left && b.right <= PCA_VIEW.right && b.top >= PCA_VIEW.top && b.bottom <= PCA_VIEW.bottom, `${name}: the ${part} lies inside the plot box`).toBe(true);
+      }
       const label = g!.querySelector('text.york-label')!;
       const lines = label.querySelectorAll('tspan').length;
       const lx = Number(label.getAttribute('x'));
@@ -1058,6 +1151,48 @@ describe('York traveller edge marker (Task 29, flag yorkTraveller)', () => {
       expect(apart, `${name}: the words are clear of the mark`).toBe(true);
       expect(below ? block.bottom < q.y : block.top > q.y, `${name}: the block is on the plot-centre side vertically`).toBe(true);
     }
+  });
+
+  // The British frame is nearly square, so it leaves room either side of itself in the plot box and only the bottom (and top) of the clamp is
+  // reached by the real data. A frame as wide as the plot box has every edge on the box's own edge: the mark is then 30 inside on all four sides.
+  it('keeps the mark 30 inside the plot box on all four sides, and its arrow and words inside, when the frame fills the box', () => {
+    const wide: Frame = { xmin: 0, xmax: 0.96, ymin: 0, ymax: 0.57 };       // 960 x 570 units: exactly the plot box
+    const sc = makeScale(wide);
+    expect([sc.toX(0), sc.toX(0.96), sc.toY(0.57), sc.toY(0)].map((v) => Math.round(v * 1000) / 1000)).toEqual([20, 980, 20, 590]);
+    const spots: Record<string, { at: [number, number]; mark: [number, number] }> = {
+      NW: { at: [-0.2, 0.8], mark: [50, 50] }, N: { at: [0.48, 0.8], mark: [500, 50] }, NE: { at: [1.1, 0.8], mark: [950, 50] },
+      E: { at: [1.1, 0.3], mark: [950, 290] }, SE: { at: [1.1, -0.2], mark: [950, 560] }, S: { at: [0.48, -0.2], mark: [500, 560] },
+      SW: { at: [-0.2, -0.2], mark: [50, 560] }, W: { at: [-0.2, 0.3], mark: [50, 290] },
+    };
+    for (const [name, { at, mark }] of Object.entries(spots)) {
+      const d: WorkshopData = { ...FIXTURE, frames: { ...FIXTURE.frames, britain: wide }, named: [{ ...york, x: at[0], y: at[1] }] };
+      const g = draw(d, reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, d), on).querySelector('g.york-traveller');
+      expect(g, name).not.toBeNull();
+      expect(g!.querySelector('path.york-marker')!.getAttribute('d'), `${name}: the mark is 30 inside the box`).toBe(shapePath(PERIOD_SHAPES.Roman, mark[0], mark[1], YORK_MARKER_R));
+      for (const [part, b] of Object.entries(yorkBoxes(g!))) {
+        expect(b.left >= PCA_VIEW.left && b.right <= PCA_VIEW.right && b.top >= PCA_VIEW.top && b.bottom <= PCA_VIEW.bottom, `${name}: the ${part} lies inside the plot box`).toBe(true);
+      }
+    }
+  });
+
+  // A class reaches the Roman step by typing the guided commands from the start, not by jumping to it: the plot then holds six layers and the
+  // legend's first row runs Bell Beaker, Bronze Age, Iron Age, Roman, the last under the plot's south-east corner, where the arrow of a mark
+  // pinned to the box's bottom edge once landed (Task 29, fix round 1). The counts here are the real build's, so the entries are as long as a class's.
+  it('at the Roman step of the guided run, the mark, its arrow and its words are clear of every legend entry', () => {
+    const counts: Record<PeriodId, number> = { FirstFarmers: 118, BellBeaker: 77, BronzeAge: 83, IronAge: 371, Roman: 17, AngloSaxon: 206, Viking: 37, Today: 108 };
+    const d: WorkshopData = { ...data, periods: data.periods.map((p) => ({ ...p, n_pca: counts[p.id] })) };
+    const flow = withFeatures({ yorkTraveller: true, consumerBars: true, back: true, finaleAnimation: true }, ALL_OFF);
+    const plot = guidedPlot(d, 'roman', flow);
+    expect(plot.focus).toBe('Roman');
+    expect(plot.layers, 'the class\'s six layers, not the shortcut\'s two').toEqual(['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'Today']);
+    const svg = draw(d, plot, flow);
+    const entries = [...svg.querySelectorAll('g.legend-item')].map((i) => i.getAttribute('data-legend'));
+    expect(entries.slice(0, 4), 'the legend\'s first row').toEqual(['BellBeaker', 'BronzeAge', 'IronAge', 'Roman']);
+    const romanEntry = legendBox(svg.querySelector('g.legend-item[data-legend="Roman"]')!);
+    expectClearOfLegend(svg, 'guided run');
+    // The check has teeth: the arrow's tip, where the mark used to sit, was inside this legend's Roman entry.
+    const tip = oldArrowTip(d.frames[plot.frame], york);
+    expect(overlap({ left: tip.x - 1, right: tip.x + 1, top: tip.y - 1, bottom: tip.y + 1 }, romanEntry), 'the old arrow tip was on the Roman entry').toBe(true);
   });
 
   it('lies wholly inside the 1000 x 760 drawing where the data puts him: the pointer\'s three corners and the square mark', () => {
@@ -1125,35 +1260,59 @@ describe('York traveller edge marker (Task 29, flag yorkTraveller)', () => {
 
 const REAL_JSON = resolve(__dirname, '../src/data/workshop_data.json');   // (not import.meta.url: under jsdom it is not a file URL)
 describe.runIf(process.env.REAL_DATA === '1' && existsSync(REAL_JSON))('York traveller on the real data (Task 29)', () => {
-  const real = validateData(JSON.parse(readFileSync(REAL_JSON, 'utf8')));
-  const p = reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, real);
-  const draw = (): SVGSVGElement => {
+  // Read inside each test, as tests/plots-consumer.test.ts does: a skipped describe still runs this function to collect its tests, so reading and
+  // validating the build's JSON here would make a plain `npm test` depend on it.
+  const real = (): WorkshopData => validateData(JSON.parse(readFileSync(REAL_JSON, 'utf8')));
+  const on = withFeatures({ yorkTraveller: true }, ALL_OFF);
+  const draw = (d: WorkshopData, p: PlotState, features: Features = on): SVGSVGElement => {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     document.body.replaceChildren(svg);
-    renderPca(svg, real, p, { animate: false, features: withFeatures({ yorkTraveller: true }, ALL_OFF) });
+    renderPca(svg, d, p, { animate: false, features });
     return svg;
   };
 
   it('is drawn on the Roman focus as an edge marker inside the plot box', () => {
-    const label = draw().querySelector('g.york-traveller text.york-label');
+    const d = real();
+    const label = draw(d, reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, d)).querySelector('g.york-traveller text.york-label');
     expect(label?.textContent).toBe(YORK_TRAVELLER_LABEL);
     const y0 = Number(label!.getAttribute('y'));
     expect(y0).toBeGreaterThanOrEqual(PCA_VIEW.top);
     expect(y0 + (label!.querySelectorAll('tspan').length - 1) * YORK_LINE).toBeLessThanOrEqual(PCA_VIEW.bottom);
   });
 
-  it('is off the British frame to the east and south, so he is pinned to its south-east corner and points down and to the right', () => {
-    const named = real.named?.[0];
+  it('is off the British frame to the east and south, so he is pinned to its south-east corner, 30 inside the plot box, and points down and to the right', () => {
+    const d = real();
+    const named = d.named?.[0];
     expect(named, 'the build has the named point').toBeDefined();
-    const fr = real.frames.britain;
+    const fr = d.frames.britain;
     expect(named!.x).toBeGreaterThan(fr.xmax);
     expect(named!.y).toBeLessThan(fr.ymin);
     const sc = makeScale(fr);
     const corner = { x: sc.toX(fr.xmax), y: sc.toY(fr.ymin) };
-    const g = draw().querySelector('g.york-traveller')!;
-    expect(g.querySelector('path.york-marker')!.getAttribute('d')).toBe(shapePath(PERIOD_SHAPES.Roman, corner.x, corner.y, YORK_MARKER_R));
+    expect(corner.y, 'the frame\'s corner is on the plot box\'s bottom edge').toBeCloseTo(PCA_VIEW.bottom, 6);
+    const mark = { x: corner.x, y: corner.y - 30 };                         // 30 inside the box (YORK_EDGE_INSET, pinned above)
+    const g = draw(d, reducePlot(INITIAL_PLOT, { kind: 'pca', period: 'Roman' }, d)).querySelector('g.york-traveller')!;
+    expect(g.querySelector('path.york-marker')!.getAttribute('d')).toBe(shapePath(PERIOD_SHAPES.Roman, mark.x, mark.y, YORK_MARKER_R));
     const tip = /^M(-?[\d.]+) (-?[\d.]+)/.exec(g.querySelector('path.york-pointer')!.getAttribute('d') ?? '')!;
-    expect(Number(tip[1])).toBeGreaterThan(corner.x);
-    expect(Number(tip[2])).toBeGreaterThan(corner.y);
+    expect(Number(tip[1])).toBeGreaterThan(mark.x);
+    expect(Number(tip[2])).toBeGreaterThan(mark.y);
+    expect(Number(tip[2]), 'and its tip is still inside the plot box').toBeLessThan(PCA_VIEW.bottom);
+  });
+
+  // What a class sees at the Roman step: the guided commands typed from the start (a shortcut such as the Iron Age and then the Roman period
+  // leaves out four layers and their legend entries, and hid the arrow on the Roman entry that fix round 1 removed).
+  it('at the Roman step of the guided run, the mark, its arrow and its words are clear of every legend entry', () => {
+    const d = real();
+    const flow = withFeatures({ yorkTraveller: true, consumerBars: true, back: true, finaleAnimation: true }, ALL_OFF);
+    const plot = guidedPlot(d, 'roman', flow);
+    expect(plot.focus).toBe('Roman');
+    expect(plot.layers).toEqual(['FirstFarmers', 'BellBeaker', 'BronzeAge', 'IronAge', 'Roman', 'Today']);
+    const svg = draw(d, plot, flow);
+    const entries = [...svg.querySelectorAll('g.legend-item')].map((i) => i.getAttribute('data-legend'));
+    expect(entries.slice(0, 4), 'the legend\'s first row').toEqual(['BellBeaker', 'BronzeAge', 'IronAge', 'Roman']);
+    expectClearOfLegend(svg, 'guided run, real data');
+    const tip = oldArrowTip(d.frames[plot.frame], d.named![0]!);
+    const roman = legendBox(svg.querySelector('g.legend-item[data-legend="Roman"]')!);
+    expect(overlap({ left: tip.x - 1, right: tip.x + 1, top: tip.y - 1, bottom: tip.y + 1 }, roman), 'the old arrow tip was on the Roman entry').toBe(true);
   });
 });

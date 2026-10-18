@@ -145,11 +145,26 @@ export const YORK_MARKER_R = 8;
 /** The label wraps at this many characters, in 15 px type of weight 600 with a white outline, lines YORK_LINE apart. */
 export const YORK_LABEL_CHARS = 36;
 export const YORK_LINE = 18;
+/**
+ * The mark's arrow, a triangle: its tip YORK_POINTER_REACH from the mark's centre toward where he really lies, its base YORK_POINTER_BASE from
+ * the centre and YORK_POINTER_HALF to each side of it.
+ */
+export const YORK_POINTER_REACH = 22;
+export const YORK_POINTER_BASE = 12;
+export const YORK_POINTER_HALF = 6;
+/**
+ * The mark is pinned to the frame's edge but never closer than this to the plot box's own edge. The legend runs under the box and its first
+ * row reaches under the south-east corner at the Roman step of the guided run (Bell Beaker, Bronze Age, Iron Age and Roman, the last at x 727 to
+ * 842), so a mark on the box's bottom edge put its arrow, which reaches YORK_POINTER_REACH beyond the mark, on the Roman entry (Task 29, fix round
+ * 1). Kept this far in, the mark (7.2 and its stroke), the arrow (22) and the words all lie inside the box, at every edge and corner.
+ */
+export const YORK_EDGE_INSET = 30;
 
 /**
  * The York traveller from data.named (Martiniano et al. 2016; Task 28), drawn only on a Roman-focus PCA and only where he
  * is off the current frame, because his label says "(off this zoomed map)". He is pinned to the frame edge like any clipped
- * point, with a small pointer toward where he really lies, and labelled on the plot-centre side of the marker.
+ * point, kept YORK_EDGE_INSET inside the plot box so that the mark, its arrow and its words stay clear of the legend under the box, with a
+ * small pointer toward where he really lies, and labelled on the plot-centre side of the marker.
  * Returns null when nothing should be drawn. Reads the first named point: validateNamed accepts any number of them, the data
  * build writes exactly one, and the key is checked too, so nothing else is ever drawn as him.
  */
@@ -161,7 +176,11 @@ export function yorkTravellerMark(data: WorkshopData, p: PlotState, features: Fe
   const c = clampToFrame(named, fr);
   if (!c.clipped) return null;
   const sc = makeScale(fr);
-  const q = { x: sc.toX(c.x), y: sc.toY(c.y) };
+  const edge = { x: sc.toX(c.x), y: sc.toY(c.y) };            // where he is pinned on the frame's edge
+  const q = {                                                  // where the mark goes: that, but YORK_EDGE_INSET inside the plot box
+    x: Math.min(Math.max(edge.x, PCA_VIEW.left + YORK_EDGE_INSET), PCA_VIEW.right - YORK_EDGE_INSET),
+    y: Math.min(Math.max(edge.y, PCA_VIEW.top + YORK_EDGE_INSET), PCA_VIEW.bottom - YORK_EDGE_INSET),
+  };
   const t = { x: sc.toX(named.x), y: sc.toY(named.y) };
   const len = Math.hypot(t.x - q.x, t.y - q.y) || 1;
   const u = { x: (t.x - q.x) / len, y: (t.y - q.y) / len };
@@ -171,9 +190,9 @@ export function yorkTravellerMark(data: WorkshopData, p: PlotState, features: Fe
     class: 'york-marker', d: shapePath(PERIOD_SHAPES.Roman, q.x, q.y, YORK_MARKER_R),
     fill: '#FFFFFF', stroke: PERIOD_COLORS.Roman, 'stroke-width': 3,
   }));
-  const tip = { x: q.x + u.x * 22, y: q.y + u.y * 22 };
-  const base = { x: q.x + u.x * 12, y: q.y + u.y * 12 };
-  const side = { x: -u.y * 6, y: u.x * 6 };
+  const tip = { x: q.x + u.x * YORK_POINTER_REACH, y: q.y + u.y * YORK_POINTER_REACH };
+  const base = { x: q.x + u.x * YORK_POINTER_BASE, y: q.y + u.y * YORK_POINTER_BASE };
+  const side = { x: -u.y * YORK_POINTER_HALF, y: u.x * YORK_POINTER_HALF };
   g.append(svgEl('path', {
     class: 'york-pointer',
     d: `M${f1(tip.x)} ${f1(tip.y)}L${f1(base.x + side.x)} ${f1(base.y + side.y)}L${f1(base.x - side.x)} ${f1(base.y - side.y)}Z`,
